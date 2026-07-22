@@ -1,0 +1,42 @@
+# RobotTrain — Validator Configuration Example
+#
+# Copy to validator.yaml and fill in required fields.
+# All runtime parameters are read from this file.
+# NO environment variable fallback.
+
+# ─── Bittensor Subnet ──────────────────────────────
+subnet:
+  network: test                    # finney | test | local
+  netuid: 313
+  subtensor_endpoint: ""           # optional WS endpoint override
+  wallet_path: ""                  # empty uses the Bittensor SDK default
+  coldkey: default
+  hotkey: default
+  hotkey_ss58: ""
+  wallet_password: ""  # wallet unlock password (set to skip interactive prompt)
+
+# ─── HTTP Direct Link ────────────────────────────────
+# control.json URL — validator polls this every 60s to get updated config
+# (public_key, payment, training params)
+urls:
+  control_json: ""  # e.g. "https://host/metadata/control.json"
+
+# ─── Backend API ────────────────────────────────────
+backend:
+  url: "http://localhost:8001"     # Backend API server address
+  public_key: ""                   # From control.json → public_key (single string)
+
+# ─── Weight Submission ─────────────────────────────
+weight_interval_min: 720           # How often to set_weights (in blocks)
+
+# ─── Notes ──────────────────────────────────────────
+#
+# backend.public_key comes from the public control.json → public_key.
+# Validator uses it to access read-only endpoints:
+#   GET /api/rank, /api/scores, /api/weights, /api/export
+#
+# The validator uses only read-only API access and never accepts a write key.
+
+# ─── Logging ────────────────────────────────────────
+log_level: INFO
+log_dir: logs

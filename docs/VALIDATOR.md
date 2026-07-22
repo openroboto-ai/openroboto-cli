@@ -1,0 +1,38 @@
+# Weight-Setting Validator Guide
+
+## Responsibility
+
+`validator.py` is a lightweight Bittensor weight setter. It does not run benchmarks. The public evaluation implementation is maintained in the separate `validator` repository.
+
+The process:
+
+1. reads public `control.json` fields;
+2. scans public chain commitments;
+3. requests current weights from the read-only `/api/weights` endpoint;
+4. maps hotkeys to current metagraph UIDs;
+5. normalizes positive weights to the Bittensor range;
+6. calls `set_weights`.
+
+## Configuration
+
+```bash
+cp validator.example.yaml validator.yaml
+```
+
+Set the Bittensor network, netuid, local wallet selection, public `control.json` URL, and read-only result-service URL. Leave the public read credential empty if the deployed read endpoint does not require it.
+
+## Run
+
+```bash
+python validator.py --config validator.yaml
+```
+
+The process polls every 60 seconds and applies `weight_interval_min` before each weight submission.
+
+## Security properties
+
+- no import from a scoring-service or owner package;
+- no scoring, payment-management, round-control, or dataset-management operation;
+- no write credential for the result service;
+- chain writes are limited to the validator wallet's Bittensor `set_weights` call.
+

@@ -1,0 +1,25 @@
+services:
+  miner:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: openroboto-miner:latest
+    runtime: nvidia
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+    volumes:
+      - ./miner.yaml:/app/miner.yaml:ro
+      - miner-data:/tmp/robot_train_vla_miner
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: ["miner.py", "--config", "miner.yaml"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+volumes:
+  miner-data:
+

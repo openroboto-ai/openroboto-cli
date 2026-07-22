@@ -1,0 +1,33 @@
+# Python
+**/__pycache__/
+*.py[cod]
+*.so
+.venv/
+venv/
+
+# Secrets and local configuration
+*.yaml
+!*.example.yaml
+!**/*.example.yaml
+.env
+.env.*
+
+# Runtime data
+*.db
+*.sqlite
+*.sqlite3
+state/
+.pids/
+logs/
+tmp/
+*.pid
+
+# Model artifacts
+*.pt
+*.pth
+*.ckpt
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+

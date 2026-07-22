@@ -1,0 +1,9 @@
+# Host-side miner and weight-validator dependencies.
+# OpenPI training dependencies are isolated in openpi-runner/.
+bittensor==10.5.0
+pyyaml>=6.0
+huggingface_hub>=0.24.0
+safetensors>=0.4.0
+protobuf>=4.25.0
+numpy>=2.0
+
