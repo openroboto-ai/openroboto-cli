@@ -37,7 +37,10 @@ VLA_ACTION_DIM = 7
 VLA_ACTION_CHUNK_SIZE = 50
 LIBERO_IMAGE_SIZE = 224
 LIBERO_STATE_DIM = 8
-LIBERO_TASK_SUITES = ["libero_spatial", "libero_object", "libero_goal", "libero_10"]
+LIBERO_TASK_SUITES = [
+    "libero_spatial", "libero_object", "libero_goal", "libero_10",
+    "libero_object_swap", "libero_spatial_swap",
+]
 
 # VLA scoring weights
 VLA_SCORING_WEIGHTS = {

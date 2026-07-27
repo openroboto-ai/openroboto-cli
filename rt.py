@@ -130,16 +130,21 @@ def _save_state(round_num: int, state: dict) -> None:
 def _resolve_round(args) -> int:
     if args.round and args.round > 0:
         return args.round
-    # Auto-detect from state
-    for fname in sorted(os.listdir(STATE_DIR), reverse=True) if os.path.exists(STATE_DIR) else []:
-        if fname.startswith("round_") and fname.endswith(".json"):
-            try:
-                rn = int(fname.split("_")[1].split(".")[0])
-                state = _load_state(rn)
-                if state.get("step") == "training" and state.get("status") == "completed":
-                    return rn
-            except Exception:
-                pass
+    # Auto-detect from state: latest round with a completed step.
+    # Numeric sort (string sort would put round_9 above round_10).
+    # Any completed step counts, so standalone burn/announce (state step is
+    # already "upload"/"burn" by then) can resume without --round.
+    rounds = []
+    if os.path.exists(STATE_DIR):
+        for fname in os.listdir(STATE_DIR):
+            if fname.startswith("round_") and fname.endswith(".json"):
+                try:
+                    rounds.append(int(fname.split("_")[1].split(".")[0]))
+                except ValueError:
+                    pass
+    for rn in sorted(rounds, reverse=True):
+        if _load_state(rn).get("status") == "completed":
+            return rn
     logger.error("❌ Cannot auto-detect round. Use --round N")
     sys.exit(1)
 
@@ -206,8 +211,10 @@ def cmd_upload(args):
 # ─── Step 4: Burn ──────────────────────────────────────────
 
 def cmd_burn(args):
-    """Stake burn on-chain (Step 4)."""
+    """Stake burn on-chain (Step 4).
+    Saves burn_tx_hash/burn_block to state so a later announce can read them."""
     config = Config.load(args.config)
+    round_num = _resolve_round(args)
 
     logger.info(f"[rt] Step 4/3: Stake Burn Payment")
 
@@ -232,6 +239,15 @@ def cmd_burn(args):
 
     burn_tx = burn_result["tx_hash"]
     burn_block = burn_result.get("block_number")
+
+    # Persist to state — announce reads burn_tx_hash/burn_block from here.
+    state = _load_state(round_num)
+    state["burn_tx_hash"] = burn_tx
+    state["burn_block"] = burn_block
+    state["step"] = "burn"
+    state["status"] = "completed"
+    _save_state(round_num, state)
+
     logger.info(f"✅ Burn submitted: tx={burn_tx[:16]}... block={burn_block}")
 
 
@@ -251,6 +267,7 @@ def cmd_announce(args):
     hf_repo_id = state.get("hf_repo_id", "")
     hf_url = state.get("hf_url", "")
     burn_tx = state.get("burn_tx_hash", "")
+    burn_block = state.get("burn_block", 0)
 
     if not hf_repo_id or not hf_url:
         logger.error("❌ HF repo/URL not found. Run 'rt.py upload' first.")
@@ -430,6 +447,7 @@ def build_parser():
 
     p = sub.add_parser("burn", help="Step 4: Stake Burn")
     p.add_argument("--config", default="miner.yaml")
+    p.add_argument("--round", type=int, default=0, help="Round (auto-detect from state)")
     p.set_defaults(func=cmd_burn)
 
     p = sub.add_parser("announce", help="Step 5: Chain Commitment with block_hash")

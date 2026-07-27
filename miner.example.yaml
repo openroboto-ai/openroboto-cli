@@ -6,8 +6,8 @@
 
 # ─── Bittensor Subnet ──────────────────────────────
 subnet:
-  network: test                    # finney | test | local
-  netuid: 313
+  network: finney                  # finney (mainnet) | test | local
+  netuid: 15                       # mainnet netuid (testnet was: network=test, netuid=313)
   subtensor_endpoint: ""           # optional WS endpoint override
   wallet_path: ""                  # empty uses the Bittensor SDK default
   coldkey: default
