@@ -67,6 +67,7 @@ def fetch_weights(backend_url: str, public_key: str = "") -> dict:
     try:
         import urllib.request
         req = urllib.request.Request(f"{backend_url}/api/weights")
+        req.add_header("User-Agent", "OpenRoboto-Validator/1.0")
         if public_key:
             req.add_header("X-API-Key", public_key)
         with urllib.request.urlopen(req, timeout=30) as resp:
@@ -156,7 +157,21 @@ def set_weights_on_chain(subtensor, wallet, netuid: int, weights: dict, uids: li
                 weights=weight_list,
             )
             if result:
-                success = getattr(result, 'is_success', False) or result is True
+                # Multiple result formats:
+                # - standard: is_success attribute
+                # - timelocked: success attribute + error=None
+                success = (
+                    getattr(result, 'is_success', False)
+                    or getattr(result, 'success', False)
+                    or result is True
+                    or (
+                        hasattr(result, 'error') and result.error is None
+                        and (
+                            getattr(result, 'success', False)
+                            or str(getattr(result, 'message', '') or '').lower() == 'success'
+                        )
+                    )
+                )
                 extrinsic_hash = ""
                 if hasattr(result, 'extrinsic_hash'):
                     try:
@@ -167,9 +182,9 @@ def set_weights_on_chain(subtensor, wallet, netuid: int, weights: dict, uids: li
                     logger.info(f"[set_weights] ✅ Chain set_weights OK | success={success} hash=0x{extrinsic_hash if extrinsic_hash else 'N/A'}")
                     return True
                 else:
-                    # result is truthy but is_success is False → actual chain failure
+                    # result is truthy but success check failed → actual chain failure
                     msg = getattr(result, 'status_message', '') or str(result)
-                    logger.error(f"[set_weights] ❌ Chain set_weights FAILED (result truthy but is_success=False) | hash=0x{extrinsic_hash if extrinsic_hash else 'N/A'} | msg={msg}")
+                    logger.error(f"[set_weights] ❌ Chain set_weights FAILED | hash=0x{extrinsic_hash if extrinsic_hash else 'N/A'} | msg={msg}")
                     return False
             else:
                 logger.warning("[set_weights] set_weights returned False")
