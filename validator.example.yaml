@@ -6,8 +6,8 @@
 
 # ─── Bittensor Subnet ──────────────────────────────
 subnet:
-  network: test                    # finney | test | local
-  netuid: 313
+  network: finney                  # finney | test | local
+  netuid: 80
   subtensor_endpoint: ""           # optional WS endpoint override
   wallet_path: ""                  # empty uses the Bittensor SDK default
   coldkey: default
@@ -19,11 +19,11 @@ subnet:
 # control.json URL — validator polls this every 60s to get updated config
 # (public_key, payment, training params)
 urls:
-  control_json: ""  # e.g. "https://host/metadata/control.json"
+  control_json: "https://api.openroboto.ai/control.json"
 
 # ─── Backend API ────────────────────────────────────
 backend:
-  url: "http://localhost:8001"     # Backend API server address
+  url: "https://api.openroboto.ai"     # Backend API server address
   public_key: ""                   # From control.json → public_key (single string)
 
 # ─── Weight Submission ─────────────────────────────

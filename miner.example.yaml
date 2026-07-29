@@ -7,7 +7,7 @@
 # ─── Bittensor Subnet ──────────────────────────────
 subnet:
   network: finney                  # finney (mainnet) | test | local
-  netuid: 15                       # mainnet netuid (testnet was: network=test, netuid=313)
+  netuid: 80                       # mainnet netuid (testnet was: network=test, netuid=313)
   subtensor_endpoint: ""           # optional WS endpoint override
   wallet_path: ""                  # empty uses the Bittensor SDK default
   coldkey: default
@@ -17,9 +17,9 @@ subnet:
 
 # ─── Public HTTP resources ──────────────────────────
 urls:
-  control_json: "https://<host>/metadata/control.json"
-  dataset_train: "https://<host>/data/v1/train.json"
-  dataset_val: "https://<host>/data/v1/val.json"
+  control_json: "https://api.openroboto.ai/control.json"
+  dataset_train: "https://api.openroboto.ai/train.json"
+  dataset_val: "https://api.openroboto.ai/val.json"
 
 # ─── Model ──────────────────────────────────────────
 model:

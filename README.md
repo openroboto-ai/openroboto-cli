@@ -1,8 +1,8 @@
 # OpenRoboto Miner and Protocol
 
-OpenRoboto is a Bittensor testnet subnet for improving vision-language-action models. This repository contains the public miner, on-chain protocol helpers, weight-setting validator, training runner, configuration examples, and reproducibility documentation for netuid 313.
+OpenRoboto is a Bittensor mainnet subnet for improving vision-language-action models. This repository contains the public miner, on-chain protocol helpers, weight-setting validator, training runner, configuration examples, and reproducibility documentation for netuid 80.
 
-[中文](README_zh.md) · [Protocol overview](docs/SUBNET_OVERVIEW.md) · [Seed derivation](docs/SEED_GENERATION.md) · [Evaluation toolkit](https://github.com/openroboto-ai/openroboto-evaluation)
+[Protocol overview](docs/SUBNET_OVERVIEW.md) · [Seed derivation](docs/SEED_GENERATION.md) · [Evaluation toolkit](https://github.com/openroboto-ai/openroboto-evaluation)
 
 ## Public trust boundary
 
@@ -31,7 +31,7 @@ Requirements:
 - Linux with an NVIDIA GPU and recent driver;
 - Python 3.11;
 - Docker with NVIDIA Container Toolkit;
-- a registered Bittensor testnet hotkey;
+- a registered Bittensor mainnet hotkey;
 - a Hugging Face account with a write token.
 
 ```bash
