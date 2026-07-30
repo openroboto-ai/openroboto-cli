@@ -1,6 +1,6 @@
 # OpenRoboto Subnet Protocol and Incentives
 
-OpenRoboto is a Bittensor testnet subnet for open robot-learning models. Miners fine-tune a public vision-language-action base model, publish an immutable Hugging Face revision, and announce it on netuid 313. Evaluation uses the public LIBERO toolkit and a reproducible post-submission seed.
+OpenRoboto is a Bittensor mainnet subnet for open robot-learning models. Miners fine-tune a public vision-language-action base model, publish an immutable Hugging Face revision, and announce it on netuid 80. Evaluation uses the public LIBERO toolkit and a reproducible post-submission seed.
 
 ## Public evidence
 
@@ -20,6 +20,9 @@ Held-out task data and the scoring-service deployment remain private.
 miner trains model
       |
       v
+merge -> full checkpoint
+      |
+      v
 immutable HF commit
       |
       v
@@ -36,6 +39,25 @@ public ranking -> validator.py -> set_weights
 ```
 
 The commitment binds the submitting hotkey, round, model repository and commit, payment reference, and block information. A malformed or unpaid submission does not enter evaluation.
+
+## Submission artifact requirements
+
+The evaluation service loads **complete model checkpoints only**. Every submission passes a structural pre-check (`libero_eval/check_model.py` in the [evaluation repository](https://github.com/openroboto-ai/openroboto-evaluation)) before any GPU time is spent; a submission that fails it is marked `failed` and the rejection reason is recorded so the miner can see exactly why.
+
+| Requirement | Detail |
+|---|---|
+| Checkpoint format (one of) | openpi JAX: a `params/` directory (orbax OCDBT) · openpi PyTorch: a `model.safetensors` file |
+| Normalization stats | `assets/physical-intelligence/libero/norm_stats.json` (state dim 8, action dim 7) |
+| Architecture | Must match π0.5 (`pi05_libero` inference config); total parameter count within 2.5B–4.5B |
+| **Not accepted** | **A bare LoRA adapter** (`adapter_config.json` + `adapter_model.safetensors`). The evaluator performs no merging — if you train with LoRA, merge the adapter back into the π0.5 base and export the full checkpoint before uploading. |
+
+The pre-check is pure CPU and public — run it yourself before paying the submission fee:
+
+```bash
+# from the evaluation repository
+uv run libero_eval/check_model.py --model /path/to/checkpoint --config pi05_libero
+# exit 0 = will be accepted, exit 1 = would be rejected (reasons printed)
+```
 
 ## Evaluation fee
 

@@ -5,7 +5,7 @@
 - Linux with an NVIDIA GPU and recent driver
 - Python 3.11
 - Docker with NVIDIA Container Toolkit
-- Bittensor testnet wallet and registered hotkey
+- Bittensor mainnet wallet and registered hotkey
 - Hugging Face account with a write token
 
 Confirm GPU access:

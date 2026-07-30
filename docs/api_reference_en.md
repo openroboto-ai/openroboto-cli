@@ -54,7 +54,7 @@ curl -H "X-API-Key: ***" http://localhost:8001/api/v1/rounds/current
 {
   "round": {
     "id": 1, "label": "Round 01", "status": "live",
-    "network": "testnet",
+    "network": "finney",
     "base_model": {"name": "pi0.5", "hf_repo": "openroboto/base-v0.5", "revision": ""},
     "started_at": null, "ends_at": null, "submission_count": 3,
     "champion": {
@@ -443,7 +443,7 @@ curl -X POST \
     "env_scores": [],
     "total_score": 0.0,
     "duration_sec": 30.0,
-    "error": "model files corrupted: adapter_config.json missing"
+    "error": "model rejected by pre-eval check: no params/ directory or model.safetensors found"
   }' \
   http://localhost:8001/api/v1/benchmark/task/task_5MinerAexamp..._1/score
 ```

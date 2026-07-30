@@ -1,9 +1,26 @@
 """
-miner.py - π0.5 LIBERO Miner (Steps 1-2 only)
+miner.py - π0.5 LIBERO Miner (Steps 1-2 only) — REFERENCE SAMPLE
 
 Workflow:
   1. Download control.json via HTTP (round state)
-  2. Download dataset + π0.5 local training (LoRA)
+  2. Download dataset + π0.5 local training (LoRA by default)
+
+⚠️  IMPORTANT — the default training output is a LoRA adapter, which is NOT
+directly submittable. The evaluation worker only accepts complete model
+checkpoints and rejects bare adapters at a pre-eval check (no GPU time spent,
+rejection reason returned to the miner).
+
+Before running rt.py, merge the adapter into the π0.5 base and export a FULL
+checkpoint into the round output directory, so that it contains:
+  - openpi JAX:      params/           (orbax OCDBT), or
+  - openpi PyTorch:  model.safetensors
+  - plus:            assets/physical-intelligence/libero/norm_stats.json
+
+Verify locally before paying the submission fee (pure CPU, from the public
+evaluation repo github.com/openroboto-ai/openroboto-evaluation):
+    uv run libero_eval/check_model.py --model <output_dir> --config pi05_libero
+
+See docs/SUBNET_OVERVIEW.md §3 "What the uploaded repo must contain".
 
 After training completes, state is saved to state/round_N.json.
 Run rt.py for steps 3-5: upload to HF, stake burn, chain announcement.
@@ -257,6 +274,13 @@ def run_one_round(
         state["status"] = "completed"
         _save_state(round_num, state)
         logger.info(f"[round %d] ✅ Training complete — model saved at {round_output}", round_num)
+        logger.warning(
+            "[round %d] ⚠️  The default training output is a LoRA adapter and is NOT directly submittable. "
+            "Merge it into the π0.5 base and export a FULL checkpoint (params/ or model.safetensors "
+            "+ assets/physical-intelligence/libero/norm_stats.json) into the round output dir, "
+            "then verify with check_model.py. See docs/SUBNET_OVERVIEW.md §3.",
+            round_num,
+        )
         logger.info(f"[round %d] 📝 Run 'python rt.py submit --round {round_num}' for steps 3-5 (upload → burn → announce)", round_num)
     else:
         logger.info("[round %d] ⏭️  Step 2/2: Model Training (skipped)", round_num)

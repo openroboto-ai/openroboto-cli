@@ -20,9 +20,16 @@ Held-out task data, the scoring service deployment, and subnet-owner operational
 1. Read the current public `control.json`.
 2. Download the public training resources and base checkpoint.
 3. Train through the isolated `openpi-runner` container.
-4. Upload the resulting model to Hugging Face.
-5. Pay the current evaluation burn and announce the exact model commit on chain.
-6. Reproduce the published evaluation seed and run the public validator toolkit locally.
+4. Merge any LoRA adapter into the π0.5 base and export a complete checkpoint.
+5. Upload the complete checkpoint to Hugging Face.
+6. Pay the current evaluation burn and announce the exact model commit on chain.
+7. Reproduce the published evaluation seed and run the public validator toolkit locally.
+
+> **Submission format.** The evaluation service only accepts complete model checkpoints —
+> an openpi JAX `params/` directory or a PyTorch `model.safetensors`, together with
+> `assets/physical-intelligence/libero/norm_stats.json`. A bare LoRA adapter is rejected
+> by a CPU pre-check before any GPU evaluation. Exact requirements and a local pre-check
+> command are documented in [docs/SUBNET_OVERVIEW.md](docs/SUBNET_OVERVIEW.md).
 
 ## Installation
 
@@ -94,7 +101,7 @@ The exact formula, drand chain identifier, verification steps, and security assu
 
 | Path | Purpose |
 |---|---|
-| `miner.py` | Miner training entry point |
+| `miner.py` | Miner training entry point (reference sample; its default LoRA output must be merged into the base model before submission) |
 | `rt.py` | Upload, burn, and chain announcement CLI |
 | `validator.py` | Read-only weight fetch and on-chain `set_weights` |
 | `payment.py` | Evaluation-burn transaction helper |

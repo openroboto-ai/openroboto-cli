@@ -1,36 +1,36 @@
-# openpi-runner — π₀.₅ 训练隔离容器
+# openpi-runner — Isolated π₀.₅ Training Container
 
-将 openpi 训练环境隔离到独立 Docker 镜像，与主进程 (bittensor) 完全隔离。
+Isolates the openpi training environment in a dedicated Docker image, fully separated from the main process (bittensor).
 
-## 为什么需要隔离?
+## Why isolation?
 
-- **openpi** 需要 `numpy<2.0`
-- **bittensor==10.5.0** 需要 `numpy>=2.0.1`
-- 两者无法共存于同一 Python 环境
+- **openpi** requires `numpy<2.0`
+- **bittensor==10.5.0** requires `numpy>=2.0.1`
+- The two cannot coexist in one Python environment
 
-## 方案
+## Design
 
 ```
-主进程 (bittensor, numpy>=2.0)
+main process (bittensor, numpy>=2.0)
   │
-  ├─ 下载数据集 (HTTP 直链)
-  ├─ 调用 openpi-runner 容器 (docker run -v)
+  ├─ download dataset (direct HTTP)
+  ├─ invoke openpi-runner container (docker run -v)
   │    ├─ openpi (numpy<2.0)
-  │    ├─ 训练 π₀.₅
-  │    └─ 输出 → /data/output
-  ├─ 收集 metrics.json + proof.json
-  ├─ 推模型到 HF
-  └─ 链上公告
+  │    ├─ train π₀.₅
+  │    └─ output → /data/output
+  ├─ collect metrics.json + proof.json
+  ├─ push model to HF
+  └─ announce on chain
 ```
 
-## 构建镜像
+## Build the image
 
 ```bash
 cd openpi-runner
 docker build -t robot-train-openpi .
 ```
 
-## 手动测试
+## Manual test
 
 ```bash
 docker run --gpus all \
@@ -46,9 +46,9 @@ docker run --gpus all \
   robot-train-openpi
 ```
 
-## 自动调用
+## Automatic invocation
 
-主进程通过 `miner/training_pipeline_vla.py` 自动调用：
+The main process calls it through `miner/training_pipeline_vla.py`:
 
 ```python
 from miner.training_pipeline_vla import run_training
@@ -60,5 +60,5 @@ metrics, policy = run_training(
 )
 ```
 
-环境变量:
-- `OPENPI_RUNNER_IMAGE` — 自定义镜像名 (默认 `robot-train-openpi:latest`)
+Environment variables:
+- `OPENPI_RUNNER_IMAGE` — custom image name (default `robot-train-openpi:latest`)

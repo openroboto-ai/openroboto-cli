@@ -2,9 +2,13 @@
 miner/push_hf.py — Push trained π₀.₅ model to HuggingFace (public)
 
 Responsibilities:
-  1. Push training output (adapter + metrics) to HF repo
+  1. Push training output (full merged checkpoint + metrics) to HF repo
   2. Set repo as public
   3. Return HF repo URL
+
+Note: this module uploads model_dir as-is. The evaluator only accepts complete
+checkpoints (`params/` or `model.safetensors` + norm_stats assets); a bare LoRA
+adapter will be rejected at the pre-eval check. Merge before you upload.
 """
 
 import os
@@ -33,7 +37,11 @@ def push_model_to_hf(
     """将训练好的模型推送到 HuggingFace 公共仓库 / Push trained model to HF public repository.
 
     Args:
-        model_dir: training output dir (contains adapter weights, metrics, etc)
+        model_dir: dir containing the FULL merged checkpoint to submit
+                   (openpi JAX `params/` or PyTorch `model.safetensors`, plus
+                   `assets/physical-intelligence/libero/norm_stats.json`).
+                   A bare LoRA adapter dir will upload fine but be rejected
+                   by the evaluator — merge into the π0.5 base first.
         repo_id: HF repo ID, e.g. "username/pi05-libero-round-1"
         hf_token: HF API token
         round_num: current round number
