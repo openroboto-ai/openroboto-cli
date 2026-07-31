@@ -55,7 +55,7 @@ curl -H "X-API-Key: ***" http://localhost:8001/api/v1/rounds/current
   "round": {
     "id": 1, "label": "Round 01", "status": "live",
     "network": "finney",
-    "base_model": {"name": "pi0.5", "hf_repo": "openroboto/base-v0.5", "revision": ""},
+    "base_model": {"name": "pi0.5", "hf_repo": "openroboto-ai/pi05-libero-pytorch", "revision": ""},
     "started_at": null, "ends_at": null, "submission_count": 3,
     "champion": {
       "miner_hotkey": "5MinerAexamp...", "model_name": "pi05-AAAAAAAAAAAA",
@@ -107,7 +107,7 @@ curl -H "X-API-Key: ***" "http://localhost:8001/api/v1/leaderboard?round_id=0&li
 ```json
 {
   "round_id": 1, "generated_at": "2026-07-17T08:00:00Z",
-  "baseline": {"model_name": "pi0.5", "hf_repo": "openroboto/base-v0.5", "revision": "", "score": {"mean": 0.605, "std": 0.011, "trials": 3}},
+  "baseline": {"model_name": "pi0.5", "hf_repo": "openroboto-ai/pi05-libero-pytorch", "revision": "", "score": {"mean": 0.502917, "std": 0.001, "trials": 3}},
   "total": 1,
   "rows": [{
     "rank": 1, "submission_id": "task_5MinerAexamp..._1",
@@ -292,6 +292,44 @@ curl -H "X-API-Key: ***" http://localhost:8001/api/v1/queue/status
 ```
 
 **200**: Queue status counters.
+
+---
+
+#### GET /api/v1/scan-rejections
+
+Submissions rejected at the scanner stage (payment verification failed) — no API key required. **If your commitment landed on chain but your task never appears in the queue, check here first**: it returns the exact `reject_reason` (e.g. `burn_tx_too_old: block_diff=45 exceeds window=10`, `amount mismatch`, `burn tx replay`).
+
+Query params: `hotkey`, `uid`, `round_num`, `limit` (default 200), `offset`.
+
+```bash
+curl "https://api.openroboto.ai/api/v1/scan-rejections?hotkey=<your_hotkey_ss58>"
+```
+
+**200**:
+
+```json
+{
+  "success": true,
+  "rejections": [
+    {
+      "uid": 61,
+      "hotkey": "5Miner...ss58",
+      "round_num": 1,
+      "hf_repo_id": "user/pi05-XXXXXXXXXXXX",
+      "commit_block": 8736712,
+      "burn_block": 8736667,
+      "burn_tx_hash": "4449a27c...",
+      "reject_reason": "burn_tx_too_old: block_diff=45 exceeds window=10",
+      "created_at": "2026-07-31T04:01:00+00:00"
+    }
+  ],
+  "total": 1,
+  "limit": 200,
+  "offset": 0
+}
+```
+
+Note: a rejected burn is **not refunded**. Fix the cause and re-submit with a fresh burn via one-shot `rt.py submit`.
 
 ---
 
