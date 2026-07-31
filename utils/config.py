@@ -11,7 +11,7 @@ import yaml
 NETWORK_ENDPOINTS = {
     "finney": None,
     "test":   None,
-    "local":  "ws://localhost:9944",
+    "local":  "ws://127.0.0.1:9944",
 }
 
 
@@ -68,7 +68,7 @@ class Config:
         return NETWORK_ENDPOINTS.get(self.network, f"wss://{self.network}.opentensor.ai:443")
 
     def apply_control(self, control: dict) -> None:
-        """Apply miner-visible public control.json fields to this instance."""
+        """Apply owner-managed control.json config to this instance."""
         # Payment config
         payment = control.get("payment", {})
         self.burn_rate_tao = payment.get("burn_rate_tao", self.burn_rate_tao)
@@ -119,6 +119,13 @@ class Config:
         backend = data.get("backend", {})
         cfg.backend_url = backend.get("url", cfg.backend_url)
         cfg.backend_public_key = backend.get("public_key", cfg.backend_public_key)
+
+        # Payment config (local override in miner.yaml)
+        payment = data.get("payment", {})
+        if payment.get("burn_rate_tao") is not None:
+            cfg.burn_rate_tao = float(payment["burn_rate_tao"])
+        if payment.get("limit_price_rao") is not None:
+            cfg.limit_price_rao = int(payment["limit_price_rao"])
 
         return cfg
 
