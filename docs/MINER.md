@@ -8,15 +8,15 @@
 ┌──────────────────────────────────────────────────────────────┐
 │                    BACKEND API (:8001)                        │
 │                                                              │
-│  ┌──────────────┐  ┌──────────────┐                          │
-│  │  Evaluator   │  │   Ranking    │                          │
-│  │  (benchmark) │  │   (DB)       │                          │
-│  └──────┬───────┘  └──────┬───────┘                          │
-│         │                 │                                   │
+│  ┌──────────────────┐  ┌──────────────────┐                  │
+│  │  Evaluator       │  │   ScannerLoop    │                  │
+│  │  (benchmark API) │  │   (scan + seed)  │                  │
+│  └──────┬───────────┘  └────────┬─────────┘                  │
+│         │                      │                             │
 │  ┌──────────────────────────────────────────────────────┐    │
 │  │                  Public API                          │    │
 │  │  /api/rank   /api/scores   /api/weights              │    │
-│  │  /api/miner  /api/export                              │    │
+│  │  /api/miner  /api/export  /api/v1/*                  │    │
 │  └──────────────────────────────────────────────────────┘    │
 └──────────┬───────────────────────────────────────────────────┘
            │
@@ -40,8 +40,7 @@
 
 **Two-stage workflow**: `miner.py` handles Steps 1-2 (prep + training). After training completes, run `rt.py submit` for Steps 3-5 (upload → burn → announce).
 
-**Backend auto-scans chain**: Backend API runs `ChainScanner` (polls every 60s),
-discovers miner submissions, and queues them for evaluation.
+**Backend auto-scans chain**: Backend runs `ChainScanner` + `ScannerLoop` (polls every 60s), discovers miner submissions, verifies burns, computes seeds, and queues for evaluation.
 
 ## Quick Start
 
@@ -120,3 +119,5 @@ ChainScanner (`backend/chain_scanner.py`) uses the same `_decode_raw()`.
 - **HTTP direct links** — Miner/Backend pulls control.json and datasets via HTTP GET, no R2 SDK
 - **HF token needs write access** — For uploading models to personal repo
 - **Chain Commitments API** — Data persists on chain, auto-verified after submission
+- **Burn hash strict exact match** — Backend verifies burn tx using strict exact match (no `startswith` prefix matching), preventing false positives from truncated hashes
+- **Anti-plagiarism** — Backend computes LFS fingerprint (`repo_hash`) for each submission; same hash from different hotkey → rejected. The hash is stored even for rejected submissions for auditability.

@@ -18,10 +18,12 @@ Usage (miner side, after training completes):
 
 import json
 import logging
+import os
 import asyncio
+from backend.logging_setup import setup_module_logger
 from typing import Optional
 
-logger = logging.getLogger(__name__)
+logger = setup_module_logger(__name__)
 
 try:
     import bittensor as bt
@@ -218,13 +220,13 @@ def verify_burn_on_chain(
         if not block:
             return {"verified": False, "error": f"block {burn_block} not found"}
 
-        tx_hash_clean = tx_hash.replace("0x", "")
+        tx_hash_clean = tx_hash.replace("0x", "").lower()
         found_ext = None
         for extrinsic in block.get("extrinsics", []):
             ext_hash = getattr(extrinsic, "extrinsic_hash", None)
             if ext_hash:
-                ext_hash = ext_hash.hex() if isinstance(ext_hash, bytes) else str(ext_hash)
-            if ext_hash == tx_hash or ext_hash == tx_hash_clean or ext_hash == "0x" + tx_hash_clean:
+                ext_hash = ext_hash.hex().lower() if isinstance(ext_hash, bytes) else str(ext_hash).lower().replace("0x", "")
+            if ext_hash and ext_hash == tx_hash_clean:
                 found_ext = extrinsic
                 break
 
@@ -278,12 +280,12 @@ def verify_burn_on_chain(
                         elif name == "hotkey":
                             burn_target_hotkey = value
 
-        # Amount check (mandatory)
+        # Amount check (must be at least expected amount)
         expected_rao = int(expected_amount_tao * 1e9)
         if burn_amount_rao is None:
             return {"verified": False, "error": "amount not found in tx"}
-        if burn_amount_rao != expected_rao:
-            return {"verified": False, "error": f"amount mismatch: got {burn_amount_rao}, expected {expected_rao}"}
+        if burn_amount_rao < expected_rao:
+            return {"verified": False, "error": f"amount insufficient: got {burn_amount_rao}, expected >= {expected_rao}"}
 
         # Target hotkey check (mandatory)
         if burn_target_hotkey is None:

@@ -60,7 +60,7 @@ MAX_COMMIT_COUNT = 1
 CHAMPION_WINDOW_BLOCKS = 7200  # ~24h
 
 # Champion challenge: challenger must win on all envs
-CHAMPION_MARGIN = 0.02  # Public default; round metadata may publish a different value.
+CHAMPION_MARGIN = 0.01  # Public default; round metadata may publish a different value.
 MIN_TASKS_PER_ENV = 5   # Minimum successful samples per env
 
 # Anti-plagiarism: model_hash comparison

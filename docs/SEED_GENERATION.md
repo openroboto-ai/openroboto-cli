@@ -46,6 +46,8 @@ Confirm that the returned `round` and `randomness` match the published evaluatio
 
 If drand is unavailable, evaluation must wait. The reference protocol does not fall back to block-hash-only derivation because that would change the published formula and reduce the independent entropy sources.
 
+A submission whose seed cannot be computed yet is reported with the non-terminal status `seed_failed` and is retried automatically on every scan cycle. A drand outage is an infrastructure condition, not a submission fault: no submission is rejected because of it, and no miner action is needed.
+
 ## Reproducible example
 
 ```python

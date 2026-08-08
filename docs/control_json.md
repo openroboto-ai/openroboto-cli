@@ -10,7 +10,7 @@
 | `status` | Public lifecycle state such as `active` or `paused` |
 | `message` | Human-readable public notice |
 | `payment.enabled` | Whether the evaluation fee is active |
-| `payment.burn_rate_tao` | Evaluation fee announced for the round |
+| `payment.burn_rate_tao` | Evaluation fee announced for the round. `0` announces a free period: burn verification is skipped and submissions are accepted without payment |
 | `payment.limit_price_rao` | Optional transaction price limit |
 | `dataset.version` | Public training-data version |
 | `dataset.train_url` | Public training-data URL |

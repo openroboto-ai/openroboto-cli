@@ -281,6 +281,9 @@ curl http://localhost:8001/api/miner/<your-hotkey-short>
 
 # Check backend scanner logs
 tail -f backend/data/backend.log
+
+# Check for scan rejections (if burn verification failed)
+curl "http://localhost:8001/api/v1/scan-rejections?hotkey=<your-hotkey-ss58>"
 ```
 
 ### Training container fails
@@ -299,3 +302,7 @@ docker run --rm --gpus all -v /data:/data robot-train-openpi:latest nvidia-smi
 - State is saved to `state/round_N.json` — re-running `rt.py submit` resumes from the last completed step.
 - Backend scanner picks up submissions within ~60 seconds.
 - Payment config (`burn_rate_tao`, `limit_price_rao`) comes from owner's `control.json`, not miner.yaml.
+- Backend verifies burn tx using **strict exact match** (no `startswith` prefix matching).
+- Anti-plagiarism: backend computes LFS fingerprint (`repo_hash`) for each submission; same hash from different hotkey → rejected.
+- Seed computation failure is auto-retried (`seed_failed` status), no manual intervention needed.
+- If your submission fails burn verification, check `/api/v1/scan-rejections` for the exact rejection reason.

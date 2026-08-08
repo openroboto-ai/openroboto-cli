@@ -16,7 +16,7 @@
 |------|--------|--------|-----------|
 | **No auth** | — | — | `GET /health` |
 | **public_key** (read-only) | `X-API-Key: ***` | `control.json` → `public_key` | All read-only endpoints listed below |
-| **admin_key** (write/management) | `X-API-Key: ***` | `backend.yaml` → `admin_key` | `POST /api/v1/benchmark/task/{id}/score`, `GET /api/v1/payments/*`, `GET /api/v1/benchmark/task/{id}/score` (GET readiness check) |
+| **admin_key** (write/management) | `X-API-Key: ***` | `backend.yaml` → `admin_key` | `POST /api/v1/benchmark/task/{id}/score`, `PATCH /api/v1/benchmark/task/{id}/status`, `GET /api/v1/payments/*` |
 
 ---
 
@@ -91,7 +91,7 @@ curl -H "X-API-Key: ***" "http://localhost:8001/api/v1/rounds?limit=8"
 
 #### GET /api/v1/leaderboard?round_id=0&limit=50&offset=0
 
-Rankings. Challenge-based: challenger avg_score > king avg_score + CHAMPION_MARGIN (0.02).
+Rankings. Challenge-based: challenger avg_score > king avg_score + CHAMPION_MARGIN (0.01).
 
 | Param | Type | Default | Description |
 |-------|------|---------|-------------|
@@ -145,7 +145,7 @@ Submission detail (audit endpoint, v1 API).
 curl -H "X-API-Key: ***" http://localhost:8001/api/v1/submissions/task_5MinerAexamp..._1
 ```
 
-**200**: Full submission record.
+**200**: Full submission record with `stage`, `detail`, `worker_id` fields.
 
 ---
 
@@ -185,7 +185,7 @@ curl -H "X-API-Key: 54321" http://localhost:8001/api/submission/task_5MinerBexam
 
 #### GET /api/submission/history/{hotkey}/{round_num}
 
-Full submission history (all statuses: unknown/pending/done/failed/rejected).
+Full submission history (all statuses). Returns `stage`, `detail` (parsed from `eval_detail` JSON), and `worker_id` fields via `LEFT JOIN submissions`.
 
 ```bash
 curl -H "X-API-Key: ***" http://localhost:8001/api/submission/history/5MinerAexamp.../1
@@ -201,9 +201,23 @@ curl -H "X-API-Key: ***" http://localhost:8001/api/submission/history/5MinerAexa
   "block_hash": "f874d5ed4e14113d...",
   "drand_random": "85eeb23277d6ba2b...", "drand_round": 6294819,
   "model_hash": "", "env_list": "[\"libero_spatial\",\"libero_object\",\"libero_goal\",\"libero_10\"]",
+  "stage": null, "detail": null, "worker_id": null,
   "submitted_at": "2026-07-17T08:06:51Z"
 }]
 ```
+
+---
+
+#### GET /api/v1/submissions/history
+
+All submissions history (paginated, public_key). Returns `stage`, `detail`, `worker_id`.
+
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| `hotkey` | string | — | Filter by hotkey |
+| `round_num` | int | — | Filter by round |
+| `limit` | int | 50 | Page size |
+| `offset` | int | 0 | Offset |
 
 ---
 
@@ -285,13 +299,13 @@ curl -H "X-API-Key: ***" http://localhost:8001/api/v1/benchmark/queue
 
 #### GET /api/v1/queue/status
 
-Eval queue status (internal counters).
+Eval queue status (internal counters). Uses unified status values (`evaluated`, `eval_failed`, `rejected`).
 
 ```bash
 curl -H "X-API-Key: ***" http://localhost:8001/api/v1/queue/status
 ```
 
-**200**: Queue status counters.
+**200**: Queue status counters with legacy status mapping (`done`→`evaluated`, `failed`→`eval_failed`).
 
 ---
 
@@ -400,6 +414,31 @@ curl -H "X-API-Key: ***" http://localhost:8001/api/v1/benchmark/task/task_xxx_1/
 
 ---
 
+#### PATCH /api/v1/benchmark/task/{task_id}/status
+
+Update benchmark task progress (admin_key required). Worker reports current stage for real-time visibility.
+
+```bash
+curl -X PATCH \
+  -H "X-API-Key: ***" \
+  -H "Content-Type: application/json" \
+  -d '{"status": "downloading"}' \
+  http://localhost:8001/api/v1/benchmark/task/task_xxx_1/status
+```
+
+**Request Body**:
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `status` | string | Yes | One of: `downloading`, `prechecking`, `evaluating` |
+
+**200**:
+```json
+{"ok": true, "task_id": "task_xxx_1", "stage": "downloading"}
+```
+
+---
+
 #### POST /api/v1/benchmark/task/{task_id}/score
 
 Submit benchmark scores (admin_key required).
@@ -442,49 +481,31 @@ curl -X POST \
 | `round_num` | int | Yes | Round number |
 | `init_seed` | int | No | Initial seed used for evaluation |
 | `env_scores` | array | Required if success=true | Per-env scores — **must include all 6 environments** |
-| `env_scores[].env_name` | string | Required if success=true | Env name — must be one of the 6 allowed envs: `libero_spatial`, `libero_object`, `libero_goal`, `libero_10`, `libero_object_swap`, `libero_spatial_swap` |
+| `env_scores[].env_name` | string | Required if success=true | Env name |
 | `env_scores[].score` | float | Required if success=true | Score [0,1] |
 | `env_scores[].samples` | int | Required if success=true | Sample count (≥ 0) |
 | `env_scores[].duration_sec` | float | Required if success=true | Duration (seconds) |
 | `env_scores[].error` | string | No | Error message |
 | `total_score` | float | Yes | Overall score (0 if success=false) |
 | `duration_sec` | float | Yes | Total duration |
-| `error` | string | Required if success=false | Error description (e.g. "model files corrupted") |
-| `per_task_scores` | array | No | Per-task detail scores (optional, each item: `task_id`, `success_rate`, `trials`, `duration_sec`, `error`) |
+| `error` | string | Required if success=false | Error description |
+| `per_task_scores` | array | No | Per-task detail scores |
 
 **Two submission modes**:
 
 **Mode A — Success (`success=true`)**:
-- Must provide all 6 env_scores (all `ALLOWED_ENVS` must be present)
-- Backend validates: each env_name present, score in [0,1] (numeric, not NaN), samples ≥ 0
+- Must provide all 6 env_scores
+- Backend validates: each env_name present, score in [0,1], samples ≥ 0
 - Creates challenge attempt and writes all env_scores to `eval_scores` / `challenge_scores`
-- submission status → `done`
+- submission status → `evaluated`
 
 **Mode B — Failure (`success=false`)**:
 - `env_scores` can be empty `[]`
-- Must provide `error` with failure reason (e.g. "model files corrupted", "CUDA OOM")
+- Must provide `error` with failure reason
 - **No** env_scores validation
 - **No** scores written to `eval_scores`
 - **No** challenge created / **no** ranking entry
-- submission status → `failed`
-
-```bash
-# Mode B example: model incomplete, scoring failed
-curl -X POST \
-  -H "X-API-Key: ***" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "success": false,
-    "miner_hotkey": "5MinerAexamp...",
-    "hf_repo_id": "miner-a/pi05-AAAAAAAAAAAA",
-    "round_num": 1,
-    "env_scores": [],
-    "total_score": 0.0,
-    "duration_sec": 30.0,
-    "error": "model rejected by pre-eval check: no params/ directory or model.safetensors found"
-  }' \
-  http://localhost:8001/api/v1/benchmark/task/task_5MinerAexamp..._1/score
-```
+- submission status → `eval_failed`
 
 **200**:
 ```json
@@ -502,7 +523,34 @@ curl -X POST \
 
 ---
 
-### 7. Payments (admin_key)
+### 7. Benchmark Progress (admin_key)
+
+#### POST /api/v1/benchmark-progress
+
+Update task progress (stage, progress percentage, current env). Admin_key required.
+
+```bash
+curl -X POST \
+  -H "X-API-Key: ***" \
+  -H "Content-Type: application/json" \
+  -d '{"task_id": "task_xxx_1", "stage": "running", "progress": 0.45, "current_env": "libero_spatial"}' \
+  http://localhost:8001/api/v1/benchmark-progress
+```
+
+**Request Body**:
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `task_id` | string | Yes | Task ID |
+| `stage` | string | Yes | `downloading`, `prechecking`, or `running` |
+| `progress` | float | No | Progress 0.0–1.0 |
+| `current_env` | string | No | Current environment being evaluated |
+
+**200**: `{"ok": true}`
+
+---
+
+### 8. Payments (admin_key)
 
 #### GET /api/v1/payments?round_num=0
 
@@ -573,7 +621,7 @@ curl -H "X-API-Key: ***" "http://localhost:8001/api/v1/payments/summary?round_nu
 
 ---
 
-### 8. Deprecated
+### 9. Deprecated
 
 #### POST /api/eval → **410 Gone**
 
@@ -583,7 +631,7 @@ Use chain scanner or Benchmark Worker API.
 
 ### Allowed Environments
 
-The 6 environments that must all be present in a successful score submission (`ALLOWED_ENVS`):
+The 6 environments that must all be present in a successful score submission:
 
 | Env Name | Description |
 |----------|-------------|
@@ -596,12 +644,19 @@ The 6 environments that must all be present in a successful score submission (`A
 
 ---
 
-### Submission Status Values
+### Submission Status Values (Unified Model)
 
-| Status | Description |
-|--------|-------------|
-| `unknown` | Initial state, just created |
-| `pending` | Verified and enqueued for evaluation (set by `enqueue_eval`) |
-| `done` | Evaluation completed successfully |
-| `failed` | Evaluation failed |
-| `rejected` | Verification failed, never entered queue |
+| Status | Description | Terminal |
+|--------|-------------|----------|
+| `received` | Chain announcement seen | No |
+| `burn_checking` | Burn verification in progress | No |
+| `burn_passed` | Burn verified, awaiting seed | No |
+| `burn_rejected` | Burn verification failed | **Yes** |
+| `pending` | Enqueued, waiting for worker | No |
+| `seed_failed` | Seed computation failed (drand unavailable), auto-retried | No |
+| `evaluating` | Worker evaluating (stage: `downloading`/`prechecking`/`running`) | No |
+| `evaluated` | Evaluation completed successfully | **Yes** |
+| `eval_failed` | Evaluation failed | **Yes** |
+| `rejected` | Rejected (plagiarism, model hash failure, validation failure) | **Yes** |
+
+**Backward compatibility**: Old status values (`done` → `evaluated`, `failed` → `eval_failed`, `enqueued` → `pending`) are automatically mapped in API responses. The `sm` status mapping dictionaries in the database preserve old keys alongside new keys.
