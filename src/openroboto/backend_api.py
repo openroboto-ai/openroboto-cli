@@ -59,6 +59,18 @@ from openroboto_protocol.schemas import (
 
 from openroboto.http_client import build_request, urlopen
 
+#: 🔴 **不发这个头就什么信封都拿不到。**
+#:
+#: 后端的默认形状是裸 JSON（迁移期为了不打断评测 worker，见后端 ADR 02 §6），
+#: 只有点名要才给 `{data, meta}` / `{error: {...}, meta}`。漏掉这一行的表现是：
+#: 本文件里所有解信封的代码**一次都不触发** —— `_error_envelope()` 永远返回 None、
+#: `data` 永远取不到，而且**不报错**，只是拿到一份形状不对的数据。
+#:
+#: 尾巴上带 `application/json` 是给中间的网关和还没升级的后端留的：
+#: 只写厂商类型时，个别代理会判 406。后端的协商是子串匹配、且信封优先，
+#: 两个都写不影响它给信封。
+ACCEPT = "application/vnd.openroboto.envelope+json, application/json"
+
 REQUEST_TIMEOUT_SEC = 30
 DEFAULT_LIMIT = 20
 
@@ -178,7 +190,10 @@ def _get(
     if query:
         url = f"{url}?{urllib.parse.urlencode(query)}"
 
-    request = build_request(url, {"X-API-Key": api_key} if api_key else None)
+    headers = {"Accept": ACCEPT}
+    if api_key:
+        headers["X-API-Key"] = api_key
+    request = build_request(url, headers)
 
     try:
         with urlopen(request, REQUEST_TIMEOUT_SEC) as response:
@@ -248,9 +263,7 @@ def _parse(model: type[_Model], raw: bytes, path: str) -> _Model:
     except ValueError as exc:
         # pydantic 的文档链接对矿工是纯噪音，这里不往外抛。
         complaints = [
-            line
-            for line in str(exc).splitlines()
-            if "errors.pydantic.dev" not in line
+            line for line in str(exc).splitlines() if "errors.pydantic.dev" not in line
         ]
         detail = "\n  ".join(complaints[:MAX_MISMATCH_LINES])
         raise BackendError(

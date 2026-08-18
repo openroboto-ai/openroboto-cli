@@ -85,8 +85,7 @@ def push_model(
             repo_type="model",
             token=hf_token,
             commit_message=(
-                f"Round {round_num} π₀.₅ LIBERO model — "
-                f"{datetime.now(UTC).isoformat()}"
+                f"Round {round_num} π₀.₅ LIBERO model — {datetime.now(UTC).isoformat()}"
             ),
         )
         commit_sha = commit_sha_from_url(str(commit_url)) or str(
@@ -95,7 +94,11 @@ def push_model(
     except Exception as exc:
         raise UploadError(f"推送到 HF 失败：{exc}") from exc
 
-    url = str(commit_url) if "/commit/" in str(commit_url) else f"https://huggingface.co/{repo_id}"
+    url = (
+        str(commit_url)
+        if "/commit/" in str(commit_url)
+        else f"https://huggingface.co/{repo_id}"
+    )
     logger.info("✅ 已上传 %s | commit=%s", url, commit_sha[:8])
     return UploadResult(url=url, commit_sha=commit_sha)
 
@@ -118,9 +121,7 @@ def _write_round_info(
             "training_steps": metrics.get("training_steps", 0),
             "training_duration_sec": metrics.get("training_duration_seconds", 0),
         }
-    (path / "round_info.json").write_text(
-        json.dumps(info, indent=2), encoding="utf-8"
-    )
+    (path / "round_info.json").write_text(json.dumps(info, indent=2), encoding="utf-8")
 
 
 def _client_version() -> str:

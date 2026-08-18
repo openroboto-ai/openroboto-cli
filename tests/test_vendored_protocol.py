@@ -117,7 +117,15 @@ def test_no_new_imports_of_the_vendored_copy() -> None:
 
     新增一处 = 又开出一条静默走到副本上的路径，也就是当年漂 105 行的那条路。
     """
-    hits = _git_grep(r"^[[:space:]]*(from|import) protocol([. ]|$)", "*.py")
+    # 排除本文件：第 27 行的 `import protocol.seed` 是**这条测试自己的取证手段**
+    # （它要拿到副本里的函数才能和协议包逐值比对），不是违规的调用点。
+    # 不排除的表现是这条测试永远红，而且是**提交之后才红** —— `git grep` 只看被
+    # 跟踪的文件，`tests/` 还没进版本库时它扫不到自己，本地全绿一提交就炸。
+    hits = _git_grep(
+        r"^[[:space:]]*(from|import) protocol([. ]|$)",
+        "*.py",
+        ":!tests/test_vendored_protocol.py",
+    )
     found = {line.split(":", 2)[0]: line.split(":", 2)[2].strip() for line in hits}
     # 三个 vendored 文件自己的 re-export 语句写的是 `from openroboto_protocol...`，
     # 所以不会出现在这里；真出现了说明有人把它改回了副本内部 import。

@@ -53,9 +53,7 @@ def run(args: argparse.Namespace) -> int:
     settings: Settings | None
     try:
         settings = Settings.load(args.config)
-        results.append(
-            CheckResult("配置文件", True, f"{args.config} 解析通过")
-        )
+        results.append(CheckResult("配置文件", True, f"{args.config} 解析通过"))
     except ConfigError as exc:
         settings = None
         results.append(
@@ -154,7 +152,9 @@ def check_control(settings: Settings) -> CheckResult:
 
 def check_docker() -> CheckResult:
     if not shutil.which("docker"):
-        return CheckResult("Docker", False, "没找到 docker", "装 Docker：https://get.docker.com")
+        return CheckResult(
+            "Docker", False, "没找到 docker", "装 Docker：https://get.docker.com"
+        )
     version = _run(["docker", "--version"])
     if version is None:
         return CheckResult(

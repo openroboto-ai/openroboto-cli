@@ -37,8 +37,7 @@ def run(args: argparse.Namespace) -> int:
         return 1
 
     say(
-        f"✅ burn 完成 | tx={state['burn_tx_hash'][:16]}... "
-        f"block={state['burn_block']}"
+        f"✅ burn 完成 | tx={state['burn_tx_hash'][:16]}... block={state['burn_block']}"
     )
     say("   → 下一步 `openroboto announce`（**必须**做完，否则这笔 burn 没人看得见）")
     return 0

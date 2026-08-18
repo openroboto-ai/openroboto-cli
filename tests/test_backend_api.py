@@ -114,6 +114,24 @@ def test_empty_parameters_are_not_sent(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "limit=5" in url
 
 
+def test_every_request_asks_for_the_envelope(monkeypatch: pytest.MonkeyPatch) -> None:
+    """🔴 每个请求都必须点名要信封，否则后端给的是裸 JSON。
+
+    后端的默认形状是裸 JSON（迁移期为了不打断评测 worker）。漏掉这个头的表现
+    **不是报错**：`_error_envelope()` 永远返回 None、`data` 永远取不到，
+    本文件里所有解信封的用例照样绿（它们喂的是构造好的信封字节，
+    根本不经过真实的 HTTP 头）—— 只有这一条盯着请求本身。
+
+    带不带 key 的两条路径分开走（`_get` 里是两个分支），所以两条都验。
+    """
+    for kwargs in ({"hotkey": "5X", "limit": 3}, {"hotkey": "", "limit": 5}):
+        seen = _capture(monkeypatch, _list_envelope([]))
+        backend_api.fetch_submissions("https://api.example", **kwargs)
+        accept = seen[0].get_header("Accept")
+        assert accept is not None, "请求没带 Accept —— 拿到的会是裸 JSON"
+        assert "application/vnd.openroboto.envelope+json" in accept
+
+
 def test_rejections_need_no_key(monkeypatch: pytest.MonkeyPatch) -> None:
     """对矿工白纸黑字承诺过 No API key required，挂上 key 就是毁约。"""
     seen = _capture(monkeypatch, _list_envelope([_rejection()]))

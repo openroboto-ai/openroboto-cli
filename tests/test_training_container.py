@@ -109,9 +109,12 @@ def test_image_comes_from_environment_override(monkeypatch) -> None:  # type: ig
 
     monkeypatch.setenv("OPENPI_RUNNER_IMAGE", "my/openpi:dev")
     assert runner_image() == "my/openpi:dev"
-    assert build_docker_command(
-        train_data_path="/tmp/data/train.json", output_dir="/out"
-    )[-1] == "my/openpi:dev"
+    assert (
+        build_docker_command(train_data_path="/tmp/data/train.json", output_dir="/out")[
+            -1
+        ]
+        == "my/openpi:dev"
+    )
 
 
 def test_parse_result_prefers_stdout_marker(tmp_path: Path) -> None:

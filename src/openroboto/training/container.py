@@ -190,7 +190,7 @@ def parse_result(stdout: str, output_dir: str) -> tuple[dict[str, Any], dict[str
             )
 
     for name, target in (("metrics.json", "metrics"), ("proof.json", "proof")):
-        if (metrics if target == "metrics" else proof):
+        if metrics if target == "metrics" else proof:
             continue
         path = Path(output_dir) / name
         if path.is_file():
