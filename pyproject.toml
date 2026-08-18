@@ -1,0 +1,137 @@
+[project]
+name = "openroboto"
+version = "0.1.0"
+description = "OpenRoboto subnet (Bittensor netuid 80) CLI — everything a miner or external validator types."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "OpenRoboto", email = "cameron@moonshotcommons.com" }]
+keywords = ["bittensor", "openroboto", "subnet", "miner", "cli"]
+
+# ⚠️ 3.11，不是 3.12。矿工机器上跑的就是 3.11
+# （openpi-runner/Dockerfile 与 SETUP_NATIVE.md 都写死 python3.11）。
+# 写 3.12 等于所有现有矿工装不上这个包。
+requires-python = ">=3.11"
+
+# 依赖要轻（AGENTS.md 红线 #4）。矿工只想提交模型，不该被迫装一堆东西。
+# 这里每一条都有人在用：
+#   openroboto-protocol —— commitment 编码 / checkpoint 格式判定，不许本地复制一份
+#   pyyaml             —— miner.yaml
+#   bittensor          —— 链交互（burn / commitment / set_weights）
+#   huggingface_hub    —— 模型上传
+# HTTP 一律用 stdlib urllib，不引 requests。
+dependencies = [
+    # 精确钉死，不是 `>=`。版本号**就是**契约版本：浮动范围意味着矿工侧和后端侧
+    # 可能解析到不同的代码，而"两边能被证明装的是同一份"正是这个包唯一的存在理由。
+    # `.github/workflows/protocol-guards.yml` 会检查这一条。
+    "openroboto-protocol==1.0.0",
+    "pyyaml>=6.0",
+    # 生产矿工机上跑的是 10.5.0（旧 requirements.txt 钉死这个版本）。
+    # 用到的两个 API 是 SDK 私有面：`publish_metadata_extrinsic`（commitment）
+    # 与 `substrate.compose_call("add_stake_burn")`（burn），大版本升级必然会动，
+    # 所以上界锁在 11。
+    "bittensor>=10.5,<11",
+    "huggingface_hub>=0.24.0",
+]
+
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Typing :: Typed",
+]
+
+[project.urls]
+Homepage = "https://github.com/openroboto-ai/openroboto-cli"
+Issues = "https://github.com/openroboto-ai/openroboto-cli/issues"
+
+[project.scripts]
+openroboto = "openroboto.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.10.11,<0.11.0"]
+build-backend = "uv_build"
+
+# openroboto-protocol 还没发到 PyPI。发布前这一段要删掉，否则 `uv sync`
+# 在没有兄弟目录的机器上会失败。矿工装的是 wheel，不受 [tool.uv.sources] 影响。
+[tool.uv.sources]
+openroboto-protocol = { path = "../openroboto-protocol", editable = true }
+
+[dependency-groups]
+dev = [
+    "pytest>=7.4.3,<10.0.0",
+    "mypy>=1.8.0,<3.0.0",
+    "ruff>=0.2.2,<1.0.0",
+    "types-PyYAML>=6.0",
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 88
+src = ["src"]
+# 旧结构（`rt.py` / `miner.py` / `validator.py` / `utils/` / `protocol/` …）**一个都不删**，
+# 但它们是搬家前的原样代码，不参加新仓的风格与类型约束 —— 否则 lint 永远是红的，
+# 红久了就没人看了。搬完之后这些文件的去留单独决定（SCOPE.md）。
+extend-exclude = [
+    "rt.py",
+    "miner.py",
+    "validator.py",
+    "payment.py",
+    "download_checkpoint.py",
+    "utils",
+    "protocol",
+    "miner",
+    "openpi-runner",
+    "scripts",
+    # 模板是原样搬过来的、在训练容器里跑的独立脚本（依赖 openpi / torch），
+    # 不参加本包的风格约束 —— 改它们的排版会让与容器侧的对照变难。
+    "src/openroboto/templates",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "T20", "RUF"]
+# 注释与 docstring 写中文，中文标点会被 RUF001-003 当作同形字逐个报出来，对本仓是纯噪音。
+ignore = ["RUF001", "RUF002", "RUF003"]
+
+[tool.ruff.lint.per-file-ignores]
+# CLI 就是要往 stdout 打字给矿工看，T20（print）在命令层不适用。
+"src/openroboto/commands/*.py" = ["T20"]
+"src/openroboto/console.py" = ["T20"]
+# 模板是给矿工挂进容器的独立脚本，不参与本包的类型与风格约束。
+"src/openroboto/templates/*" = ["T20", "B", "RUF"]
+
+[tool.mypy]
+strict = true
+python_version = "3.11"
+# 只查新结构；旧文件与模板（模板在容器里跑，依赖 openpi/torch）不参加。
+#
+# 不查 `tests/`：pytest 的 stub 会把 numpy 拖进来，而 numpy 的 stub 用了 3.12 才有的
+# `type` 语句 —— 我们按矿工侧的 3.11 检查，跟进去只会得到 numpy 自己的语法报错。
+# 测试的正确性由 pytest 保证，不由类型检查保证。
+files = ["src/openroboto"]
+exclude = "src/openroboto/templates/"
+
+[[tool.mypy.overrides]]
+# bittensor / huggingface_hub / torch 不带类型信息，且矿工机以外的环境（CI、本机）
+# 未必装得上 bittensor（它拖 torch）。所有链交互都在函数体内延迟 import，
+# 这样 `openroboto check` / `init` / `status` 在没有 bittensor 的机器上也能跑。
+#
+# `follow_imports = "skip"` 是必需的：numpy 的 stub 用了 3.12 才有的 `type` 语句，
+# 而我们按 3.11 检查（矿工侧的版本）—— 跟进去只会检出 numpy 自己的语法差异。
+module = [
+    "bittensor",
+    "bittensor.*",
+    "huggingface_hub",
+    "huggingface_hub.*",
+    "torch",
+    "torch.*",
+    "numpy",
+    "numpy.*",
+]
+ignore_missing_imports = true
+follow_imports = "skip"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -14,7 +14,8 @@ digest  = SHA256(message)
 seed    = big_endian_uint32(digest[-4:])
 ```
 
-The reference implementation is `protocol/seed.py`:
+The reference implementation is `openroboto_protocol.seed`
+(`pip install "openroboto-protocol==1.0.0"`):
 
 ```python
 import hashlib
@@ -36,7 +37,7 @@ The two entropy sources are operationally independent. Reviewers should still ve
 
 ## Drand verification
 
-The public drand quicknet chain identifier is defined in `protocol/seed.py`. For a recorded round, retrieve:
+The public drand quicknet chain identifier is `openroboto_protocol.seed.DRAND_CHAIN_HASH`. For a recorded round, retrieve:
 
 ```text
 https://api.drand.sh/<quicknet-chain-hash>/public/<drand-round>
@@ -51,7 +52,7 @@ A submission whose seed cannot be computed yet is reported with the non-terminal
 ## Reproducible example
 
 ```python
-from protocol.seed import derive_seed
+from openroboto_protocol.seed import derive_seed
 
 block_hash = "0x" + "11" * 32
 round_num = 1
@@ -76,7 +77,7 @@ This translation is deterministic and public. It randomizes the evaluation mecha
 
 - obtain the miner commitment and containing block hash from chain;
 - obtain the recorded drand round and randomness from the public beacon;
-- recompute the uint32 base seed with `protocol/seed.py`;
+- recompute the uint32 base seed with `openroboto_protocol.seed.derive_seed`;
 - recompute per-task seeds with the public validator toolkit;
 - rerun the pinned model commit against the documented benchmark configuration.
 

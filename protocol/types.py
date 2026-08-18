@@ -1,5 +1,33 @@
-"""
-Shared protocol: data classes, constants, and type definitions.
+"""⚠️ DEPRECATED —— 已被 `openroboto-protocol` 取代，此文件待归档。
+
+**任何 import 都应改掉**：协议常量与状态词表一律从 `openroboto_protocol.constants` /
+`openroboto_protocol.status` 取，不要从这里取。本仓 `src/openroboto/` 已经全部这样做了。
+
+这份文件就是那次事故的物证：同一套协议代码曾在四个仓库里各存一份，这一份漂了 105 行
+（`payment.py` 漂了 313 行）。下面这些值**现在就是错的**，照抄会直接算错钱：
+
+| 这里 | `openroboto_protocol` | 差别 |
+|---|---|---|
+| `TOP_K_EMISSION_WEIGHTS = [0.70, 0.20, 0.10]` | `(0.07, 0.02, 0.01)` | 相对口径 vs 生效的绝对口径，**差十倍** |
+| `STATUS_WAITING/EVAL/SCORING/ACTIVE/PAUSED/DONE` | `received/pending/evaluating/evaluated/rejected/...` | 两套词表，没有一个对得上 |
+
+正因为已经漂了，这个文件**不能**像 `seed.py` 那样改成再导出 ——
+再导出会把上面那些值悄悄换掉，那是改行为，不是搬家。它只能整体作废。
+
+为什么还没删：`SCOPE.md` 规定继承自 `openroboto-subnet` 的旧文件一律不删；
+而且还有两个符号在用它，且**两个都不在 `openroboto-protocol` 里**：
+
+- `PI05_BASE_CHECKPOINT` —— `miner.py:155`
+- `VLAEpisode` —— `miner/trainer_vla.py:34`
+
+它们该不该进协议包要人裁：`PI05_BASE_CHECKPOINT` 是基座 checkpoint 的 gs:// 地址
+（两边要不要有一致理解？矿工训练用它，后端不碰），`VLAEpisode` 是训练数据集的行格式
+（只有矿工侧读写）。按 `AGENTS.md` §2 的标准（"双方是否必须对它有一致的理解"），
+两个看起来都**不该**进协议包，更像是搬进 `src/openroboto/training/`。
+定了之后，`protocol/` 整个目录连同
+`.github/workflows/protocol-guards.yml` 里的豁免清单一起删。
+
+在那之前：**不要往这个文件里加任何东西，也不要修它的值。**
 """
 
 from dataclasses import dataclass

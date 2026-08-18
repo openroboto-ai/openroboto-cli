@@ -6,9 +6,13 @@
 venv/
 
 # Secrets and local configuration
+# 矿工的 miner.yaml 里有 HF token 和钱包密码，所以整类 *.yaml 默认不进版本库。
 *.yaml
 !*.example.yaml
 !**/*.example.yaml
+# 例外：打进 pip 包的配置模板。它们**必须**进版本库 —— 被 *.yaml 规则吞掉的话，
+# 从干净 clone 构建出来的 wheel 里没有模板，`openroboto init` 当场失败。
+!src/openroboto/templates/*.yaml
 .env
 .env.*
 
@@ -21,6 +25,16 @@ state/
 logs/
 tmp/
 *.pid
+
+# Build and tool caches
+dist/
+build/
+*.egg-info/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+# 基座 checkpoint 的本地缓存（几个 GB）
+cache/
 
 # Model artifacts
 *.pt

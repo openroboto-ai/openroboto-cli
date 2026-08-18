@@ -8,8 +8,12 @@
 set -e
 
 DEPLOY_DIR="/data/robot-train"
-REPO_URL="${REPO_URL:-https://github.com/your-org/robot-train-subnet.git}"
+# The default used to be https://github.com/your-org/robot-train-subnet.git — a
+# placeholder for a repository that does not exist, so anyone following the docs
+# failed at the clone step. This is the real public repository.
+REPO_URL="${REPO_URL:-https://github.com/openroboto-ai/openroboto-cli.git}"
 REPO_BRANCH="${REPO_BRANCH:-main}"
+CLONE_DIR="$DEPLOY_DIR/openroboto-cli"
 
 echo "============================================"
 echo "  RobotTrain π₀.₅ Miner — Auto Deploy"
@@ -122,11 +126,11 @@ chown -R robot-train:robot-train "$DEPLOY_DIR"
 # ─── 5. Clone Repository ──────────────────────────────────
 echo ""
 echo "📂 Cloning repository..."
-if [ ! -d "$DEPLOY_DIR/robot-train-subnet/.git" ]; then
-    sudo -u robot-train git clone --branch "$REPO_BRANCH" "$REPO_URL" "$DEPLOY_DIR/robot-train-subnet"
+if [ ! -d "$CLONE_DIR/.git" ]; then
+    sudo -u robot-train git clone --branch "$REPO_BRANCH" "$REPO_URL" "$CLONE_DIR"
 else
     echo "✅ Repository already exists, skipping clone"
-    sudo -u robot-train git -C "$DEPLOY_DIR/robot-train-subnet" pull
+    sudo -u robot-train git -C "$CLONE_DIR" pull
 fi
 
 # ─── 6. Python Virtual Environment ───────────────────────────
@@ -136,22 +140,24 @@ if [ ! -d "$DEPLOY_DIR/venv" ]; then
     sudo -u robot-train python3.11 -m venv "$DEPLOY_DIR/venv"
 fi
 
+# The CLI itself is a pip package (`openroboto`); openpi lives only inside the
+# training container, never in this interpreter (numpy<2.0 vs numpy>=2.0).
 sudo -u robot-train bash -c "
 source $DEPLOY_DIR/venv/bin/activate
 pip install --upgrade pip
-cd $DEPLOY_DIR/robot-train-subnet
-pip install -r requirements.txt
-pip install git+https://github.com/Physical-Intelligence/openpi.git@main
+pip install $CLONE_DIR
 "
 
 # ─── 7. Configuration File ──────────────────────────────────
 echo ""
 echo "⚙️  Configuration file..."
-if [ ! -f "$DEPLOY_DIR/robot-train-subnet/config.yaml" ]; then
-    sudo -u robot-train cp "$DEPLOY_DIR/robot-train-subnet/config.example.yaml" "$DEPLOY_DIR/robot-train-subnet/config.yaml"
-    echo "📝 Please edit the config: sudo -u robot-train nano $DEPLOY_DIR/robot-train-subnet/config.yaml"
+# `openroboto init` writes miner.yaml plus a training strategy script, so the
+# miner does not have to copy example files by hand.
+if [ ! -f "$DEPLOY_DIR/miner.yaml" ]; then
+    sudo -u robot-train "$DEPLOY_DIR/venv/bin/openroboto" init "$DEPLOY_DIR"
+    echo "📝 Please edit the config: sudo -u robot-train nano $DEPLOY_DIR/miner.yaml"
 else
-    echo "✅ config.yaml already exists"
+    echo "✅ miner.yaml already exists"
 fi
 
 # ─── 8. systemd Service ──────────────────────────────
@@ -167,10 +173,9 @@ Wants=docker.service
 Type=simple
 User=robot-train
 Group=robot-train
-WorkingDirectory=$DEPLOY_DIR/robot-train-subnet
+WorkingDirectory=$DEPLOY_DIR
 Environment="PATH=$DEPLOY_DIR/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin"
-Environment="REGISTRY_PASSWORD="
-ExecStart=$DEPLOY_DIR/venv/bin/python miner_vla.py --config config.yaml --registry docker.io --registry-username "" --registry-password \$REGISTRY_PASSWORD
+ExecStart=$DEPLOY_DIR/venv/bin/openroboto train --config miner.yaml
 Restart=always
 RestartSec=30
 StandardOutput=append:$DEPLOY_DIR/logs/miner.log
@@ -191,9 +196,9 @@ echo "  ✅ Deploy Complete!"
 echo "============================================"
 echo ""
 echo "Next steps:"
-echo "  1. Edit config: sudo -u robot-train nano $DEPLOY_DIR/robot-train-subnet/config.yaml"
-echo "  2. Set Docker password: sudo systemctl edit robot-train-miner"
-echo "  3. Start service: sudo systemctl start robot-train-miner"
-echo "  4. Check status: sudo systemctl status robot-train-miner"
+echo "  1. Edit config: sudo -u robot-train nano $DEPLOY_DIR/miner.yaml"
+echo "  2. Check the environment: sudo -u robot-train $DEPLOY_DIR/venv/bin/openroboto doctor"
+echo "  3. Build the training image: sudo -u robot-train $DEPLOY_DIR/venv/bin/openroboto build"
+echo "  4. Start service: sudo systemctl start robot-train-miner"
 echo "  5. View logs: tail -f $DEPLOY_DIR/logs/miner.log"
 echo ""

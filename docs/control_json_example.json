@@ -4,7 +4,7 @@
   "message": "Round 1 is active",
   "payment": {
     "enabled": true,
-    "burn_rate_tao": 0.01,
+    "burn_rate_tao": 0.1,
     "limit_price_rao": 0
   },
   "dataset": {

@@ -12,7 +12,7 @@ Each evaluated submission may require a public burn amount. The current value is
 4. Record the transaction hash and block number.
 5. Include that reference in the model chain commitment.
 
-The submission CLI performs this flow in `rt.py submit`.
+The submission CLI performs this flow in `openroboto submit`.
 
 ## Public fields
 
@@ -20,13 +20,15 @@ The submission CLI performs this flow in `rt.py submit`.
 {
   "payment": {
     "enabled": true,
-    "burn_rate_tao": 0.01,
+    "burn_rate_tao": 0.1,
     "limit_price_rao": 0
   }
 }
 ```
 
-These are example values. Always use the current round's published document.
+These are example values that match the rate published at the time of writing
+(0.1 TAO). Always use the current round's published document — a burn that does
+not match the published rate is rejected, and rejected burns are not refunded.
 
 ## Verification
 

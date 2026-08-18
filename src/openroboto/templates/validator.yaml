@@ -1,0 +1,33 @@
+# OpenRoboto — external validator configuration
+#
+# Written by `openroboto init --validator`. The validator reads weights from the
+# backend and sets them on chain; it runs no benchmarks itself.
+
+# ─── Bittensor subnet ───────────────────────────────────────
+subnet:
+  network: finney                  # finney | test | local
+  netuid: 80                       # required
+  subtensor_endpoint: ""
+  wallet_path: ""
+  coldkey: default
+  hotkey: default
+  hotkey_ss58: ""
+  wallet_password: ""              # optional; never commit a real password
+
+# ─── Public HTTP resources ──────────────────────────────────
+urls:
+  control_json: "https://api.openroboto.ai/control.json"
+
+# ─── Backend API ────────────────────────────────────────────
+backend:
+  url: "https://api.openroboto.ai"
+  public_key: ""                   # read-only key, published in control.json.
+                                   # GET /api/weights returns 401 without it.
+                                   # The validator never needs a write key.
+
+# ─── Weight submission ──────────────────────────────────────
+weight_interval_min: 720           # how often to call set_weights, in minutes
+
+# ─── Logging ────────────────────────────────────────────────
+log_level: INFO
+log_dir: logs

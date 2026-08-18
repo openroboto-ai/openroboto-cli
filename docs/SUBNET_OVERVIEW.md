@@ -151,12 +151,19 @@ The worker can also report progress via `PATCH /api/v1/benchmark/task/{id}/statu
 The subnet does not rank by raw score alone; it uses a challenge system designed to reward beating the incumbent, not tying it:
 
 1. Scored miners are ordered by earliest scoring time; the first becomes the initial **champion** (Rank 1).
-2. Each subsequent miner **challenges the current champion**: the challenger's average score must exceed the champion's by at least **`champion_margin` (default 0.01)**.
+2. Each subsequent miner **challenges the current champion**. The challenge succeeds only if
+
+   ```
+   challenger_score > champion_score + champion_margin      # champion_margin default 0.01
+   ```
+
+   Note the comparison is **strictly greater than**. A gap of *exactly* `champion_margin` is **not** enough to take the crown — the challenge fails, and so does anything below it. Ties lose on purpose: an exact copy of the champion's weights scores exactly the same, so "resubmit the leader's model" can never win. If you want Rank 1, you have to beat the incumbent by *more* than the margin.
+
 3. If the challenge succeeds, the challenger becomes the new champion, the old champion drops to Rank 2, and the rest shift down.
 4. If it fails, the challenger **does not appear on the board at all**.
 5. The board is capped at **Top 3**, with emission weights **70 / 20 / 10**.
 
-Consequences worth noting: copying the current champion's weights cannot dethrone it (a copy ties, and a tie loses by margin); and a settled round's champion is **held** until someone clears the bar in a later round.
+Consequences worth noting: copying the current champion's weights cannot dethrone it (an identical copy ties, and a tie is a failed challenge); and a settled round's champion is **held** until someone clears the bar in a later round.
 
 ## 8. Weights on chain
 

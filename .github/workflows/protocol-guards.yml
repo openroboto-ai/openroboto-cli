@@ -1,0 +1,113 @@
+name: protocol guards
+
+# 这个仓目前**只有**这一条 workflow —— lint / 类型检查 / 测试的 CI 还没接
+# （`uv run ruff format --check .` 当前在 6 个从 openroboto-subnet 继承来的文件上是红的，
+#   接它之前要先决定那些文件怎么处理）。这里先把两条与协议包相关的防线立起来，
+# 因为它们防的是**静默**故障：漂移不会让任何东西报错，只会让评测某天复现不出来。
+#
+# 两条检查的原文与理由见 `../openroboto-protocol/README.md` 的
+# "What consumers must add to their own CI"。
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: protocol-guards-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  guards:
+    name: no vendored copy + version pinned
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # ───────────────────────────────────────────────────────────────────────
+      # 仓库内不得出现 vendored 的 protocol/ 副本。装了这个包还留着旧副本，
+      # import 会静默走到副本上 —— 这正是当年 protocol/types.py 漂 105 行、
+      # payment.py 漂 313 行的那条路径（矿工按 A 编码、后端按 B 解码）。
+      #
+      # 上游给的原版是"列表必须为空"。本仓现在过不了：SCOPE.md 规定从
+      # openroboto-subnet 继承来的旧文件一律不删，那三个文件还在磁盘上。
+      #
+      # 于是改成**与豁免清单精确比对**，而不是 continue-on-error，也不是
+      # 只扫 src/：
+      #   - continue-on-error 是黄色的，黄色没人看；
+      #   - 只扫 src/ 更糟 —— 副本恰恰不在 src/ 里，一条永远不可能对着它变红的
+      #     检查就是装饰。
+      # 精确比对同时守住两个方向：
+      #   - 多出**第四份**副本（任何路径下）→ 红；
+      #   - 这三个文件终于被归档 → 清单对不上、也红，于是豁免只能跟着一起删。
+      #     这就是"何时收紧"的答案：不是某个日期，是它们消失的那一天。
+      # 三个文件里已经没有独立实现了（seed.py / __init__.py 是对
+      # openroboto_protocol 的再导出，types.py 整体作废），
+      # 见 tests/test_vendored_protocol.py。
+      # ───────────────────────────────────────────────────────────────────────
+      - name: No vendored protocol copy
+        run: |
+          grandfathered="protocol/__init__.py
+          protocol/seed.py
+          protocol/types.py"
+          copies="$(git ls-files '*protocol/*.py')"
+          if [ "$copies" != "$(echo "$grandfathered" | sed 's/^ *//')" ]; then
+            echo "::error::vendored protocol copies changed."
+            echo "found:"; echo "$copies"
+            echo "grandfathered (SCOPE.md: 旧文件不删，只停止使用):"
+            echo "$grandfathered" | sed 's/^ *//'
+            echo "新增副本 → 删掉它，改 import openroboto_protocol"
+            echo "归档了旧副本 → 把这一步的豁免清单一起删掉"
+            exit 1
+          fi
+          echo "no new vendored copy (3 files grandfathered, pending archival)"
+
+      # ───────────────────────────────────────────────────────────────────────
+      # 版本必须钉死。`>=` / `~=` 意味着矿工侧和后端侧可能解析到不同的代码，
+      # 而"两边能被证明装的是同一份"是 openroboto-protocol 唯一的存在理由。
+      #
+      # 解析依赖表，不做行级 grep：本仓 pyproject.toml 里有 3 行注释和 1 行
+      # [tool.uv.sources] 提到这个包名却不是依赖声明，行级 grep 全部误判成浮动版本。
+      # ───────────────────────────────────────────────────────────────────────
+      - name: Protocol version is pinned
+        run: |
+          python3 - <<'PY'
+          import pathlib
+          import sys
+          import tomllib
+
+          reqs: list[str] = []
+          path = pathlib.Path("pyproject.toml")
+          if path.is_file():
+              data = tomllib.loads(path.read_text("utf-8"))
+              project = data.get("project", {})
+              reqs += project.get("dependencies", [])
+              for group in project.get("optional-dependencies", {}).values():
+                  reqs += group
+              # dependency-groups 的条目可能是 {include-group = "..."} 这样的表。
+              for group in data.get("dependency-groups", {}).values():
+                  reqs += [item for item in group if isinstance(item, str)]
+          for req_file in sorted(pathlib.Path().glob("requirements*.txt")):
+              reqs += [
+                  line.split("#", 1)[0].strip()
+                  for line in req_file.read_text("utf-8").splitlines()
+              ]
+
+          floating = [
+              req for req in reqs
+              if req.replace(" ", "").startswith("openroboto-protocol")
+              and "==" not in req
+          ]
+          if floating:
+              print("::error::openroboto-protocol must be pinned to an exact version:")
+              print("\n".join(floating))
+              sys.exit(1)
+          print(f"pin ok ({len(reqs)} requirements scanned)")
+          PY

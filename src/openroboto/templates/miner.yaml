@@ -1,0 +1,61 @@
+# OpenRoboto — miner configuration
+#
+# Written by `openroboto init`. Runtime parameters come from this file plus the
+# subnet's public control.json. No environment-variable fallback: what you see
+# here is what the CLI uses.
+
+# ─── Bittensor subnet ───────────────────────────────────────
+subnet:
+  network: finney                  # finney (mainnet) | test | local
+  netuid: 80                       # mainnet netuid. Required — the CLI refuses
+                                   # to touch the chain without it, because a
+                                   # wrong netuid burns real TAO on the wrong subnet.
+  subtensor_endpoint: ""           # optional WS endpoint override
+  wallet_path: ""                  # empty = Bittensor SDK default (~/.bittensor/wallets)
+  coldkey: default
+  hotkey: default
+  hotkey_ss58: ""                  # your hotkey SS58 address; the HF repo name
+                                   # is derived from its last 12 characters
+  wallet_password: ""              # optional; set it to skip the interactive prompt.
+                                   # Never commit this file with a password in it.
+
+# ─── Public HTTP resources ──────────────────────────────────
+urls:
+  control_json: "https://api.openroboto.ai/control.json"
+  dataset_train: "https://api.openroboto.ai/train.json"
+  dataset_val: "https://api.openroboto.ai/val.json"
+
+# ─── Model ──────────────────────────────────────────────────
+model:
+  vla_model_id: pi05
+  vla_checkpoint_path: ""          # empty = the training container downloads
+                                   # gs://openpi-assets/checkpoints/pi05_base itself
+  cache_dir: "/models"
+
+# ─── HuggingFace ────────────────────────────────────────────
+huggingface:
+  token: ""                        # write token; required by `openroboto upload`
+  username: ""                     # your HF account name
+
+# ─── Training ───────────────────────────────────────────────
+custom_train_script: "train_strategy.py"   # mounted into the container as
+                                           # /data/scripts/<name>, entry point
+                                           # train(cfg, episodes, policy)
+
+# ─── Logging ────────────────────────────────────────────────
+log_level: INFO
+log_dir: logs
+
+# ─── Notes ──────────────────────────────────────────────────
+#
+# Payment (burn_rate_tao, limit_price_rao) comes from the public control.json
+# payment block. Do not set it here unless you are testing offline — a burn that
+# does not match the round's rate is rejected, and rejected burns are not refunded.
+#
+# Typical flow:
+#   openroboto doctor      # check GPU / Docker / config before spending anything
+#   openroboto build       # build the openpi-runner image
+#   openroboto train       # train one round
+#   openroboto check       # verify the checkpoint layout BEFORE paying
+#   openroboto submit      # upload -> burn -> announce
+#   openroboto status      # what the subnet thinks of your submission
