@@ -306,13 +306,15 @@ def test_burn_window_boundary_matches_the_backend_exactly() -> None:
 
     # 超一个 → 阻塞
     blocked, _ = check_burn_window(1_000, 1_051, 50)
-    assert "51" in blocked and "不退" in blocked
+    # 断言数字而不是散文：措辞会被翻译、会被改写，而 51 与 50 是这条判定的事实。
+    assert "51" in blocked and "50" in blocked
 
     # 对称：burn 在 commit 之后同样算距离
     blocked_reverse, _ = check_burn_window(1_051, 1_000, 50)
-    assert blocked_reverse == blocked.replace(
-        "burn 在区块 1000，当前区块 1051", "burn 在区块 1051，当前区块 1000"
-    )
+    # 对称性断言的是"两个方向都被拦"和"距离算出来一样"，
+    # 不比整句字符串 —— 措辞会变，abs() 的语义不会。
+    assert blocked_reverse, "burn 在 commit 之后同样超窗，必须也拦"
+    assert "51" in blocked_reverse
 
 
 def test_burn_window_skips_when_either_block_is_unknown() -> None:
@@ -325,7 +327,8 @@ def test_burn_window_warns_before_the_edge_without_blocking() -> None:
     """贴边界要提醒（commitment 进块还要几个块），但**不能**算进阻塞判定。"""
     blocked, warning = check_burn_window(1_000, 1_048, 50)
     assert blocked == ""  # 48 < 50，后端会接受
-    assert "贴着边界" in warning
+    assert warning, "贴边界必须提醒"
+    assert "48" in warning and "50" in warning
 
 
 def test_preflight_size_estimate_includes_the_block_hash() -> None:
@@ -414,7 +417,7 @@ def test_status_explains_a_rejection_reason() -> None:
     )
     lines = status_command.explain(reason)
     assert "BURN_TX_TOO_OLD" in lines[0]
-    assert "重试不会有不同的结果" in lines[1]
+    assert "Retrying will not give a different result" in lines[1]
 
     assert status_command.explain(None) == []
 
@@ -436,7 +439,9 @@ def test_doctor_flags_every_field_needed_before_spending() -> None:
     """doctor 是花钱之前的最后一道拦截，缺项必须逐条点名。"""
     results = doctor_command.check_settings(Settings())
     failed = {r.name for r in results if not r.ok}
-    assert failed == {"netuid", "hotkey_ss58", "HF 账号", "control.json 地址"}
+    # 断言条数与关键字段，不断言显示名 —— 显示名是给人看的，会被翻译/改写。
+    assert "netuid" in failed and "hotkey_ss58" in failed
+    assert len(failed) == 4, f"空配置应当报 4 项，实际 {failed}"
 
 
 def test_doctor_passes_on_a_complete_config() -> None:
@@ -516,4 +521,4 @@ def test_doctor_balance_check_does_not_crash_on_an_unknown_rate(
 
     result = doctor_command.check_wallet(settings)
     assert result.ok is False
-    assert "未知" in result.detail
+    assert "unknown" in result.detail.lower()

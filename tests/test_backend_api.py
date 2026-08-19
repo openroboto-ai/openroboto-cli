@@ -199,7 +199,7 @@ def test_non_retryable_error_tells_the_miner_to_stop(
     rendered = str(excinfo.value)
     assert "烧的那笔交易太旧了" in rendered
     assert "BURN_TX_TOO_OLD" in rendered
-    assert "重试不会有不同的结果" in rendered
+    assert "Retrying will not give a different result" in rendered
     assert REQUEST_ID in rendered
 
 
@@ -211,7 +211,7 @@ def test_retryable_error_says_it_is_worth_retrying(
         backend_api.fetch_submissions("https://api.example")
 
     assert excinfo.value.retryable is True
-    assert "再试一次" in str(excinfo.value)
+    assert "retrying it as-is" in str(excinfo.value)
 
 
 def test_error_inside_a_200_is_still_an_error(monkeypatch: pytest.MonkeyPatch) -> None:

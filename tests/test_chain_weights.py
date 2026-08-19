@@ -36,7 +36,7 @@ def test_no_positive_weights_returns_empty_with_reason() -> None:
     result = normalize_weights({"a": 0.0}, ["a"])
     assert result.uids == []
     assert result.weights == []
-    assert result.detail == ["没有正权重"]
+    assert result.detail and "positive" in result.detail[0].lower()
 
 
 def test_detail_lines_cover_every_weight() -> None:

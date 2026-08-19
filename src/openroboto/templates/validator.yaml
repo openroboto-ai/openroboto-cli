@@ -4,6 +4,8 @@
 # backend and sets them on chain; it runs no benchmarks itself.
 
 # ─── Bittensor subnet ───────────────────────────────────────
+environment: mainnet   # mainnet | dev（见 miner.yaml 的说明）
+
 subnet:
   network: finney                  # finney | test | local
   netuid: 80                       # required

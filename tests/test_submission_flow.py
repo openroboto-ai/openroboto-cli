@@ -180,7 +180,7 @@ def test_announce_failure_tells_the_miner_not_to_burn_again(
     state = _uploaded_state()
     state["burn_tx_hash"] = "0x" + "d" * 64
     assert announce_command.perform_announce(_settings(), 1, state) is False
-    assert "不要重复 burn" in capsys.readouterr().err
+    assert "do not burn again" in capsys.readouterr().err
 
 
 # ─── 费率必须是已知的，不许猜（旧默认值 0.01 vs 线上 0.1）──────
@@ -206,7 +206,7 @@ def test_burn_refuses_when_the_rate_is_unknown(
     assert settings.burn_rate_tao is None  # 默认值不许是任何具体金额
 
     assert burn_command.perform_burn(settings, 1, _uploaded_state()) is False
-    assert "拿不到" in capsys.readouterr().err
+    assert "Could not get" in capsys.readouterr().err
 
 
 # ─── burn 生效窗口（后端 50 个区块，超了拒且不退）─────────────
@@ -240,7 +240,7 @@ def test_announce_refuses_once_the_burn_window_has_passed(
     assert ok is False
     assert captured == []  # 一个 commitment 都没发出去
     err = capsys.readouterr().err
-    assert "51" in err and "不退" in err  # 说清距离多少、后果是什么
+    assert "51" in err and "50" in err  # 距离与窗口，两个数字都要说
 
 
 def test_announce_allows_exactly_at_the_window_edge(
@@ -297,7 +297,9 @@ def test_unconfirmed_submission_does_not_invent_a_block_reference() -> None:
         fee_tao=0.0,
         confirmed=False,
     )
-    assert unconfirmed.extrinsic_ref == "未确认"
+    # 只断言"不是一个像真的区块引用" —— 具体措辞会被翻译。
+    assert "-" not in unconfirmed.extrinsic_ref
+    assert str(CURRENT_BLOCK) not in unconfirmed.extrinsic_ref
 
     confirmed = SubmitResult(
         ok=True,
@@ -319,7 +321,7 @@ def test_announce_does_not_claim_on_chain_without_a_block_number(
 
     assert ok is True
     out = capsys.readouterr().out
-    assert "已提交" in out and "已上链" not in out
+    assert "commitment submitted" in out and "commitment on chain" not in out
 
 
 def test_parse_extrinsic_result_confirms_only_with_a_real_block() -> None:

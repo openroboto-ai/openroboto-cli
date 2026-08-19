@@ -11,6 +11,10 @@ on:
     branches: [main]
   push:
     branches: [main]
+  # release.yml 通过 workflow_call 调进来 —— 于是**门槛只有这一份定义**。
+  # 在发版 workflow 里另写一套"发版前检查"，写出来的必然更弱（没人会把 lint、
+  # 类型、127 条用例和覆盖率门槛再敲一遍），而且两份迟早只有一份是对的。
+  workflow_call:
 
 permissions:
   contents: read
@@ -119,3 +123,85 @@ jobs:
       # 一个没人点开的报告不值得占额度。要看逐行报告就在本地 `uv run coverage html`。
       - name: Coverage gate
         run: uv run coverage report
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # 构建并**验证产物本身**，而不是只验证源码。
+  #
+  # 今天（2026-08-19）刚踩过一次这个坑的近亲：`.dockerignore` 里一条 `*.yaml`
+  # 把 `templates/*.yaml` 一起排除了，镜像构建成功、只在矿工第一次
+  # `openroboto init` 时才炸。打包侧的排除规则同样是静默的 —— 少一个模板，
+  # wheel 照样能装、`--version` 照样能跑，直到有人真去用那条命令。
+  #
+  # 所以这里装的是**打出来的 wheel**，然后检查里面确实有那些非 .py 的东西。
+  # ───────────────────────────────────────────────────────────────────────────
+  build:
+    name: build + verify the artifact
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: ${{ env.UV_VERSION }}
+
+      - run: uv build
+
+      # tag 发版时，tag 名与包版本必须一致。消费方拿到的是版本号，
+      # 而 tag 是那个版本对应的不可变 git 引用 —— 两者对不上就无从追溯。
+      - name: Tag matches package version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          version="$(uv run python -c 'import openroboto; print(openroboto.__version__)')"
+          tag="${GITHUB_REF_NAME#v}"
+          if [ "$version" != "$tag" ]; then
+            echo "::error::tag v$tag 与包版本 $version 对不上"
+            exit 1
+          fi
+          echo "tag 与包版本一致：$version"
+
+      # 装 wheel（不是源码树）再检查内容物。
+      - name: The wheel actually contains what the commands need
+        run: |
+          python3 - <<'PY'
+          import glob
+          import sys
+          import zipfile
+
+          wheel = glob.glob("dist/*.whl")[0]
+          names = set(zipfile.ZipFile(wheel).namelist())
+
+          # 每一条都对应一个"少了它，某条命令在矿工机器上才炸"的场景：
+          required = {
+              "openroboto/templates/miner.yaml": "openroboto init 生成不出配置",
+              "openroboto/templates/validator.yaml": "openroboto init --validator 失败",
+              "openroboto/templates/simple/train_strategy.py": "init 给不出策略脚本",
+              "openroboto/templates/gitignore": "工作区没有 .gitignore，"
+                                                "矿工第一次 git add 就提交钱包密码",
+              "openroboto/templates/README-miner.md": "工作区没有说明",
+              "openroboto/runner/Dockerfile": "openroboto build 没有构建上下文",
+              "openroboto/runner/train_runner.py": "训练镜像里没有入口脚本",
+          }
+          missing = {p: why for p, why in required.items() if p not in names}
+          for path, why in missing.items():
+              print(f"::error::wheel 里缺 {path} —— {why}")
+          sys.exit(1 if missing else 0)
+          PY
+
+      # 装到一个干净环境里，确认命令真的能跑起来。
+      # `--version` 会同时打印协议包版本，所以它也顺带证明依赖装上了。
+      - name: The installed command runs
+        run: |
+          python3 -m venv /tmp/verify
+          /tmp/verify/bin/pip install --quiet dist/*.whl
+          /tmp/verify/bin/openroboto --version
+          /tmp/verify/bin/openroboto --help > /dev/null
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error

@@ -4,6 +4,17 @@
 # subnet's public control.json. No environment-variable fallback: what you see
 # here is what the CLI uses.
 
+# ─── Which subnet and backend ───────────────────────────────
+# `mainnet` = netuid 80 on finney, real TAO, non-refundable fees.
+# `dev`     = netuid 313 on testnet, faucet TAO, nothing to lose.
+#
+# This one name covers four settings that must agree: subnet.network,
+# subnet.netuid, urls.control_json and backend.url. Changing only some of them
+# is how you burn mainnet TAO at the dev fee rate, or submit to testnet and then
+# ask production why nothing showed up. Anything below can still be overridden
+# individually — the CLI just refuses to run on chain when the pieces disagree.
+environment: mainnet
+
 # ─── Bittensor subnet ───────────────────────────────────────
 subnet:
   network: finney                  # finney (mainnet) | test | local

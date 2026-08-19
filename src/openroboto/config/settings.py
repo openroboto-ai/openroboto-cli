@@ -19,6 +19,8 @@ from typing import Any
 
 import yaml
 
+from openroboto.config import environments
+
 
 class ConfigError(Exception):
     """A config item is missing or invalid.
@@ -34,6 +36,19 @@ class Settings:
 
     Mutable — `apply_control()` overwrites the payment section in place.
     """
+
+    #: Which subnet + backend this config talks to: `mainnet` | `dev`.
+    #:
+    #: One name for a decision that used to be four independent switches
+    #: (`network`, `netuid`, `urls.control_json`, `backend.url`). Changing only
+    #: some of them is not harmless — see `config/environments.py` for the two
+    #: half-states and what each one costs.
+    #:
+    #: It supplies **URL defaults only**, never `netuid`: that field has no
+    #: default on purpose, because a config that forgets it must fail rather than
+    #: quietly pick a subnet. `require_for_chain()` verifies the netuid you set
+    #: against the environment you named.
+    environment: str = environments.DEFAULT_ENVIRONMENT
 
     # ─── Bittensor ─────────────────────────────────────
     network: str = "finney"
@@ -140,13 +155,27 @@ class Settings:
         """
         missing: list[str] = []
         if self.netuid <= 0:
-            missing.append("subnet.netuid（主网是 80，测试网当年是 313）")
+            missing.append("subnet.netuid (80 on mainnet, 313 on the old testnet)")
         if not self.network:
-            missing.append("subnet.network（finney | test | local）")
+            missing.append("subnet.network (finney | test | local)")
+        # Report missing fields and contradictions **together**, not in two
+        # rounds. Reported separately, someone who mistyped the environment name
+        # first gets "netuid missing", fills in netuid, and only then sees the
+        # real problem -- one command re-run per problem just to learn the next.
+        missing += environments.check_coherent(
+            environment=self.environment,
+            network=self.network,
+            netuid=self.netuid,
+            control_json_url=self.control_json_url,
+            backend_url=self.backend_url,
+        )
         if missing:
             raise ConfigError(
-                "配置缺项，无法上链：\n  - " + "\n  - ".join(missing) + "\n"
-                "  → 编辑 miner.yaml 补上这些字段，或 `openroboto init` 生成一份模板"
+                "This config cannot commit on chain:\n  - "
+                + "\n  - ".join(missing)
+                + "\n"
+                "  \u2192 edit miner.yaml, or run `openroboto init` to generate a "
+                "template. TAO burned with a mismatched config is not refunded."
             )
 
     @classmethod
@@ -157,15 +186,17 @@ class Settings:
                 raw = yaml.safe_load(f) or {}
         except FileNotFoundError as exc:
             raise ConfigError(
-                f"找不到配置文件 {path}\n"
-                f"  → `openroboto init <目录名>` 会生成一份可用的 miner.yaml"
+                f"Config file not found: {path}\n"
+                f"  \u2192 `openroboto init <directory>` generates a working "
+                f"miner.yaml"
             ) from exc
         except yaml.YAMLError as exc:
-            raise ConfigError(f"{path} 不是合法的 YAML：{exc}") from exc
+            raise ConfigError(f"{path} is not valid YAML: {exc}") from exc
 
         if not isinstance(raw, dict):
             raise ConfigError(
-                f"{path} 顶层必须是映射（key: value），实际是 {type(raw).__name__}"
+                f"The top level of {path} must be a mapping (key: value), "
+                f"got {type(raw).__name__}"
             )
 
         return cls.from_mapping(raw)
@@ -177,6 +208,16 @@ class Settings:
         Tests go straight through this one, with nothing written to disk.
         """
         cfg = cls()
+
+        # Apply the environment preset first, then read the explicit fields --
+        # the order cannot be reversed: explicit values must override the preset.
+        cfg.environment = str(data.get("environment", cfg.environment))
+        preset = environments.ENVIRONMENTS.get(cfg.environment)
+        if preset is not None:
+            cfg.network = preset.network
+            cfg.control_json_url = preset.control_json_url
+            cfg.backend_url = preset.backend_url
+            # netuid is deliberately not set; see the comment on that field above.
 
         subnet = _section(data, "subnet")
         cfg.network = subnet.get("network", cfg.network)
@@ -248,5 +289,7 @@ def _section(data: dict[str, Any], name: str) -> dict[str, Any]:
     if value is None:
         return {}
     if not isinstance(value, dict):
-        raise ConfigError(f"配置段 `{name}` 必须是映射，实际是 {type(value).__name__}")
+        raise ConfigError(
+            f"Config section `{name}` must be a mapping, got {type(value).__name__}"
+        )
     return value

@@ -1,0 +1,160 @@
+name: Release
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 这个包发出去之后，装它的人不在团队里
+#
+# `openroboto` 是矿工敲的一切。发错一个版本，表现不是 CI 变红，而是某个我们
+# 不认识的人在自己的机器上烧掉了不退的 TAO —— 而我们只会看到提交量下降。
+#
+# 所以这里的每一道闸都不是流程洁癖：
+#   · 正式发布只认 v* tag（不可变的 git 引用，且就是版本号本身）
+#   · 手动触发**永远**只到 TestPyPI，`publish` job 的 `if` 钉死了这一点
+#   · 两条路跑的是同一份 gates、上传的是同一份产物，只换上传目标
+#   · 上传前有 environment 人工审批 —— 版本号不可重用，按下去就撤不回来
+# ═══════════════════════════════════════════════════════════════════════════════
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: '发到 TestPyPI（不是正式 PyPI）。输入 testpypi 确认'
+        required: true
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+# cancel-in-progress: false —— 和 ci.yml 相反，是故意的。上传到索引不可撤销也
+# 不可重放（同一个版本号只能传一次），跑到一半被后来的 workflow 掐掉，
+# 留下的是一个"发了一半"的版本，比慢一点糟糕得多。
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  UV_VERSION: "0.11.18"
+
+jobs:
+  # 门槛就是每个 PR 跑的那一套，一行不差 —— 直接 uses ci.yml。
+  # 它顺带产出 `dist` artifact，并且已经验过 wheel 里模板与构建上下文都在、
+  # 装完命令跑得动、tag 与包版本一致。
+  gates:
+    name: gates (the same ones every PR runs)
+    uses: ./.github/workflows/ci.yml
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # TestPyPI —— 预发布版（0.1.0a1 之类）和排练都走这里。
+  #
+  # 为什么内测不直接发正式 PyPI：`openroboto` **一次都没发过正式版**，而 pip 的
+  # 规则是"只有预发布版可选时就装预发布版"。也就是说第一个 alpha 传上正式
+  # PyPI 之后，任何人裸 `pip install openroboto` 装到的就是它。TestPyPI 是独立
+  # 索引，矿工不会误装。
+  #
+  # 内测者这样装：
+  #   pip install --index-url https://test.pypi.org/simple/ \
+  #               --extra-index-url https://pypi.org/simple/ \
+  #               "openroboto==0.1.0a1"
+  # （`--extra-index-url` 是必需的：bittensor 这些真依赖只在正式 PyPI 上。）
+  #
+  # ⚠️ TestPyPI 的版本号**同样不可重用**。它不是可以随便乱发的沙盒，
+  # 只是发错了不影响真实消费方。
+  # ───────────────────────────────────────────────────────────────────────────
+  publish-testpypi:
+    name: publish to TestPyPI
+    needs: [gates]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: github.event_name == 'workflow_dispatch' && inputs.confirm == 'testpypi'
+
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/openroboto
+
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      # 不 checkout：发布的是 gates 里构建并验证过的那份产物，不是重新构建的
+      # 另一份。少一次 checkout 也意味着这个拿着 id-token 的 job 里没有仓库
+      # 代码可执行，唯一跑起来的东西是 uv publish。
+      - name: Download the artifact that passed the gates
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: dist
+          path: dist
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: ${{ env.UV_VERSION }}
+
+      - name: Publish
+        run: uv publish --publish-url https://test.pypi.org/legacy/ dist/*
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # 正式 PyPI。Trusted Publishing（OIDC），不放长期 token。
+  #
+  # 理由：长期 token 放在 repo secrets 里，谁看过、什么时候泄的、泄了之后被用来
+  # 发过什么，事后都查不出来 —— 而这个 token 的权限是"以 OpenRoboto 的名义往
+  # PyPI 发任意版本"，拿到它的人可以给全体矿工推一个改过 burn 金额的 0.1.1。
+  # OIDC 换来的 token 只对这一次 run 有效，且 PyPI 侧还要求它来自指定的
+  # repo + workflow 文件 + environment，仓库里没有任何可偷的东西。
+  # ───────────────────────────────────────────────────────────────────────────
+  publish:
+    name: publish to PyPI
+    needs: [gates]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # 🔴 手动触发**永远**到不了正式 PyPI。没有这一行，`workflow_dispatch`
+    # 会把两个 publish job 一起点着，而这一个是不可撤销的。
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    # environment 有两个作用，缺一不可：
+    #   1. GitHub 上给它配 required reviewers —— 上传不可撤销、版本号不可重用，
+    #      按下去之前必须有一个人类确认这确实是要发的那个 tag；
+    #   2. PyPI 的 trusted publisher 配置里填的就是这个名字，对不上 OIDC 直接被拒。
+    #      改名字要同时改 pypi.org 上那条记录。
+    environment:
+      name: pypi
+      url: https://pypi.org/p/openroboto
+
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Download the artifact that passed the gates
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: dist
+          path: dist
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: ${{ env.UV_VERSION }}
+
+      # ci.yml 已经比过一次 tag 与 pyproject 的 version。这里再比一次，比的是
+      # **产物文件名** —— 也就是真正要上传的那堆字节。上一次证明的是"源码里写着
+      # 0.1.0"，这一次证明的是"要传上去的包确实叫 0.1.0"。中间隔着一次 artifact
+      # 上传下载。
+      - name: Artifact version matches the tag
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          for expected in \
+            "dist/openroboto-${version}.tar.gz" \
+            "dist/openroboto-${version}-py3-none-any.whl"; do
+            if [ ! -f "$expected" ]; then
+              echo "::error::产物里没有 $expected"
+              ls -la dist/
+              exit 1
+            fi
+          done
+          echo "产物与 tag 一致：$version"
+
+      - name: Publish
+        run: uv publish dist/*

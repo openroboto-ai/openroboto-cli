@@ -171,3 +171,85 @@ def test_refresh_burn_rate_falls_back_to_local_config(
     control_module.refresh_burn_rate(settings, _Logger())
     assert settings.burn_rate_tao == 0.1
     assert any("0.1" in message for message in messages)
+
+
+# ─── environment：四个必须同源的字段 ─────────────────────────
+
+
+def test_environment_defaults_urls_but_never_netuid() -> None:
+    """环境预设填 URL，**不填 netuid**。
+
+    `netuid` 没有默认值是刻意的：忘了配就该失败，而不是悄悄挑一个子网 ——
+    挑错了烧的是真 TAO。环境只负责校验你自己写的那个。
+    """
+    cfg = Settings.from_mapping({"environment": "dev"})
+    assert cfg.network == "test"
+    assert "api-dev" in cfg.control_json_url
+    assert "api-dev" in cfg.backend_url
+    assert cfg.netuid == 0, "环境不许替矿工决定 netuid"
+
+
+def test_explicit_fields_beat_the_environment_preset() -> None:
+    """预设是默认值不是强制值 —— 自建后端的人必须还能用。"""
+    cfg = Settings.from_mapping(
+        {
+            "environment": "dev",
+            "backend": {"url": "https://my-own-backend.example"},
+        }
+    )
+    assert cfg.backend_url == "https://my-own-backend.example"
+    assert "api-dev" in cfg.control_json_url  # 没被显式覆盖的仍然来自预设
+
+
+def test_mainnet_netuid_with_dev_control_json_is_refused() -> None:
+    """会赔钱的半切换之一：按 dev 的 0.01 费率，在**主网**上烧。
+
+    dev 公布 burn_rate_tao=0.01、生产公布 0.1。这种组合下矿工烧掉十分之一的
+    费用，生产后端按金额核对判拒，**且不退款**。
+    """
+    cfg = Settings.from_mapping(
+        {
+            "subnet": {"netuid": 80, "network": "finney"},
+            "urls": {"control_json": "https://api-dev.openroboto.ai/control.json"},
+        }
+    )
+    with pytest.raises(ConfigError) as excinfo:
+        cfg.require_for_chain()
+    assert "control_json" in str(excinfo.value)
+
+
+def test_testnet_netuid_with_mainnet_environment_is_refused() -> None:
+    """另一半：提交到测试网，却去问生产要状态 —— `status` 永远空且无从解释。"""
+    cfg = Settings.from_mapping({"subnet": {"netuid": 313, "network": "test"}})
+    with pytest.raises(ConfigError) as excinfo:
+        cfg.require_for_chain()
+    assert "313" in str(excinfo.value)
+
+
+def test_a_coherent_config_passes() -> None:
+    """别把正常配置也拦了 —— 比后端严不是安全方向。"""
+    Settings.from_mapping(
+        {"subnet": {"netuid": 80, "network": "finney"}}
+    ).require_for_chain()
+    Settings.from_mapping(
+        {"environment": "dev", "subnet": {"netuid": 313, "network": "test"}}
+    ).require_for_chain()
+
+
+def test_a_self_hosted_backend_is_not_treated_as_a_conflict() -> None:
+    """指向自己搭的后端是合法的，这个检查不该逼所有人用我们的域名。"""
+    Settings.from_mapping(
+        {
+            "subnet": {"netuid": 80, "network": "finney"},
+            "backend": {"url": "https://my-own-backend.example"},
+            "urls": {"control_json": "https://my-own-backend.example/control.json"},
+        }
+    ).require_for_chain()
+
+
+def test_an_unknown_environment_name_fails_instead_of_falling_back() -> None:
+    """打错环境名必须报错。悄悄退回 mainnet = 拿真钱做测试。"""
+    cfg = Settings.from_mapping({"environment": "staging"})
+    with pytest.raises(ConfigError) as excinfo:
+        cfg.require_for_chain()
+    assert "staging" in str(excinfo.value)
