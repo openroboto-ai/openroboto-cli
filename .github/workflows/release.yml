@@ -1,28 +1,37 @@
 name: Release
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 这个包发出去之后，装它的人不在团队里
+# Once this package is published, the people installing it are not on the team
 #
-# `openroboto` 是矿工敲的一切。发错一个版本，表现不是 CI 变红，而是某个我们
-# 不认识的人在自己的机器上烧掉了不退的 TAO —— 而我们只会看到提交量下降。
+# `openroboto` is everything a miner types. Publishing a bad version does not show up
+# as CI going red; it shows up as someone we have never met burning non-refundable TAO
+# on their own machine — and all we would see is submissions dropping.
 #
-# 所以这里的每一道闸都不是流程洁癖：
-#   · 往索引上传只认 v* tag（不可变的 git 引用，且它就是版本号本身）
-#   · 手动触发**永远**到不了正式 PyPI，`publish` job 的 `if` 钉死了这一点
-#   · 两条路跑的是同一份 gates、上传的是同一份产物，只换上传目标
-#   · environment 限定部署来源：`pypi` 只接 `v*` tag、`testpypi` 只接 main
+# So none of the gates here is process fussiness:
+#   · uploading to an index only happens for a v* tag (an immutable git reference, and
+#     it is the version number itself)
+#   · a manual trigger can **never** reach real PyPI; the `if` on the `publish` job
+#     nails that down
+#   · both paths run the same gates and upload the same artifact, only the upload
+#     target changes
+#   · environment restricts the deployment source: `pypi` only accepts `v*` tags,
+#     `testpypi` only accepts main
 #
-# 🔴 **少一道闸：没有人工审批。** required reviewers 在私有仓上要付费计划，
-# 而 openroboto-ai 目前是 free（2026-08-19 实测，API 返回 422）。也就是说
-# **`git push origin v0.1.0a1` 会一路发到 PyPI，中间没有第二双眼睛**，
-# 而上传不可撤销、版本号不可重用。
-# 补上它的办法：把仓库转公开（公开仓的 required reviewers 免费，而这个仓本来
-# 就要在上线时转公开），或者升级到 Team。在那之前，push tag 这个动作本身
-# 就是最后一道闸 —— 推之前请自己确认一次版本号。
+# 🔴 **One gate is missing: there is no human approval.** required reviewers need a
+# paid plan on a private repo, and openroboto-ai is currently on free (measured
+# 2026-08-19, the API returns 422). That means **`git push origin v0.1.0a1` goes all
+# the way to PyPI with no second pair of eyes in between**, while an upload is
+# irreversible and a version number cannot be reused.
+# Ways to close it: make the repo public (required reviewers are free on public repos,
+# and this repo is going public at launch anyway), or upgrade to Team. Until then, the
+# act of pushing the tag is itself the last gate — please double-check the version
+# number yourself before pushing.
 #
-# 内测版和正式版都发**正式 PyPI**，靠版本号区分（`v0.1.0a1` vs `v0.1.0`）：
-# pip 有正式版时不会选预发布版，所以内测者 `pip install openroboto==0.1.0a1`
-# 就够了，而矿工裸装拿不到它。TestPyPI 只留作发布链路本身的排练场。
+# Beta versions and stable versions both go to **real PyPI**, distinguished by the
+# version number (`v0.1.0a1` vs `v0.1.0`): pip will not pick a pre-release when a
+# stable release exists, so `pip install openroboto==0.1.0a1` is enough for beta
+# testers, while a plain install by a miner will not get it. TestPyPI is kept only as a
+# rehearsal ground for the publishing pipeline itself.
 # ═══════════════════════════════════════════════════════════════════════════════
 
 on:
@@ -31,7 +40,7 @@ on:
   workflow_dispatch:
     inputs:
       confirm:
-        description: '发到 TestPyPI（不是正式 PyPI）。输入 testpypi 确认'
+        description: 'Publish to TestPyPI (not real PyPI). Type testpypi to confirm'
         required: true
         default: ''
         type: string
@@ -39,9 +48,10 @@ on:
 permissions:
   contents: read
 
-# cancel-in-progress: false —— 和 ci.yml 相反，是故意的。上传到索引不可撤销也
-# 不可重放（同一个版本号只能传一次），跑到一半被后来的 workflow 掐掉，
-# 留下的是一个"发了一半"的版本，比慢一点糟糕得多。
+# cancel-in-progress: false — the opposite of ci.yml, and deliberate. Uploading to an
+# index is neither reversible nor replayable (the same version number can only be
+# uploaded once), and being cut off halfway by a later workflow leaves a
+# "half-published" version behind, which is far worse than being slow.
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
@@ -50,27 +60,34 @@ env:
   UV_VERSION: "0.11.18"
 
 jobs:
-  # 门槛就是每个 PR 跑的那一套，一行不差 —— 直接 uses ci.yml。
-  # 它顺带产出 `dist` artifact，并且已经验过 wheel 里模板与构建上下文都在、
-  # 装完命令跑得动、tag 与包版本一致。
+  # The gate is exactly the set every PR runs, line for line — it just uses ci.yml.
+  # It also produces the `dist` artifact along the way, and has already verified that
+  # the templates and the build context are inside the wheel, that the command runs
+  # after installation, and that the tag matches the package version.
   gates:
     name: gates (the same ones every PR runs)
     uses: ./.github/workflows/ci.yml
 
   # ───────────────────────────────────────────────────────────────────────────
-  # TestPyPI —— **只用来排练发布链路本身**，不是内测版的分发渠道。
+  # TestPyPI — **only used to rehearse the publishing pipeline itself**, it is not the
+  # distribution channel for beta versions.
   #
-  # 内测版走正式 PyPI（见下面 `publish`）：预发布版号 + 精确钉住就够了，
+  # Beta versions go through real PyPI (see `publish` below): a pre-release version
+  # number plus an exact pin is enough,
   #   pip install openroboto==0.1.0a1
-  # 而 TestPyPI 要求内测者额外记住两个 index 参数
-  #   （`--extra-index-url` 还是必需的，因为 bittensor 这些真依赖只在正式 PyPI 上）
-  # —— 为了一个本来就不会被误装的版本，让每个内测者多敲两行，不值得。
+  # whereas TestPyPI would require beta testers to remember two extra index arguments
+  #   (`--extra-index-url` is still required, because real dependencies such as
+  #    bittensor only exist on real PyPI)
+  # — making every beta tester type two more lines for a version that would not be
+  # installed by accident anyway is not worth it.
   #
-  # 留着它的理由只有一个：`uv publish`、OIDC 交换、environment 审批这几步，
-  # 在真正往正式 PyPI 传之前，需要有地方能整条跑一遍。跑的是**同一份 gates、
-  # 同一份产物**，只换上传目标 —— 不存在"两套流程漂移"的空间。
+  # There is exactly one reason to keep it: `uv publish`, the OIDC exchange and the
+  # environment approval need somewhere to be run end to end before anything is really
+  # pushed to real PyPI. It runs **the same gates and the same artifact**, only the
+  # upload target changes — there is no room for "two pipelines drifting apart".
   #
-  # ⚠️ TestPyPI 的版本号**同样不可重用**，排练也会烧号。
+  # ⚠️ TestPyPI version numbers are **equally non-reusable**; a rehearsal burns a
+  # number too.
   # ───────────────────────────────────────────────────────────────────────────
   publish-testpypi:
     name: publish to TestPyPI
@@ -88,9 +105,10 @@ jobs:
       contents: read
 
     steps:
-      # 不 checkout：发布的是 gates 里构建并验证过的那份产物，不是重新构建的
-      # 另一份。少一次 checkout 也意味着这个拿着 id-token 的 job 里没有仓库
-      # 代码可执行，唯一跑起来的东西是 uv publish。
+      # No checkout: what gets published is the artifact that was built and verified in
+      # gates, not another one built again. One fewer checkout also means this job,
+      # which holds an id-token, has no repository code available to execute; the only
+      # thing that runs is uv publish.
       - name: Download the artifact that passed the gates
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
@@ -106,44 +124,55 @@ jobs:
         run: uv publish --publish-url https://test.pypi.org/legacy/ dist/*
 
   # ───────────────────────────────────────────────────────────────────────────
-  # 正式 PyPI。**正式版和预发布版都走这里**，靠版本号区分：
-  #   v0.1.0a1 / v0.1.0rc1  → 内测版，`pip install openroboto` 不会选中它
-  #   v0.1.0                → 正式版
+  # Real PyPI. **Both stable and pre-release versions go through here**, distinguished
+  # by the version number:
+  #   v0.1.0a1 / v0.1.0rc1  → beta version; `pip install openroboto` will not pick it
+  #   v0.1.0                → stable version
   #
-  # pip 的规则（实测）：有正式版时只选正式版，预发布版要 `--pre` 或精确钉住。
-  # PyPI 没有 npm 那种 dist-tag，版本号本身就是那个开关。
+  # pip's rule (measured): when a stable release exists, only the stable release is
+  # picked; a pre-release needs `--pre` or an exact pin. PyPI has no dist-tags like npm;
+  # the version number itself is that switch.
   #
-  # 🔴 **有一个窗口期例外，别踩**：`openroboto` 至今没发过正式版，而"没有正式版
-  # 可选时 pip 会选预发布版"。也就是说在 0.1.0 发出去之前，第一个 alpha 就是
-  # 裸 `pip install openroboto` 装到的东西。两个办法：早点发一个正式 0.1.0，
-  # 或者内测结束后把 alpha 在 PyPI 上 yank 掉（PEP 592：yank 掉的版本除非被
-  # 精确钉住，否则解析器不会选它 —— 已经装了的人不受影响）。
+  # 🔴 **There is one window of exception, do not step in it**: `openroboto` has never
+  # published a stable release, and "when there is no stable release to choose, pip will
+  # pick a pre-release". That means, until 0.1.0 is out, the first alpha is what a bare
+  # `pip install openroboto` gets. Two ways out: publish a stable 0.1.0 early, or yank
+  # the alpha on PyPI once the beta ends (PEP 592: a yanked version is not picked by the
+  # resolver unless it is pinned exactly — people who already installed it are
+  # unaffected).
   #
-  # Trusted Publishing（OIDC），不放长期 token。
+  # Trusted Publishing (OIDC); no long-lived token is stored.
   #
-  # 理由：长期 token 放在 repo secrets 里，谁看过、什么时候泄的、泄了之后被用来
-  # 发过什么，事后都查不出来 —— 而这个 token 的权限是"以 OpenRoboto 的名义往
-  # PyPI 发任意版本"，拿到它的人可以给全体矿工推一个改过 burn 金额的 0.1.1。
-  # OIDC 换来的 token 只对这一次 run 有效，且 PyPI 侧还要求它来自指定的
-  # repo + workflow 文件 + environment，仓库里没有任何可偷的东西。
+  # Reason: with a long-lived token in repo secrets, who has seen it, when it leaked and
+  # what was published with it afterwards are all impossible to determine after the
+  # fact — and this token's permission is "publish any version to PyPI in OpenRoboto's
+  # name", so whoever obtains it can push a 0.1.1 with a modified burn amount to every
+  # miner. A token obtained via OIDC is valid only for this one run, and PyPI
+  # additionally requires it to come from a specified repo + workflow file +
+  # environment, so there is nothing in the repository worth stealing.
   # ───────────────────────────────────────────────────────────────────────────
   publish:
     name: publish to PyPI
     needs: [gates]
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # 🔴 手动触发**永远**到不了正式 PyPI。没有这一行，`workflow_dispatch`
-    # 会把两个 publish job 一起点着，而这一个是不可撤销的。
+    # 🔴 A manual trigger can **never** reach real PyPI. Without this line,
+    # `workflow_dispatch` would light up both publish jobs, and this one is
+    # irreversible.
     if: startsWith(github.ref, 'refs/tags/v')
 
-    # environment 现在起两个作用：
-    #   1. 部署来源限定为 `v*` tag —— 即使有人改坏了上面那个 `if`，
-    #      非 tag 的触发也进不来（2026-08-19 配好，`gh api ... /environments/pypi`）；
-    #   2. PyPI 的 trusted publisher 配置里填的就是这个名字，对不上 OIDC 直接被拒。
-    #      改名字要同时改 pypi.org 上那条记录。
+    # environment now serves two purposes:
+    #   1. it restricts the deployment source to `v*` tags — even if someone breaks the
+    #      `if` above, a non-tag trigger cannot get in (configured 2026-08-19, via
+    #      `gh api ... /environments/pypi`);
+    #   2. this exact name is what PyPI's trusted publisher configuration holds; if it
+    #      does not match, OIDC is rejected outright. Renaming it requires changing that
+    #      record on pypi.org at the same time.
     #
-    # 🔴 它**还不能**起第三个作用 —— 人工审批。见文件头那段：免费计划上
-    # 私有仓配不了 required reviewers。转公开或升 Team 之后，来这里把这条注释改掉。
+    # 🔴 It **cannot yet** serve a third purpose — human approval. See the block at the
+    # top of this file: required reviewers cannot be configured for a private repo on
+    # the free plan. Once the repo is public or upgraded to Team, come here and change
+    # this comment.
     environment:
       name: pypi
       url: https://pypi.org/p/openroboto
@@ -164,10 +193,11 @@ jobs:
         with:
           version: ${{ env.UV_VERSION }}
 
-      # ci.yml 已经比过一次 tag 与 pyproject 的 version。这里再比一次，比的是
-      # **产物文件名** —— 也就是真正要上传的那堆字节。上一次证明的是"源码里写着
-      # 0.1.0"，这一次证明的是"要传上去的包确实叫 0.1.0"。中间隔着一次 artifact
-      # 上传下载。
+      # ci.yml already compared the tag against pyproject's version once. It is compared
+      # again here, this time against the **artifact filenames** — that is, the actual
+      # bytes about to be uploaded. The first check proved "the source says 0.1.0", this
+      # one proves "the package about to be uploaded really is called 0.1.0". An
+      # artifact upload and download sits in between.
       - name: Artifact version matches the tag
         run: |
           version="${GITHUB_REF_NAME#v}"
@@ -175,12 +205,12 @@ jobs:
             "dist/openroboto-${version}.tar.gz" \
             "dist/openroboto-${version}-py3-none-any.whl"; do
             if [ ! -f "$expected" ]; then
-              echo "::error::产物里没有 $expected"
+              echo "::error::$expected is not in the artifact"
               ls -la dist/
               exit 1
             fi
           done
-          echo "产物与 tag 一致：$version"
+          echo "artifact matches the tag: $version"
 
       - name: Publish
         run: uv publish dist/*
