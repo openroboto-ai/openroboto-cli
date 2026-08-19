@@ -36,7 +36,7 @@ and burns are **not refunded**.
 
 | Path | What it is |
 |---|---|
-| `miner.yaml` | Your configuration. Holds your wallet password and HF token — **never commit it** |
+| `miner.yaml` | Your configuration. Holds your wallet password and HF token — **never commit it**. The `environment` field at the top picks mainnet / dev / local as one setting |
 | `train_strategy.py` | Your training logic. This is the file to edit |
 | `.gitignore` | Keeps credentials, state and multi-GB caches out of version control |
 | `state/round_N.json` | Per-round progress. `submit` reads it to resume **and to reuse an existing burn instead of paying twice** |

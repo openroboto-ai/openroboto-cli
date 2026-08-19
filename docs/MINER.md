@@ -78,6 +78,22 @@ openroboto submit
 openroboto status
 ```
 
+### Testing against something other than mainnet
+
+`environment` picks the subnet and the backend together — they are one decision,
+and configuring only half of it is how you burn mainnet TAO at the dev fee rate,
+or submit to testnet and then ask production why nothing showed up.
+
+```yaml
+environment: mainnet   # default: netuid 80, real TAO
+environment: dev       # testnet 313, faucet TAO
+environment: local     # your own backend; you must give backend.url and urls.control_json
+```
+
+`openroboto doctor` reports a mismatched combination, and `burn` / `announce`
+refuse to run on one. Full table and the local-backend example:
+[CONFIG.md](./CONFIG.md#environment--one-name-for-four-coupled-settings).
+
 > **⚠️ Burn→announce window.** The backend rejects any submission whose burn tx is more than **50 blocks (~10 minutes)** away from the chain commitment. This is an anti-replay rule: a fee cannot be paid once and attached to a later submission. `openroboto submit` runs upload → burn → announce back-to-back precisely so you stay inside this window. If you run `openroboto burn` and `openroboto announce` separately and the gap exceeds 50 blocks, the submission is rejected and the burned TAO is **not refunded** — `announce` will refuse to submit rather than let you pay a commitment fee for a submission that is already doomed.
 
 The CLI pulls `control.json` via **HTTP direct link** (ETag cached), no R2 SDK
