@@ -1,12 +1,15 @@
-"""`miner.yaml` / `validator.yaml` 的解析。
+"""Parsing of `miner.yaml` / `validator.yaml`.
 
-字段名就是矿工手里那份 YAML 的键名 —— **改一个键名，现有矿工的配置文件全部失效**
-（AGENTS.md 红线 #3）。所以这里只搬家，键名一个字母都没动。
+The field names are the key names in the YAML file the miner is holding —
+**change one key name and every existing miner's config file stops working**
+(AGENTS.md red line #3). So this was a move and nothing else: not one letter of any
+key name was touched.
 
-分工：
-- `miner.yaml` 是**用户的**（凭据、路径、自己的训练脚本）；
-- `control.json` 是**子网的**（本轮 payment / dataset / training / process），
-  见 `config/control.py`。
+Division of labour:
+- `miner.yaml` belongs to **the user** (credentials, paths, their own training
+  script);
+- `control.json` belongs to **the subnet** (this round's payment / dataset /
+  training / process), see `config/control.py`.
 """
 
 from __future__ import annotations
@@ -18,23 +21,35 @@ import yaml
 
 
 class ConfigError(Exception):
-    """配置缺项或不合法。消息面向矿工，必须说清哪一项、期望值、怎么修。"""
+    """A config item is missing or invalid.
+
+    The message is aimed at the miner and must state which item, what value was
+    expected, and how to fix it.
+    """
 
 
 @dataclass
 class Settings:
-    """一份配置文件的全部内容。可变 —— `apply_control()` 会就地覆盖 payment 段。"""
+    """The full content of one config file.
+
+    Mutable — `apply_control()` overwrites the payment section in place.
+    """
 
     # ─── Bittensor ─────────────────────────────────────
     network: str = "finney"
-    # ⚠️ 这个字段目前**不生效**：链连接走 `bt.Subtensor(network=...)`，只认网络名。
-    # 旧代码也一样（`utils/chain.py::get_subtensor` 的 endpoint 参数从未被使用），
-    # 所以这里保持同样的行为，没有偷偷改成「连你配的节点」—— 那会改变交易发往哪个
-    # 节点。要不要真正支持自定义端点，需要单独决定。
+    # ⚠️ This field currently **has no effect**: the chain connection goes through
+    # `bt.Subtensor(network=...)`, which only accepts a network name. The old code
+    # behaved the same way (the endpoint parameter of `utils/chain.py::get_subtensor`
+    # was never used), so the same behaviour is kept here, rather than quietly
+    # changing it to "connect to the node you configured" — that would change which
+    # node transactions are sent to. Whether to really support a custom endpoint
+    # needs a separate decision.
     subtensor_endpoint: str = ""
-    # 0 = 未配置。旧代码默认 313（测试网），而主网是 80 —— 一个漏配 netuid 的
-    # miner.yaml 会把 burn 打到另一条子网上，TAO 真烧掉。默认值救不了这种错，
-    # 只能拒绝启动，所以这里不给默认网络，由 `require_for_chain()` 拦。
+    # 0 = not configured. The old code defaulted to 313 (testnet) while mainnet is
+    # 80 — a miner.yaml that forgets to set netuid would send the burn to a
+    # different subnet, and the TAO really is burned. A default value cannot save
+    # you from that mistake, only refusing to start can, so no default network is
+    # given here and `require_for_chain()` blocks it.
     netuid: int = 0
     wallet_path: str = ""
     coldkey: str = "default"
@@ -43,14 +58,13 @@ class Settings:
     wallet_password: str = ""
     weight_interval_min: int = 720
 
-    # ─── 公开 HTTP 资源 ────────────────────────────────
+    # ─── Public HTTP resources ─────────────────────────
     control_json_url: str = ""
     dataset_train_url: str = ""
     dataset_val_url: str = ""
     dataset_test_url: str = ""
 
-    # ─── 模型 ──────────────────────────────────────────
-    model_cache_dir: str = "/models"
+    # ─── Model ─────────────────────────────────────────
     vla_model_id: str = "pi05"
     vla_checkpoint_path: str = ""
 
@@ -59,46 +73,71 @@ class Settings:
     hf_username: str = ""
     hf_merged_model_id: str = ""
 
-    # ─── 日志 ──────────────────────────────────────────
+    # ─── Logging ───────────────────────────────────────
     log_level: str = "INFO"
     log_dir: str = "logs"
 
-    # ─── 矿工 ──────────────────────────────────────────
+    # ─── Miner ─────────────────────────────────────────
     custom_train_script: str = ""
 
-    # ─── 验证者 ────────────────────────────────────────
+    # ─── Validator ─────────────────────────────────────
     backend_url: str = "https://api.openroboto.ai"
     backend_public_key: str = ""
 
-    # ─── 支付（正常由 control.json 覆盖） ──────────────
-    #: 本轮要烧多少 TAO。**没有默认值，这是有意的。**
+    # ─── Payment (normally overridden by control.json) ─
+    #: How much TAO to burn this round. **There is no default, and that is
+    #: deliberate.**
     #:
-    #: 原先默认 `0.01`，而线上一直是 `0.1` —— 差十倍。control.json 抓不到时
-    #: `refresh_burn_rate` 会退回这个值继续烧，于是网络抖一下矿工就少烧十倍，
-    #: 后端按金额核对直接拒，**TAO 不退**。AGENTS.md §6 已知缺陷表里就有这条
-    #: （`docs/control_json_example.json` 写着 0.01）。
+    #: It used to default to `0.01` while production has always been `0.1` — a
+    #: factor of ten. When control.json could not be fetched, `refresh_burn_rate`
+    #: would fall back to this value and burn anyway, so one network hiccup made
+    #: the miner burn ten times too little, the backend checked against the amount
+    #: and rejected it outright, and **the TAO is not refunded**. This is in the
+    #: known-defects table in AGENTS.md §6 (`docs/control_json_example.json` said
+    #: 0.01).
     #:
-    #: 现在：control.json 和 miner.yaml 都没给 → **拒绝烧**，不猜。
-    #: 烧钱是不可撤销操作，fail-closed 是唯一可接受的默认（AGENTS.md §4）。
+    #: Now: neither control.json nor miner.yaml gave a value → **refuse to burn**,
+    #: do not guess. Burning is irreversible, and fail-closed is the only
+    #: acceptable default (AGENTS.md §4).
     burn_rate_tao: float | None = None
     limit_price_rao: int = 0
 
-    #: burn 到 announce 之间允许隔多少个区块。超了后端判 `rejected`，TAO 不退。
+    #: How many blocks are allowed between burn and announce. Going over means the
+    #: backend marks it `rejected`, and the TAO is not refunded.
     #:
-    #: 值的依据：生产 `backend.yaml` 的 `scanner.burn_block_window`，
-    #: 经 `backend/config.py:77` 读取、`scanner/burn_verify.py:71` 执行 —— **50**。
-    #: （本仓文档一度写 10 个区块，2026-08-19 已按「生产行为优先」统一成 50。）
+    #: Where the value comes from: `scanner.burn_block_window` in the production
+    #: `backend.yaml`, read at `backend/config.py:77` and enforced at
+    #: `scanner/burn_verify.py:71` — **50**. (The docs in this repo said 10 blocks
+    #: for a while; on 2026-08-19 they were unified to 50 following "production
+    #: behaviour wins".)
     #:
-    #: 🔴 **这里违反红线 #1**：「burn 金额与区块窗口一律从 `openroboto-protocol`
-    #: 装，不许在本仓复制一份」。它现在就是本仓的一份副本。
-    #: 之所以先这样：协议包眼下没有这个常量，加过去是跨仓改动 + 一次发版，
-    #: 而窗口检查不能继续缺着（缺它 = 矿工白烧）。
-    #: **待办**：挪进 `openroboto_protocol`，本字段改成从协议包读默认值。
-    #: 在那之前，改这个数字必须同时对齐生产 `backend.yaml`。
+    #: 🟡 **Still a red-line #1 copy, but only until the next protocol release.**
+    #: Red line #1 says the burn amount and the block window are always installed
+    #: from `openroboto-protocol`, never copied into this repo.
+    #:
+    #: The protocol side is **done**: `openroboto_protocol.constants.BURN_BLOCK_WINDOW`
+    #: exists and carries the same value, the same provenance, and tests pinning all
+    #: three properties of the comparison. It is not released yet, and `==0.3.0`
+    #: cannot be resolved from PyPI, so importing it here today would simply not
+    #: install.
+    #:
+    #: **When openroboto-protocol 0.3.0 is published, this is a three-line change:**
+    #: bump the pin in `pyproject.toml`, `from openroboto_protocol.constants import
+    #: BURN_BLOCK_WINDOW`, and make this field default to it. Delete this comment
+    #: with it.
+    #:
+    #: Until then: changing this number requires changing the production
+    #: `backend.yaml` and the protocol constant in the same breath. Being stricter
+    #: than the backend is not the safe direction — it rejects submissions the
+    #: backend would have accepted, and the miner has already burned by then.
     burn_block_window: int = 50
 
     def require_for_chain(self) -> None:
-        """上链前的最低配置检查。缺一项就直接拒绝 —— 链上操作要花钱，不能带着错配跑。"""
+        """Minimum config check before going on chain.
+
+        One missing item and it refuses outright — on-chain operations cost money,
+        so they must not run with a broken config.
+        """
         missing: list[str] = []
         if self.netuid <= 0:
             missing.append("subnet.netuid（主网是 80，测试网当年是 313）")
@@ -112,7 +151,7 @@ class Settings:
 
     @classmethod
     def from_yaml(cls, path: str) -> Settings:
-        """读一份 YAML。键名与 `miner.example.yaml` 完全一致。"""
+        """Read one YAML file. The key names match `miner.example.yaml` exactly."""
         try:
             with open(path, encoding="utf-8") as f:
                 raw = yaml.safe_load(f) or {}
@@ -133,7 +172,10 @@ class Settings:
 
     @classmethod
     def from_mapping(cls, data: dict[str, Any]) -> Settings:
-        """从已经解析好的 YAML 映射构造。测试直接走这条，不用落盘。"""
+        """Build from an already-parsed YAML mapping.
+
+        Tests go straight through this one, with nothing written to disk.
+        """
         cfg = cls()
 
         subnet = _section(data, "subnet")
@@ -143,7 +185,8 @@ class Settings:
         )
         cfg.netuid = int(subnet.get("netuid", cfg.netuid) or 0)
         cfg.wallet_path = subnet.get("wallet_path", cfg.wallet_path)
-        # coldkey / hotkey 在 YAML 里可能被解析成数字（钱包名叫 `123`），统一转字符串。
+        # coldkey / hotkey may be parsed as numbers in YAML (a wallet named `123`),
+        # so convert both to strings.
         cfg.coldkey = str(subnet.get("coldkey", cfg.coldkey))
         cfg.hotkey = str(subnet.get("hotkey", cfg.hotkey))
         cfg.hotkey_ss58 = subnet.get("hotkey_ss58", cfg.hotkey_ss58)
@@ -156,7 +199,6 @@ class Settings:
         cfg.dataset_test_url = urls.get("dataset_test", cfg.dataset_test_url)
 
         model = _section(data, "model")
-        cfg.model_cache_dir = model.get("cache_dir", cfg.model_cache_dir)
         cfg.vla_model_id = model.get("vla_model_id", cfg.vla_model_id)
         cfg.vla_checkpoint_path = model.get(
             "vla_checkpoint_path", cfg.vla_checkpoint_path
@@ -180,7 +222,8 @@ class Settings:
         cfg.backend_url = backend.get("url", cfg.backend_url)
         cfg.backend_public_key = backend.get("public_key", cfg.backend_public_key)
 
-        # miner.yaml 里的 payment 段是本地覆盖，正常情况下由 control.json 盖掉。
+        # The payment section in miner.yaml is a local override; normally
+        # control.json overrides it.
         payment = _section(data, "payment")
         if payment.get("burn_rate_tao") is not None:
             cfg.burn_rate_tao = float(payment["burn_rate_tao"])
@@ -191,12 +234,16 @@ class Settings:
 
     @classmethod
     def load(cls, path: str) -> Settings:
-        """`from_yaml` 的别名，命令层统一用这个名字。"""
+        """Alias for `from_yaml`; the command layer uses this name throughout."""
         return cls.from_yaml(path)
 
 
 def _section(data: dict[str, Any], name: str) -> dict[str, Any]:
-    """取一个二级段。段写成空（`subnet:` 后面什么都没有）时给回空字典。"""
+    """Get a second-level section.
+
+    Returns an empty dict when the section is written empty (`subnet:` with nothing
+    after it).
+    """
     value = data.get(name)
     if value is None:
         return {}

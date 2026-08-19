@@ -25,7 +25,7 @@ openroboto init my-miner    # miner.yaml + train_strategy.py + README.md + .giti
 | `subnet` | `wallet_password` | Optional local unlock value; never commit it |
 | `urls` | `control_json` | Public miner-readable control document |
 | `urls` | `dataset_train`, `dataset_val` | Public training and validation resources |
-| `model` | `vla_model_id`, `vla_checkpoint_path`, `cache_dir` | Base model selection and local cache |
+| `model` | `vla_model_id`, `vla_checkpoint_path` | Base model selection. Leave the path empty and the container downloads the base checkpoint into `./cache/pi05_base` |
 | `huggingface` | `token`, `username` | Local Hugging Face upload credentials |
 | root | `custom_train_script` | Optional miner-owned training strategy path |
 | root | `log_level`, `log_dir` | Local logging |
