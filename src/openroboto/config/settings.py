@@ -85,11 +85,16 @@ class Settings:
 
     #: burn 到 announce 之间允许隔多少个区块。超了后端判 `rejected`，TAO 不退。
     #:
-    #: ⚠️ 按红线 #1「burn 金额与区块窗口一律从 `openroboto-protocol` 装」，
-    #: 这个常量**应该在协议包里**。暂时留在这里，因为它的值现在有歧义：
-    #: 部署文档写 10 个区块、`backend.example.yaml` 写 50。
-    #: **生产 `backend.yaml` 实测是 50**，所以先用 50。
-    #: 歧义定案后连同 `burn_rate` 一起挪进协议包。
+    #: 值的依据：生产 `backend.yaml` 的 `scanner.burn_block_window`，
+    #: 经 `backend/config.py:77` 读取、`scanner/burn_verify.py:71` 执行 —— **50**。
+    #: （本仓文档一度写 10 个区块，2026-08-19 已按「生产行为优先」统一成 50。）
+    #:
+    #: 🔴 **这里违反红线 #1**：「burn 金额与区块窗口一律从 `openroboto-protocol`
+    #: 装，不许在本仓复制一份」。它现在就是本仓的一份副本。
+    #: 之所以先这样：协议包眼下没有这个常量，加过去是跨仓改动 + 一次发版，
+    #: 而窗口检查不能继续缺着（缺它 = 矿工白烧）。
+    #: **待办**：挪进 `openroboto_protocol`，本字段改成从协议包读默认值。
+    #: 在那之前，改这个数字必须同时对齐生产 `backend.yaml`。
     burn_block_window: int = 50
 
     def require_for_chain(self) -> None:

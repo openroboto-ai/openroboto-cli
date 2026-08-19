@@ -20,7 +20,11 @@ from openroboto.commands import init as init_command
 from openroboto.commands import status as status_command
 from openroboto.config import ConfigError, Settings
 from openroboto.huggingface import build_repo_id, commit_sha_from_url
-from openroboto.preflight import check_announce_ready, payload_size
+from openroboto.preflight import (
+    check_announce_ready,
+    check_burn_window,
+    payload_size,
+)
 from openroboto.round_state import (
     StateError,
     is_step_done,
@@ -219,6 +223,42 @@ def test_preflight_rejects_a_short_commit_sha() -> None:
     state = _ready_state()
     state["hf_commit"] = "abc"
     assert any("hf_commit" in reason for reason in check_announce_ready(state, 1))
+
+
+# ─── burn 窗口（纯判定，边界照抄后端）─────────────────────────
+
+
+def test_burn_window_boundary_matches_the_backend_exactly() -> None:
+    """后端是 `abs(diff) > window` 才拒。这三条把边界钉死。
+
+    严一格就会拦掉后端本来会接受的提交；松一格矿工白烧。
+    """
+    # 正好等于窗口 → 放行（后端用 `>`，不是 `>=`）。
+    # 这里只断言"不阻塞"；贴边界的提醒会同时响，那是另一条用例的事。
+    assert check_burn_window(1_000, 1_050, 50)[0] == ""
+
+    # 超一个 → 阻塞
+    blocked, _ = check_burn_window(1_000, 1_051, 50)
+    assert "51" in blocked and "不退" in blocked
+
+    # 对称：burn 在 commit 之后同样算距离
+    blocked_reverse, _ = check_burn_window(1_051, 1_000, 50)
+    assert blocked_reverse == blocked.replace(
+        "burn 在区块 1000，当前区块 1051", "burn 在区块 1051，当前区块 1000"
+    )
+
+
+def test_burn_window_skips_when_either_block_is_unknown() -> None:
+    """区块为 0 时后端整段跳过，我们也跳过 —— 不能比后端更严。"""
+    assert check_burn_window(0, 1_000, 50) == ("", "")
+    assert check_burn_window(1_000, 0, 50) == ("", "")
+
+
+def test_burn_window_warns_before_the_edge_without_blocking() -> None:
+    """贴边界要提醒（commitment 进块还要几个块），但**不能**算进阻塞判定。"""
+    blocked, warning = check_burn_window(1_000, 1_048, 50)
+    assert blocked == ""  # 48 < 50，后端会接受
+    assert "贴着边界" in warning
 
 
 def test_preflight_size_estimate_includes_the_block_hash() -> None:

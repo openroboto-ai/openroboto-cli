@@ -52,13 +52,16 @@ def perform_burn(settings: Settings, round_num: int, state: dict[str, Any]) -> b
     # control.json 抓失败时矿工少烧十倍，后端按金额核对直接拒，TAO 不退。
     # 这是烧钱前的最后一道 fail-closed 闸，别给它加兜底值。
     if settings.burn_rate_tao is None:
+        # 这段提示里**不写具体金额**。费率是子网公布的、会变的，写死一个数字
+        # 就是把刚删掉的 0.01 换个地方重新长出来。
         fail(
             f"拿不到 round {round_num} 的评测费率，**不会** burn。\n"
-            f"   费率的正常来源是子网公布的 control.json；金额烧错后端会拒，"
-            f"且 TAO 不退，所以这里不替你猜一个值。\n"
-            f"   → 检查 miner.yaml 的 `urls.control_json` 能不能访问"
-            f"（`openroboto doctor` 会顺带查），或临时在 miner.yaml 里写死："
-            f"\n     payment:\n       burn_rate_tao: 0.1"
+            f"   费率的唯一权威来源是子网公布的 control.json 里的"
+            f" `payment.burn_rate_tao`；金额烧错后端会拒，且 TAO 不退，"
+            f"所以这里不替你猜一个值。\n"
+            f"   → 先跑 `openroboto doctor` 看 control.json 能不能访问。\n"
+            f"   → 真要手动指定，去 control.json 抄当前值填进 miner.yaml 的"
+            f" `payment.burn_rate_tao`（抄错等于白烧，务必核对）"
         )
         return False
 

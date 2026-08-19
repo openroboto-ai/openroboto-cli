@@ -350,6 +350,27 @@ def test_parse_extrinsic_result_confirms_only_with_a_real_block() -> None:
     assert no_receipt.block_height == 0  # 不编一个区块号出来
 
 
+def _payload() -> CommitmentPayload:
+    return CommitmentPayload(
+        hotkey_ss58=HOTKEY,
+        block_hash="c" * 64,
+        hf_commit=COMMIT,
+        round_num=1,
+        hf_repo_id="kyleab/pi05-abcdefghijkl",
+        burn_tx_hash="0x" + "d" * 64,
+        burn_block=8_888_880,
+    )
+
+
+def _patch_publish(monkeypatch: pytest.MonkeyPatch, fn: Any) -> None:
+    import sys
+    import types
+
+    fake = types.ModuleType("bittensor.core.extrinsics.serving")
+    fake.publish_metadata_extrinsic = fn  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "bittensor.core.extrinsics.serving", fake)
+
+
 def test_submit_announcement_reports_unknown_on_rpc_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -362,29 +383,30 @@ def test_submit_announcement_reports_unknown_on_rpc_failure(
     def _boom(**kwargs: Any) -> None:
         raise TimeoutError("rpc gone")
 
-    import sys
-    import types
+    _patch_publish(monkeypatch, _boom)
 
-    fake = types.ModuleType("bittensor.core.extrinsics.serving")
-    fake.publish_metadata_extrinsic = _boom  # type: ignore[attr-defined]
-    monkeypatch.setitem(sys.modules, "bittensor.core.extrinsics.serving", fake)
-
-    result = commitment_module.submit_announcement(
-        object(),
-        object(),
-        80,
-        CommitmentPayload(
-            hotkey_ss58=HOTKEY,
-            block_hash="c" * 64,
-            hf_commit=COMMIT,
-            round_num=1,
-            hf_repo_id="kyleab/pi05-abcdefghijkl",
-            burn_tx_hash="0x" + "d" * 64,
-            burn_block=8_888_880,
-        ),
-    )
+    result = commitment_module.submit_announcement(object(), object(), 80, _payload())
     assert result.ok is False
     assert result.confirmed is False
+
+
+def test_submit_announcement_does_not_swallow_our_own_bugs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """调用签名写错时必须炸出来，不能报成"结论未知"。
+
+    这时**什么都没发出去**。报"未知"会让矿工去查 status、等着，而 burn 的
+    50 个区块窗口同时在流走 —— 我们的一个 bug 变成矿工的一笔 TAO。
+    """
+    from openroboto.chain import commitment as commitment_module
+
+    def _wrong_signature(**kwargs: Any) -> None:
+        raise TypeError("unexpected keyword argument 'data_type'")
+
+    _patch_publish(monkeypatch, _wrong_signature)
+
+    with pytest.raises(TypeError):
+        commitment_module.submit_announcement(object(), object(), 80, _payload())
 
 
 # ─── submit ──────────────────────────────────────────────────

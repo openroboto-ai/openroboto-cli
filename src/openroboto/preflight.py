@@ -23,6 +23,51 @@ HF_COMMIT_LEN = 40
 BLOCK_HASH_PLACEHOLDER = "f" * 64
 """估算用的占位区块哈希，长度与真实值一致。"""
 
+COMMIT_LAG_BLOCKS = 5
+"""commitment 从发出到进块的余量估计（区块）。
+
+窗口只剩这么点时先提醒一句：检查是在**当前**区块做的，而 commitment 真正进块
+还要再晚几个块，正好卡边界的提交会在后端那边超窗。**不能把它算进阻塞判定** ——
+那样就比后端严，会拦掉后端本来会接受的提交。
+"""
+
+
+def check_burn_window(
+    burn_block: int, commit_block: int, window: int
+) -> tuple[str, str]:
+    """burn 与 commitment 的区块距离还在后端窗口内吗？
+
+    返回 `(阻塞原因, 提醒)`，都是空串表示没问题。**纯函数**：不碰链、不打印，
+    判定和呈现分开（呈现在 `commands/announce.py`）。
+
+    判定照抄后端 `scanner/burn_verify.py:68-75`，三处细节必须一致，
+    否则这个检查会拦住本来能过的提交：
+
+    1. `abs(burn_block - commit_block)`：**对称**，burn 在前在后都算距离；
+    2. `> window` 才拒 —— 正好等于窗口是**放行**的；
+    3. 任一区块为 0（未知）时后端**整段跳过**这项检查，这里也跳过。
+    """
+    if burn_block <= 0 or commit_block <= 0:
+        return "", ""  # 后端此时也不查，不要比后端更严
+
+    diff = abs(commit_block - burn_block)
+    if diff > window:
+        return (
+            f"burn 距今已经 {diff} 个区块，超出后端窗口 {window} —— "
+            f"现在公告上去会被判 `rejected`，而且**已经烧掉的 TAO 不退**。\n"
+            f"   burn 在区块 {burn_block}，当前区块 {commit_block}。\n"
+            f"   → 这一轮的这笔 burn 作废了。下次 `openroboto submit` 一次跑完，"
+            f"或者 burn 完立刻 announce，别隔太久",
+            "",
+        )
+
+    if diff > window - COMMIT_LAG_BLOCKS:
+        return "", (
+            f"burn 距今 {diff} 个区块，窗口是 {window} —— 贴着边界了，"
+            f"commitment 进块时可能刚好超出。别再等了"
+        )
+    return "", ""
+
 
 def check_announce_ready(state: dict[str, Any], round_num: int) -> list[str]:
     """返回阻止提交的原因列表；空列表表示可以往下走。"""

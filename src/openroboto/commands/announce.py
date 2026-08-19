@@ -18,6 +18,7 @@ from openroboto.chain import (
 from openroboto.config import ConfigError, Settings
 from openroboto.console import fail, say
 from openroboto.huggingface import commit_sha_from_url
+from openroboto.preflight import check_burn_window
 from openroboto.round_state import load_state, resolve_round, save_state
 
 
@@ -106,37 +107,13 @@ def perform_announce(settings: Settings, round_num: int, state: dict[str, Any]) 
 
 
 def _burn_window_ok(settings: Settings, burn_block: int, current_block: int) -> bool:
-    """burn 与 commit 的区块距离还在后端窗口内吗？
-
-    照抄后端的判定（`prototype/backend/scanner/burn_verify.py:68-75`），三处细节
-    必须一致，否则这个检查会拦住本来能过的提交：
-
-    1. `abs(burn_block - commit_block)`：**对称**，burn 在前在后都算距离；
-    2. `> window` 才拒 —— 正好等于窗口是**放行**的；
-    3. 任一区块为 0（未知）时后端**整个跳过**这项检查，这里也跳过。
-
-    为什么放在 announce 而不是 `preflight.check_announce_ready()`：那个函数是纯的、
-    拿不到链，而这项检查必须知道当前区块。
-    """
-    if burn_block <= 0 or current_block <= 0:
-        return True  # 后端此时也不查，不要比后端更严
-
-    window = settings.burn_block_window
-    diff = abs(current_block - burn_block)
-    if diff > window:
-        fail(
-            f"burn 距今已经 {diff} 个区块，超出后端窗口 {window} —— "
-            f"现在公告上去会被判 `rejected`，而且**已经烧掉的 TAO 不退**。\n"
-            f"   burn 在区块 {burn_block}，当前区块 {current_block}。\n"
-            f"   → 这一轮的这笔 burn 作废了。下次 `openroboto submit` 一次跑完，"
-            f"或者 burn 完立刻 announce，别隔太久"
-        )
+    """跑一遍窗口检查并把结论说给矿工听。判定本身在 `preflight` 里（纯函数）。"""
+    blocked, warning = check_burn_window(
+        burn_block, current_block, settings.burn_block_window
+    )
+    if blocked:
+        fail(blocked)
         return False
-
-    # commitment 真正进块会比现在再晚几个区块，贴着边界时先提醒一句。
-    if diff > window - 5:
-        say(
-            f"⚠️  burn 距今 {diff} 个区块，窗口是 {window} —— 贴着边界了，"
-            f"commitment 进块时可能刚好超出。别再等了"
-        )
+    if warning:
+        say(f"⚠️  {warning}")
     return True

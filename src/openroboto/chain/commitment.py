@@ -110,6 +110,11 @@ def submit_announcement(
             wait_for_inclusion=True,
             wait_for_finalization=False,
         )
+    except (TypeError, AttributeError, NameError):
+        # 我们自己写错了（调用签名不对、SDK 改了接口）—— 这时**什么都没发出去**。
+        # 报成"结论未知"会让矿工去查 status、等着，而 burn 的 50 个区块窗口
+        # 同时在流走：一个我们的 bug 就变成了矿工的一笔 TAO。让它炸出来。
+        raise
     except Exception as exc:
         # 基建故障（RPC 断、等待超时），不是矿工的错，也不代表没上链。
         logger.warning("等待 commitment 进块时出错，结论未知：%s", exc)
