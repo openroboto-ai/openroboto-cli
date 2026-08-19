@@ -35,7 +35,7 @@ openroboto --version          # CLI version + protocol package version
 | Before | Now |
 |---|---|
 | `bash download_checkpoint.sh` | *(gone)* — the training container fetches the base checkpoint into `cache/pi05_base` itself |
-| `cp miner.example.yaml miner.yaml` | `openroboto init my-miner` — writes `miner.yaml` **and** `train_strategy.py` |
+| `cp miner.example.yaml miner.yaml` | `openroboto init my-miner` — a whole workspace: `miner.yaml` (subnet constants pre-filled), `train_strategy.py`, a `README.md`, and a `.gitignore` that keeps your wallet password out of git |
 | `cp validator.example.yaml validator.yaml` | `openroboto init --validator` |
 | `docker build -t robot-train-openpi:latest openpi-runner/` | `openroboto build` |
 | `python miner.py --config miner.yaml` | `openroboto train` |
@@ -46,9 +46,33 @@ openroboto --version          # CLI version + protocol package version
 | `python rt.py announce --config miner.yaml --round 1` | `openroboto announce --round 1` |
 | *(nothing — you read the website)* | `openroboto status` — your submissions and the exact rejection reason |
 | `python validator.py --config validator.yaml` | `openroboto validator run` |
-| `docker compose up --build miner` | `docker compose up train` — the compose file now runs the CLI, not `miner.py` |
+| `docker compose up --build miner` | `openroboto train` — see below |
 
 `--config miner.yaml` is the default everywhere, so you can drop it.
+
+### About `docker compose up --build miner`
+
+That command did two things at once, and only one of them was ever about you.
+
+It built an image containing the **miner code**, and that code then started a
+**second** container to do the actual training — openpi needs `numpy<2.0` while
+bittensor needs `numpy>=2.0`, so training has always run in its own container.
+
+Now the CLI runs on the host (`pip install openroboto`) and starts the training
+container for you. `openroboto train` is the whole replacement:
+
+```bash
+openroboto build     # build the training image, once
+openroboto train     # runs it, with your data and strategy mounted in
+```
+
+The training image definition ships inside the package, so there is nothing to
+clone and nothing to keep in sync. You still need Docker on the host — that has
+not changed and cannot.
+
+If what you actually wanted was to keep the CLI itself off your host Python,
+that is still possible but it is a repository-level thing, not a miner
+workflow — see "Running the CLI in a container" in the repository README.
 
 ## `miner.yaml` changes
 

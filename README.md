@@ -134,20 +134,43 @@ The backend and this CLI import that exact function — not a copy of it.
 Formula, drand chain identifier and security assumptions:
 [docs/SEED_GENERATION.md](docs/SEED_GENERATION.md).
 
-## Running in Docker (optional)
+## Docker: what runs where
 
-If you would rather not install into the host Python:
+Training **always** runs in a container — openpi needs `numpy<2.0` and bittensor
+needs `numpy>=2.0`, so one interpreter cannot hold both. You do not have to
+arrange that:
 
 ```bash
-docker compose up train          # trains one round
+openroboto build     # builds the training image, once
+openroboto train     # starts it for you, data and strategy mounted in
+```
+
+The training image definition ships **inside the package**. There is nothing to
+clone, nothing to keep in sync, and no network needed to build it. You do need
+Docker on the host.
+
+### Running the CLI in a container too (optional, needs a clone)
+
+Separately, the `Dockerfile` and `docker-compose.yml` **in this repository** put
+the CLI itself in a container, for people who would rather not install it into
+their host Python. That is a repository-level convenience: `openroboto init` does
+**not** write these files into your workspace, because a compose file that builds
+the CLI image would need this repository's build context anyway.
+
+```bash
+git clone https://github.com/openroboto-ai/openroboto-cli && cd openroboto-cli
+docker compose up train
 docker compose run --rm train submit --config miner.yaml
 ```
 
 There is deliberately no `submit` service — a compose service can be restarted, and
-restarting a command that burns TAO is not something to leave to a restart policy.
+restarting a command that burns non-refundable TAO is not something to leave to a
+restart policy.
 
-⚠️ The compose file mounts the Docker socket so the CLI can start the training
-container. That grants host root to the container; run it only on your own machine.
+⚠️ This compose file mounts the Docker socket so the containerised CLI can start
+the training container. That grants host root to the container; run it only on
+your own machine. Installing with `pip` avoids that entirely, which is why it is
+the documented path.
 
 ## Public trust boundary
 
