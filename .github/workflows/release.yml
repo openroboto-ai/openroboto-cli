@@ -7,10 +7,14 @@ name: Release
 # 不认识的人在自己的机器上烧掉了不退的 TAO —— 而我们只会看到提交量下降。
 #
 # 所以这里的每一道闸都不是流程洁癖：
-#   · 正式发布只认 v* tag（不可变的 git 引用，且就是版本号本身）
-#   · 手动触发**永远**只到 TestPyPI，`publish` job 的 `if` 钉死了这一点
+#   · 往索引上传只认 v* tag（不可变的 git 引用，且它就是版本号本身）
+#   · 手动触发**永远**到不了正式 PyPI，`publish` job 的 `if` 钉死了这一点
 #   · 两条路跑的是同一份 gates、上传的是同一份产物，只换上传目标
 #   · 上传前有 environment 人工审批 —— 版本号不可重用，按下去就撤不回来
+#
+# 内测版和正式版都发**正式 PyPI**，靠版本号区分（`v0.1.0a1` vs `v0.1.0`）：
+# pip 有正式版时不会选预发布版，所以内测者 `pip install openroboto==0.1.0a1`
+# 就够了，而矿工裸装拿不到它。TestPyPI 只留作发布链路本身的排练场。
 # ═══════════════════════════════════════════════════════════════════════════════
 
 on:
@@ -46,21 +50,19 @@ jobs:
     uses: ./.github/workflows/ci.yml
 
   # ───────────────────────────────────────────────────────────────────────────
-  # TestPyPI —— 预发布版（0.1.0a1 之类）和排练都走这里。
+  # TestPyPI —— **只用来排练发布链路本身**，不是内测版的分发渠道。
   #
-  # 为什么内测不直接发正式 PyPI：`openroboto` **一次都没发过正式版**，而 pip 的
-  # 规则是"只有预发布版可选时就装预发布版"。也就是说第一个 alpha 传上正式
-  # PyPI 之后，任何人裸 `pip install openroboto` 装到的就是它。TestPyPI 是独立
-  # 索引，矿工不会误装。
+  # 内测版走正式 PyPI（见下面 `publish`）：预发布版号 + 精确钉住就够了，
+  #   pip install openroboto==0.1.0a1
+  # 而 TestPyPI 要求内测者额外记住两个 index 参数
+  #   （`--extra-index-url` 还是必需的，因为 bittensor 这些真依赖只在正式 PyPI 上）
+  # —— 为了一个本来就不会被误装的版本，让每个内测者多敲两行，不值得。
   #
-  # 内测者这样装：
-  #   pip install --index-url https://test.pypi.org/simple/ \
-  #               --extra-index-url https://pypi.org/simple/ \
-  #               "openroboto==0.1.0a1"
-  # （`--extra-index-url` 是必需的：bittensor 这些真依赖只在正式 PyPI 上。）
+  # 留着它的理由只有一个：`uv publish`、OIDC 交换、environment 审批这几步，
+  # 在真正往正式 PyPI 传之前，需要有地方能整条跑一遍。跑的是**同一份 gates、
+  # 同一份产物**，只换上传目标 —— 不存在"两套流程漂移"的空间。
   #
-  # ⚠️ TestPyPI 的版本号**同样不可重用**。它不是可以随便乱发的沙盒，
-  # 只是发错了不影响真实消费方。
+  # ⚠️ TestPyPI 的版本号**同样不可重用**，排练也会烧号。
   # ───────────────────────────────────────────────────────────────────────────
   publish-testpypi:
     name: publish to TestPyPI
@@ -96,7 +98,20 @@ jobs:
         run: uv publish --publish-url https://test.pypi.org/legacy/ dist/*
 
   # ───────────────────────────────────────────────────────────────────────────
-  # 正式 PyPI。Trusted Publishing（OIDC），不放长期 token。
+  # 正式 PyPI。**正式版和预发布版都走这里**，靠版本号区分：
+  #   v0.1.0a1 / v0.1.0rc1  → 内测版，`pip install openroboto` 不会选中它
+  #   v0.1.0                → 正式版
+  #
+  # pip 的规则（实测）：有正式版时只选正式版，预发布版要 `--pre` 或精确钉住。
+  # PyPI 没有 npm 那种 dist-tag，版本号本身就是那个开关。
+  #
+  # 🔴 **有一个窗口期例外，别踩**：`openroboto` 至今没发过正式版，而"没有正式版
+  # 可选时 pip 会选预发布版"。也就是说在 0.1.0 发出去之前，第一个 alpha 就是
+  # 裸 `pip install openroboto` 装到的东西。两个办法：早点发一个正式 0.1.0，
+  # 或者内测结束后把 alpha 在 PyPI 上 yank 掉（PEP 592：yank 掉的版本除非被
+  # 精确钉住，否则解析器不会选它 —— 已经装了的人不受影响）。
+  #
+  # Trusted Publishing（OIDC），不放长期 token。
   #
   # 理由：长期 token 放在 repo secrets 里，谁看过、什么时候泄的、泄了之后被用来
   # 发过什么，事后都查不出来 —— 而这个 token 的权限是"以 OpenRoboto 的名义往
