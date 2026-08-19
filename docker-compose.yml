@@ -1,12 +1,15 @@
-# 容器化跑 CLI。**可选** —— 直接 `pip install openroboto` 是主路径，
-# 这个文件是给"不想污染宿主 Python 环境"的人的。
+# Running the CLI in a container. **Optional** -- `pip install openroboto` is the
+# main path; this file is for people who would rather not touch the host's Python
+# environment.
 #
 #
-# 训练容器由这个容器**调宿主 Docker** 起（红线 #2：openpi 要 numpy<2.0、
-# bittensor 要 numpy>=2.0，一个解释器装不下），所以挂了 docker.sock。
-# ⚠️ 挂 docker.sock 等于把宿主 root 权限给这个容器。只在自己的矿机上这么跑。
+# The training container is started by this container **through the host's
+# Docker** (red line #2: openpi needs numpy<2.0 and bittensor needs numpy>=2.0,
+# and one interpreter cannot hold both), which is why docker.sock is mounted.
+# ⚠️ Mounting docker.sock hands this container root on the host. Only do this on
+# a machine you own.
 services:
-  # 默认服务：训练。**不烧钱**，可以放心重跑。
+  # Default service: training. **Spends nothing**, safe to re-run.
   train:
     build:
       context: .
@@ -16,8 +19,8 @@ services:
       NVIDIA_VISIBLE_DEVICES: all
     volumes:
       - ./miner.yaml:/app/miner.yaml:ro
-      - ./state:/app/state            # 断点：submit 靠它续跑、复用已有的 burn
-      - ./cache:/app/cache            # π0.5 基座缓存，避免每轮重下几个 GB
+      - ./state:/app/state            # checkpoint: submit resumes from it and reuses an existing burn
+      - ./cache:/app/cache            # π0.5 base cache, avoids re-downloading several GB each round
       - openroboto-logs:/logs
       - /var/run/docker.sock:/var/run/docker.sock
     command: ["train", "--config", "miner.yaml"]
@@ -29,7 +32,7 @@ services:
               count: all
               capabilities: [gpu]
 
-  # 花钱之前的自检。没有 GPU 需求，随便跑。
+  # The pre-spend self-check. Needs no GPU, run it as often as you like.
   doctor:
     image: openroboto-cli:latest
     volumes:
@@ -38,7 +41,8 @@ services:
     command: ["doctor", "--config", "miner.yaml"]
     profiles: ["tools"]
 
-  # 本地校验 checkpoint 格式 —— 还是免费的，烧钱前最后一道。
+  # Validate the checkpoint format locally -- still free, the last gate before
+  # anything is burned.
   check:
     image: openroboto-cli:latest
     volumes:
@@ -47,9 +51,10 @@ services:
     command: ["check"]
     profiles: ["tools"]
 
-# ⚠️ 故意**没有** submit / burn / announce 服务。
-# 那三个会烧不可退的 TAO，而 compose 服务很容易被 `up` 连带拉起、或被
-# restart 策略重跑一次。要提交就显式敲一次性命令，自己看着它跑完：
+# ⚠️ There are deliberately **no** submit / burn / announce services.
+# Those three burn TAO that is not refundable, and a compose service is easily
+# pulled in by a stray `up` or re-run by a restart policy. To submit, type the
+# one-off command explicitly and watch it finish:
 #
 #   docker compose run --rm train submit --config miner.yaml
 #

@@ -1,11 +1,13 @@
-> # ⚠️ 已归档 —— 内容已并入 `../SUBNET_OVERVIEW.md`
+> # ⚠️ Archived — merged into `../SUBNET_OVERVIEW.md`
 >
-> **状态**：superseded · **归档日期**：2026-08-19
-> **替代者**：`docs/SUBNET_OVERVIEW.md` §2 Roles
+> **Status**: superseded · **Archived on**: 2026-08-19
+> **Superseded by**: `docs/SUBNET_OVERVIEW.md` §2 Roles
 >
-> **为什么**：这 35 行是 `SUBNET_OVERVIEW.md` §2 的子集，两处各写一遍角色分工，
-> 改一处忘一处就会互相矛盾。归档时它仍写着「Public implementation: `validator.py`
-> 和 `utils/`」—— 那已经是 `openroboto validator run` 了，正是漂移的实例。
+> **Why**: these 35 lines are a subset of `SUBNET_OVERVIEW.md` §2. Describing the
+> role split in two places means the two contradict each other as soon as someone
+> updates one and forgets the other. At the time of archiving this file still
+> said "Public implementation: `validator.py` and `utils/`" — that is
+> `openroboto validator run` now, which is exactly the drift it caused.
 
 ---
 

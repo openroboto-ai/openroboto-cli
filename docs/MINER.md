@@ -130,19 +130,19 @@ outcome of each step:
 
 1. `announce` builds the payload (including `block_hash` for the seed reveal) and
    publishes it as a chain commitment, **waiting for inclusion in a block**
-2. Confirmed → `✅ commitment 已上链 | ref=<block>-<index> fee=… TAO`
+2. Confirmed → `✅ commitment on chain | ref=<block>-<index> fee=… TAO`
 3. State is saved to `state/round_N.json` — re-running skips completed steps
 
 **The CLI distinguishes three outcomes, and they are not the same thing:**
 
 | What you see | What it means | What to do |
 |---|---|---|
-| `✅ commitment 已上链 \| ref=<block>-<index>` | In a block. The block reference is real. | Nothing. Check `openroboto status`. |
-| `✅ commitment 已提交` + `⚠️ SDK 没给回区块号` | Submitted, but the SDK returned no block number. Probably fine. | Confirm with `openroboto status`. |
-| `❌ commitment 没有确认上链` | We do not know. It may still land. | **Do not burn again.** Run `openroboto status` first; only re-run `announce` if the backend never received it. |
+| `✅ commitment on chain \| ref=<block>-<index>` | In a block. The block reference is real. | Nothing. Check `openroboto status`. |
+| `✅ commitment submitted` + `⚠️ The SDK returned no block number` | Submitted, but the SDK returned no block number. Probably fine. | Confirm with `openroboto status`. |
+| `❌ The commitment was not confirmed on chain` | We do not know. It may still land. | **Do not burn again.** Run `openroboto status` first; only re-run `announce` if the backend never received it. |
 
 A block reference is only ever printed when the chain actually returned one. If
-you see `未确认`, no block number is being invented to reassure you.
+you see `not confirmed`, no block number is being invented to reassure you.
 
 **Resume support**: if a step fails, re-run `openroboto submit` — it resumes from
 the last completed step and **reuses the existing burn rather than paying twice**.
