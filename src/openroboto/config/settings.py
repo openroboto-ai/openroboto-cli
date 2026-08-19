@@ -214,9 +214,18 @@ class Settings:
         cfg.environment = str(data.get("environment", cfg.environment))
         preset = environments.ENVIRONMENTS.get(cfg.environment)
         if preset is not None:
-            cfg.network = preset.network
-            cfg.control_json_url = preset.control_json_url
-            cfg.backend_url = preset.backend_url
+            # `None` = 这个环境不决定该项（`local` 三项都不决定）。
+            # 只在预设真的给了值时才覆盖，否则保留字段自己的默认。
+            if preset.network is not None:
+                cfg.network = preset.network
+            if preset.host is not None:
+                cfg.control_json_url = preset.control_json_url
+                cfg.backend_url = preset.backend_url
+            else:
+                # local：清掉内置的生产默认值。留着它们才是危险的 ——
+                # 忘了配 URL 会静默连上主网后端，而你以为在本地测。
+                cfg.control_json_url = ""
+                cfg.backend_url = ""
             # netuid is deliberately not set; see the comment on that field above.
 
         subnet = _section(data, "subnet")

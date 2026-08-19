@@ -30,21 +30,26 @@ from urllib.parse import urlparse
 
 @dataclass(frozen=True)
 class Environment:
-    """One coherent set: a chain, a subnet, and the backend that watches them."""
+    """One coherent set: a chain, a subnet, and the backend that watches them.
+
+    `None` means "this environment does not decide that; your config does". It is
+    spelled `None` rather than `0` or `""` on purpose -- a zero that secretly means
+    "absent" is the shape of a bug this project has already paid for.
+    """
 
     name: str
-    network: str
-    netuid: int
-    host: str
-    """Backend host. Both `backend.url` and `urls.control_json` live here."""
+    network: str | None
+    netuid: int | None
+    host: str | None
+    """Hosted backend. `None` = there is no hosted address; you supply the URLs."""
 
     @property
     def backend_url(self) -> str:
-        return f"https://{self.host}"
+        return f"https://{self.host}" if self.host else ""
 
     @property
     def control_json_url(self) -> str:
-        return f"https://{self.host}/control.json"
+        return f"https://{self.host}/control.json" if self.host else ""
 
 
 MAINNET = Environment(
@@ -73,7 +78,24 @@ is the correct outcome -- it is exactly the combination that burns mainnet TAO a
 the dev fee.
 """
 
-ENVIRONMENTS: dict[str, Environment] = {env.name: env for env in (MAINNET, DEV)}
+LOCAL = Environment(
+    name="local",
+    network=None,
+    netuid=None,
+    host=None,
+)
+"""Your own backend, wherever it is running -- `http://localhost:8001` while
+developing, a staging box, a colleague's machine.
+
+It pins nothing, because it cannot know what your backend watches. What it does
+enforce is that you **said** where it is: with no URLs configured, the fields would
+keep their built-in defaults, which are the *production* ones -- you would believe
+you were testing locally while talking to mainnet's backend. So `local` with unset
+URLs is refused, and `local` pointing at a hosted environment is refused too, since
+that is a contradiction rather than a setup.
+"""
+
+ENVIRONMENTS: dict[str, Environment] = {env.name: env for env in (MAINNET, DEV, LOCAL)}
 
 DEFAULT_ENVIRONMENT = MAINNET.name
 """Unset means mainnet, so an existing miner.yaml keeps behaving exactly as it
@@ -117,14 +139,33 @@ def check_coherent(
         return [f"environment: unknown value {environment!r}, valid options: {known}"]
 
     problems: list[str] = []
-    if netuid and netuid != env.netuid:
+    if env.host is None:
+        # 自建后端：不约束链，但**必须**说清后端在哪。
+        for label, url in (
+            ("urls.control_json", control_json_url),
+            ("backend.url", backend_url),
+        ):
+            if not url:
+                problems.append(
+                    f"environment=local 必须显式配置 {label} —— "
+                    f"不配的话它会保持内置默认值，也就是**生产**地址，"
+                    f"你会以为在本地测，实际在跟主网后端说话。"
+                )
+            elif host_of(url) in {e.host for e in ENVIRONMENTS.values() if e.host}:
+                problems.append(
+                    f"environment=local 但 {label} 指向托管环境"
+                    f"（{host_of(url)}）—— 这不是一套配置，是自相矛盾。"
+                )
+        return problems
+
+    if env.netuid is not None and netuid and netuid != env.netuid:
         problems.append(
             f"environment={env.name} means netuid {env.netuid}, but the config "
             f"says {netuid}."
             f"\n     The two have to be changed together -- TAO burned on the "
             f"wrong subnet is not refunded."
         )
-    if network and network != env.network:
+    if env.network is not None and network and network != env.network:
         problems.append(
             f"environment={env.name} means network {env.network!r}, "
             f"but the config says {network!r}"

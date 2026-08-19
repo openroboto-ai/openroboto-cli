@@ -7,6 +7,15 @@
 # ─── Which subnet and backend ───────────────────────────────
 # `mainnet` = netuid 80 on finney, real TAO, non-refundable fees.
 # `dev`     = netuid 313 on testnet, faucet TAO, nothing to lose.
+# `local`   = your own backend. Pins nothing, but you must fill in backend.url
+#             and urls.control_json below — otherwise they would keep their
+#             built-in defaults, which are the production ones, and you would be
+#             talking to mainnet while believing you were testing locally:
+#
+#               environment: local
+#               subnet:   { netuid: 313, network: test }
+#               backend:  { url: http://localhost:8001 }
+#               urls:     { control_json: http://localhost:8001/control.json }
 #
 # This one name covers four settings that must agree: subnet.network,
 # subnet.netuid, urls.control_json and backend.url. Changing only some of them

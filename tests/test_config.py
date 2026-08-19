@@ -253,3 +253,48 @@ def test_an_unknown_environment_name_fails_instead_of_falling_back() -> None:
     with pytest.raises(ConfigError) as excinfo:
         cfg.require_for_chain()
     assert "staging" in str(excinfo.value)
+
+
+def test_local_environment_accepts_any_backend_url() -> None:
+    """自建后端（本地开发、staging、同事的机器）必须能配 —— 否则没法测。"""
+    cfg = Settings.from_mapping(
+        {
+            "environment": "local",
+            "subnet": {"netuid": 313, "network": "test"},
+            "backend": {"url": "http://localhost:8001"},
+            "urls": {"control_json": "http://localhost:8001/control.json"},
+        }
+    )
+    cfg.require_for_chain()
+    assert cfg.backend_url == "http://localhost:8001"
+    assert cfg.netuid == 313  # local 不约束链，你说了算
+
+
+def test_local_without_urls_is_refused_rather_than_silently_using_production() -> None:
+    """这条是 local 的**要害**。
+
+    不清掉内置默认值的话，`environment: local` 却忘了配 URL 的人会静默连上
+    **生产**后端 —— 而他以为自己在本地测。宁可拒绝启动。
+    """
+    cfg = Settings.from_mapping(
+        {"environment": "local", "subnet": {"netuid": 313, "network": "test"}}
+    )
+    assert cfg.backend_url == "", "local 必须清掉生产默认值"
+    assert cfg.control_json_url == ""
+    with pytest.raises(ConfigError) as excinfo:
+        cfg.require_for_chain()
+    assert "local" in str(excinfo.value)
+
+
+def test_local_pointing_at_a_hosted_environment_is_a_contradiction() -> None:
+    """说 local 却填生产地址 —— 不是一套配置，是自相矛盾，得说出来。"""
+    cfg = Settings.from_mapping(
+        {
+            "environment": "local",
+            "subnet": {"netuid": 80, "network": "finney"},
+            "backend": {"url": "https://api.openroboto.ai"},
+            "urls": {"control_json": "https://api.openroboto.ai/control.json"},
+        }
+    )
+    with pytest.raises(ConfigError):
+        cfg.require_for_chain()
