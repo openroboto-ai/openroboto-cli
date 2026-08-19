@@ -1,8 +1,11 @@
-"""`openroboto init` —— 释放配置模板与训练策略脚本。
+"""`openroboto init` -- unpack the config template and the training strategy
+script.
 
-目的很具体：**矿工全程零 clone**。以前要 `git clone` 整个子网仓库才能拿到
-`miner.example.yaml` 和一份能改的策略脚本，现在 `pip install openroboto` 之后
-一条命令就有了。模板打在 wheel 里（`openroboto/templates/`）。
+The goal is very concrete: **zero cloning for miners, start to finish**.
+Getting `miner.example.yaml` and an editable strategy script used to require
+`git clone`-ing the whole subnet repository; now one command after
+`pip install openroboto` produces them. The templates are packed into the
+wheel (`openroboto/templates/`).
 """
 
 from __future__ import annotations
@@ -14,15 +17,15 @@ from pathlib import Path
 from openroboto.console import hint, say
 
 STRATEGIES = ("simple", "example")
-"""simple = 能跑通全流程的最小实现；example = 带注释的教学版。"""
+"""simple = the minimal implementation that gets through the whole flow;
+example = the annotated teaching version."""
 
 CONFIG_TEMPLATE = {"miner": "miner.yaml", "validator": "validator.yaml"}
+README_TEMPLATE = {"miner": "README-miner.md", "validator": "README-validator.md"}
 
 
 def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    parser = subparsers.add_parser(
-        "init", help="生成 miner.yaml 与训练策略脚本（零 clone）"
-    )
+    parser = subparsers.add_parser("init", help="生成开箱即用的工作区（零 clone）")
     parser.add_argument(
         "directory", nargs="?", default=".", help="目标目录，默认当前目录"
     )
@@ -65,6 +68,17 @@ def run(args: argparse.Namespace) -> int:
             )
         )
 
+    written.append(
+        _write(target / "README.md", _template(README_TEMPLATE[role]), args.force)
+    )
+    # Inside the package it is called `gitignore` (no leading dot): dotfiles
+    # are easily swallowed by all sorts of default exclusion rules during
+    # packaging and distribution, and when they are swallowed **nothing raises
+    # an error** -- it shows up as the file simply not being in the miner's
+    # workspace, and the next `git add .` commits their wallet password. The
+    # dot is added only when it lands on disk.
+    written.append(_write(target / ".gitignore", _template("gitignore"), args.force))
+
     for path in written:
         say(f"✅ {path}")
 
@@ -75,21 +89,25 @@ def run(args: argparse.Namespace) -> int:
             "然后 `openroboto validator run`"
         )
     else:
-        say("下一步：")
+        say("下一步（工作区的 README.md 里有完整说明）：")
         say("  1. 填 miner.yaml 的 huggingface.token / username 与 subnet.hotkey_ss58")
         say("  2. `openroboto doctor` —— 花钱之前把环境问题查掉")
         say("  3. `openroboto build` → `openroboto train` →")
         say("     `openroboto check` → `openroboto submit`")
+        say("")
+        say("⚠️  miner.yaml 里会有钱包密码和 HF token，已被 .gitignore 挡掉；")
+        say("    别把它移出忽略清单。")
     return 0
 
 
 def _template(relative: str) -> str:
-    """读打进包里的模板。"""
+    """Read a template packed inside the package."""
     return (files("openroboto") / "templates" / relative).read_text(encoding="utf-8")
 
 
 def _write(path: Path, content: str, force: bool) -> Path:
-    """写文件；已存在且没给 --force 就跳过 —— 不能默默盖掉矿工填好的配置。"""
+    """Write the file; skip when it already exists and --force was not given
+    -- we must not silently overwrite a config the miner has filled in."""
     if path.exists() and not force:
         hint(f"⏭️  已存在，跳过：{path}（要覆盖加 --force）")
         return path

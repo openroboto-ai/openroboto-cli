@@ -32,12 +32,10 @@ logger = logging.getLogger(__name__)
 # ─── Config from env ──────────────────────────────────────
 
 def get_config() -> dict:
-    """从环境变量读取训练配置。
-
-    Read training config from environment variables.
+    """Read training config from environment variables.
 
     Returns:
-        配置字典，包含 checkpoint_path、train_data、epochs、batch_size 等。
+        Config dict containing checkpoint_path, train_data, epochs, batch_size, etc.
     """
     return {
         "checkpoint_path": os.getenv("CHECKPOINT_PATH", "/data/cache/pi05_base"),
@@ -57,16 +55,16 @@ def get_config() -> dict:
 # ─── Training ─────────────────────────────────────────────
 
 def run_training(cfg: dict) -> tuple:
-    """执行 π₀.₅ LIBERO 训练，支持自定义脚本或默认流程。
+    """Execute π₀.₅ LIBERO training, returns (metrics, proof).
 
-    Execute π₀.₅ LIBERO training, returns (metrics, proof).
-    Uses custom training script if CUSTOM_TRAIN env var is set, otherwise runs default.
+    Uses a custom training script if the CUSTOM_TRAIN env var is set, otherwise runs
+    the default flow.
 
     Args:
         cfg: configuration dictionary from get_config()
 
     Returns:
-        (metrics, proof) 两个字典
+        (metrics, proof) two dicts
     """
 
     custom_train = os.getenv("CUSTOM_TRAIN", "")
@@ -77,23 +75,21 @@ def run_training(cfg: dict) -> tuple:
 
 
 def _run_custom(cfg: dict, custom_script: str) -> tuple:
-    """加载并执行外部挂载的自定义训练脚本。
-
-    Load and execute externally mounted custom training script.
+    """Load and execute an externally mounted custom training script.
 
     Script interface contract:
         def train(cfg: dict, episodes: list, policy) -> tuple:
-            # cfg: config dict read from env vars / 从环境变量读取的配置字典
-            # episodes: loaded training data list / 已加载的训练数据列表
-            # policy: openpi policy (checkpoint already downloaded) / openpi 策略对象
+            # cfg: config dict read from env vars
+            # episodes: loaded training data list
+            # policy: openpi policy (checkpoint already downloaded)
             # return: (metrics_dict, proof_dict)
 
     Args:
-        cfg: configuration dictionary / 配置字典
-        custom_script: path to custom training script / 自定义训练脚本路径
+        cfg: configuration dictionary
+        custom_script: path to the custom training script
 
     Returns:
-        (metrics, proof) 两个字典
+        (metrics, proof) two dicts
     """
     import importlib.util
 
@@ -135,15 +131,14 @@ def _run_custom(cfg: dict, custom_script: str) -> tuple:
 
 
 def _run_default(cfg: dict) -> tuple:
-    """默认训练流程：使用模拟损失曲线和伪 LoRA 权重进行管道测试。
-
-    Simple training loop with fake LoRA weights for pipeline testing.
+    """Default training flow: a simple training loop with a simulated loss curve and
+    fake LoRA weights, for pipeline testing.
 
     Args:
-        cfg: configuration dictionary / 配置字典
+        cfg: configuration dictionary
 
     Returns:
-        (metrics, proof) 包含训练指标和证明的字典
+        (metrics, proof) dicts holding the training metrics and the proof
     """
 
     # Download checkpoint if needed
@@ -216,17 +211,15 @@ def _run_default(cfg: dict) -> tuple:
 
 
 def _save_lora_adapter(adapter_dir: str, cfg: dict):
-    """生成结构正确但内容为模拟的 LoRA 适配器文件。
-
-    Generate fake but structurally valid LoRA adapter files.
+    """Generate fake but structurally valid LoRA adapter files.
 
     Creates:
-    - adapter_config.json (LoRA metadata) / LoRA 元数据配置
-    - adapter_model.safetensors (fake but valid binary weights) / 模拟权重文件
+    - adapter_config.json (LoRA metadata)
+    - adapter_model.safetensors (fake but valid binary weights)
 
     Args:
-        adapter_dir: 适配器输出目录
-        cfg: 配置字典，包含 lora_r、lora_alpha、checkpoint_path 等
+        adapter_dir: adapter output directory
+        cfg: config dict containing lora_r, lora_alpha, checkpoint_path, etc.
     """
     import numpy as np
     try:
@@ -285,15 +278,13 @@ def _save_lora_adapter(adapter_dir: str, cfg: dict):
 
 
 def _load_episodes(path: str) -> list:
-    """从 JSON 文件加载训练片段（episodes）数据。
-
-    Load episode JSON data from the given path.
+    """Load episode JSON data from the given path.
 
     Args:
-        path: JSON 文件路径
+        path: path to the JSON file
 
     Returns:
-        episodes 列表
+        list of episodes
     """
     with open(path, "r") as f:
         data = json.load(f)
@@ -303,13 +294,12 @@ def _load_episodes(path: str) -> list:
 
 
 def _compute_norm_stats(episodes: list) -> dict:
-    """从训练数据中计算 openpi 兼容的归一化统计信息。
+    """Compute norm stats from training data, matching openpi expected format.
 
-    Compute norm stats from training data, matching openpi expected format.
     Returns a dict[str, NormStats] compatible with openpi's Normalize transform.
 
     Args:
-        episodes: 训练片段列表 / Episode list.
+        episodes: Episode list.
     Returns:
         {"state": NormStats(...), "actions": NormStats(...)}
     """
@@ -371,8 +361,8 @@ def _compute_norm_stats(episodes: list) -> dict:
         return result
 
     def _make_norm_stats(values, fallback_dim=8):
-        """Compute mean, std, q01, q99 and return a NormStats object.
-        计算均值、标准差、1%和99%分位数并返回 NormStats 对象。"""
+        """Compute mean, std, q01 (1st percentile), q99 (99th percentile) and
+        return a NormStats object."""
         from openpi.shared.normalize import NormStats
 
         if not values:
@@ -403,12 +393,10 @@ def _compute_norm_stats(episodes: list) -> dict:
 
 
 def _get_gpu_name() -> str:
-    """获取 GPU 设备名称，如不可用则返回 'cpu'。
-
-    Get GPU device name via torch, or return 'cpu' if unavailable.
+    """Get GPU device name via torch, or return 'cpu' if unavailable.
 
     Returns:
-        GPU 设备名称字符串
+        GPU device name string
     """
     try:
         import torch
@@ -422,10 +410,7 @@ def _get_gpu_name() -> str:
 # ─── Main ─────────────────────────────────────────────────
 
 def main():
-    """程序入口：初始化日志、读取配置、执行训练并输出结果。
-
-    Main entry point: init logging, read config, run training, print JSON result.
-    """
+    """Main entry point: init logging, read config, run training, print JSON result."""
     logging.basicConfig(level=logging.INFO, format="%(asctime)s,%(msecs)03d [%(name)s] [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
     cfg = get_config()
 

@@ -11,7 +11,7 @@ Real configuration files are local-only. Copy an example, fill its placeholders,
 `openroboto init` writes a filled-in template with every field commented:
 
 ```bash
-openroboto init my-miner    # writes miner.yaml + train_strategy.py
+openroboto init my-miner    # miner.yaml + train_strategy.py + README.md + .gitignore
 ```
 
 > The template ships **inside the package**, so it cannot drift from the parser that

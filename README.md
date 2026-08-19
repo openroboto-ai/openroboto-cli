@@ -40,7 +40,8 @@ pip install openroboto
 ```bash
 # 1. Install and scaffold
 pip install openroboto
-openroboto init my-miner          # writes miner.yaml + train_strategy.py
+openroboto init my-miner          # a ready-to-use workspace: miner.yaml,
+                                  # train_strategy.py, README.md, .gitignore
 cd my-miner
 $EDITOR miner.yaml                # hotkey_ss58, HF token + username, control.json URL
 
@@ -72,9 +73,9 @@ Real-machine setup, systemd, custom strategies: [docs/MINER_DEPLOY.md](docs/MINE
 
 | Command | What it does |
 |---|---|
-| `openroboto init [DIR] [-s simple\|example] [--validator]` | Write `miner.yaml` and a training strategy script |
+| `openroboto init [DIR] [-s simple\|example] [--validator]` | Create a working workspace: config, a training strategy to edit, a README with the exact next commands, and a `.gitignore` that keeps your wallet password out of git |
 | `openroboto doctor` | Environment check: Python, config, `control.json`, Docker, GPU, image, HF token, wallet balance |
-| `openroboto build` | Build the `openpi-runner` training image (local `openpi-runner/`, or the public context) |
+| `openroboto build` | Build the training image from the build context shipped inside the package (no clone, no network) |
 | `openroboto train [-s script.py]` | Run one round; your strategy script is mounted into the container |
 | `openroboto check [PATH]` | Verify checkpoint layout with the rules the evaluator uses — **no GPU, no network, no second repository** |
 | `openroboto upload / burn / announce` | The three submission steps, individually — for recovery, not routine use |
@@ -206,7 +207,7 @@ resolve different code, which is the one thing that package exists to prevent.
 | Path | Purpose |
 |---|---|
 | `src/openroboto/` | The package: `commands/`, `chain/`, `huggingface/`, `payment/`, `config/`, `training/`, `templates/` |
-| `openpi-runner/` | Training-container image definition, used by `openroboto build`. Not shipped in the wheel |
+| `src/openroboto/runner/` | Training-image build context (Dockerfile + the in-container entry script), **shipped in the wheel** so `openroboto build` works offline |
 | `docs/` | Miner, validator and reproducibility documentation — index at [docs/README.md](docs/README.md) |
 | `tests/` | Mirrors `src/`; needs no GPU, chain or network |
 | `Dockerfile`, `docker-compose.yml` | Optional containerised way to run the CLI |

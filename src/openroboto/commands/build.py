@@ -1,8 +1,22 @@
-"""`openroboto build` —— 构建 openpi-runner 训练镜像。
+"""`openroboto build` -- build the openpi-runner training image.
 
-镜像定义（`openpi-runner/Dockerfile`）**不进 pip 包**：它是几百行的 CUDA 环境，
-装 CLI 的人不需要它躺在 site-packages 里。本地没有这个目录时，直接用 docker 的
-**git 远程构建上下文**，矿工照样不用 clone。
+The image definition **ships with the package** (`openroboto/runner/`, about
+20 KB: one Dockerfile plus one stdlib-only script). Miners do not have to
+clone, do not have to be online, and do not need the repository to be public.
+
+It used to live in `openpi-runner/` at the repository root and not ship in the
+package, falling back to docker's **remote git build context** when it was
+absent locally -- that path was broken at both ends: the repository is private
+until launch, so the anonymous fetch that `docker build <git-url>` performs
+returns **401**, meaning `build` could not run at all for any miner who
+installed via pip; and it pinned `#main`, so a miner on a fixed CLI version
+would build from the image definition on `main` -- the container interface
+(mount points, environment variable names, the `train()` signature) is red
+line #2 and is fixed on purpose, and resolving the image definition from a
+moving branch is exactly how the two sides drift apart.
+
+`--context` and a local `./openpi-runner/` still win, which is there for
+people editing the Dockerfile.
 """
 
 from __future__ import annotations
@@ -11,7 +25,7 @@ import argparse
 import subprocess
 from pathlib import Path
 
-from openroboto import GITHUB_REPO_URL, OPENPI_RUNNER_CONTEXT
+from openroboto import OPENPI_RUNNER_CONTEXT, runner_context
 from openroboto.console import fail, hint, say
 from openroboto.training.container import runner_image
 
@@ -23,7 +37,7 @@ def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) 
     parser.add_argument(
         "--context",
         default="",
-        help=f"构建上下文，默认 ./{OPENPI_RUNNER_CONTEXT}，本地没有则用公开仓库",
+        help=f"构建上下文。默认用包内那份；本地有 ./{OPENPI_RUNNER_CONTEXT}/ 时优先它",
     )
     parser.add_argument(
         "--image", default="", help="镜像名，默认取 $OPENPI_RUNNER_IMAGE"
@@ -32,18 +46,23 @@ def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) 
     parser.set_defaults(handler=run)
 
 
-def resolve_context(explicit: str = "", branch: str = "main") -> str:
-    """定位构建上下文：显式 > 本地目录 > 公开仓库的 git 上下文。"""
+def resolve_context(explicit: str = "") -> str:
+    """Resolve the build context: explicit > local `./openpi-runner/` > the
+    one inside the package.
+
+    The last tier **always exists** (it ships in the wheel), so this function
+    never returns something that cannot be reached.
+    """
     if explicit:
         return explicit
     local = Path(OPENPI_RUNNER_CONTEXT)
     if local.is_dir():
         return str(local)
-    return f"{GITHUB_REPO_URL}#{branch}:{OPENPI_RUNNER_CONTEXT}"
+    return str(runner_context())
 
 
 def build_command(image: str, context: str, no_cache: bool = False) -> list[str]:
-    """拼 `docker build` 命令。"""
+    """Assemble the `docker build` command."""
     command = ["docker", "build", "-t", image]
     if no_cache:
         command.append("--no-cache")
@@ -54,8 +73,8 @@ def build_command(image: str, context: str, no_cache: bool = False) -> list[str]
 def run(args: argparse.Namespace) -> int:
     image = args.image or runner_image()
     context = resolve_context(args.context)
-    if context.startswith("http"):
-        hint(f"本地没有 ./{OPENPI_RUNNER_CONTEXT}/，改用远程构建上下文：{context}")
+    if not args.context and not Path(OPENPI_RUNNER_CONTEXT).is_dir():
+        hint(f"用包内的镜像定义构建（{context}）")
 
     command = build_command(image, context, args.no_cache)
     say(f"🐳 {' '.join(command)}")

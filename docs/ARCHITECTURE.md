@@ -21,7 +21,7 @@ Held-out evaluation inputs, the scoring-service deployment, databases, and subne
 | Chain access | `chain/`, `payment/` | Commitments and burn extrinsics |
 | Hugging Face | `huggingface/` | Model upload and commit resolution |
 | Config | `config/` | `miner.yaml` parsing plus the single `control.json` fetcher |
-| Training runtime | `openpi-runner/` | Isolated OpenPI execution environment |
+| Training runtime | `src/openroboto/runner/` | Isolated OpenPI image definition; ships in the wheel so `openroboto build` needs no clone |
 | Protocol | `openroboto-protocol` (installed package) | Commitment encoding, seed derivation, shared constants |
 | External validator | `commands/validator.py` | Read public weights and call Bittensor `set_weights` |
 

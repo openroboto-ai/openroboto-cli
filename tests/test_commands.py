@@ -81,6 +81,46 @@ def test_init_validator_writes_validator_config_only(tmp_path: Path) -> None:
     assert not (tmp_path / "train_strategy.py").exists()
 
 
+def test_init_gitignores_the_file_holding_the_wallet_password(tmp_path: Path) -> None:
+    """`.gitignore` 必须挡住配置文件 —— 这是安全项，不是便利项。
+
+    `miner.yaml` 里有 `subnet.wallet_password` 和 `huggingface.token`，
+    而矿工版本化自己的 `train_strategy.py` 是完全合理的行为。少了这条，
+    第一次 `git add .` 就把钱包密码提交进去了，而且**不会有任何提示**。
+    """
+    for validator in (False, True):
+        target = tmp_path / ("val" if validator else "miner")
+        args = argparse.Namespace(
+            directory=str(target),
+            strategy="simple",
+            validator=validator,
+            force=False,
+        )
+        assert init_command.run(args) == 0
+
+        ignored = (target / ".gitignore").read_text(encoding="utf-8")
+        assert "miner.yaml" in ignored
+        assert "validator.yaml" in ignored
+        # 策略脚本反过来**必须**可提交 —— 它是矿工的成果，值得留历史。
+        assert "train_strategy.py" not in ignored
+
+
+def test_init_writes_a_workspace_readme_that_names_the_next_command(
+    tmp_path: Path,
+) -> None:
+    """工作区自带手册。矿工不该为了知道下一步敲什么去翻网页。"""
+    args = argparse.Namespace(
+        directory=str(tmp_path / "w"), strategy="simple", validator=False, force=False
+    )
+    assert init_command.run(args) == 0
+
+    readme = (tmp_path / "w" / "README.md").read_text(encoding="utf-8")
+    for command in ("openroboto doctor", "openroboto train", "openroboto check"):
+        assert command in readme, f"README 没提 {command}"
+    # 跳过 check 的代价是不可退的 TAO，这句必须在
+    assert "not refunded" in readme
+
+
 # ─── check ───────────────────────────────────────────────────
 
 
@@ -139,19 +179,46 @@ def test_build_prefers_local_context(
     assert build_command.resolve_context() == "openpi-runner"
 
 
-def test_build_falls_back_to_the_public_repository(
+def test_build_falls_back_to_the_packaged_context(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """没有本地目录时用 docker 的 git 上下文 —— 矿工依然不用 clone。
+    """没有本地目录时用**包内**那份镜像定义 —— 矿工不用 clone、不用联网。
 
-    注意这里用的是真实仓库地址：旧 `scripts/deploy_miner.sh` 的默认值
-    `your-org/robot-train-subnet` 根本不存在，照文档跑必然失败。
+    这条替换了原先"退回 docker git 远程上下文"的用例。那条路对 pip 装的矿工
+    根本走不通：仓库上线前是私有的，`docker build <git-url>` 的匿名抓取返回 401。
+    而且它钉 `#main`，装固定版本 CLI 的人会用 main 的镜像定义构建，
+    与红线 #2 那套固定的容器接口对不上。
     """
     monkeypatch.chdir(tmp_path)
-    context = build_command.resolve_context()
-    assert context.startswith("https://github.com/openroboto-ai/openroboto-cli.git#")
-    assert context.endswith(":openpi-runner")
-    assert "your-org" not in context
+    context = Path(build_command.resolve_context())
+
+    assert not context.is_absolute() or context.is_dir(), "上下文必须真实存在"
+    assert (context / "Dockerfile").is_file(), f"{context} 里没有 Dockerfile"
+    assert "github.com" not in str(context), "不该再依赖远程仓库"
+
+
+def test_packaged_runner_context_ships_a_self_contained_build(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """包内上下文必须自成一体：Dockerfile 里 COPY 的文件都得在。
+
+    少一个文件的表现是 `docker build` 在矿工机器上失败，而我们这里全绿 ——
+    构建上下文的完整性没法靠 code review 保证。
+    """
+    from openroboto import runner_context
+
+    context = runner_context()
+    dockerfile = context / "Dockerfile"
+    assert dockerfile.is_file()
+
+    copied = [
+        line.split()[1]
+        for line in dockerfile.read_text(encoding="utf-8").splitlines()
+        if line.strip().startswith("COPY ")
+    ]
+    assert copied, "Dockerfile 一个 COPY 都没有？那这份上下文没有意义"
+    for name in copied:
+        assert (context / name).is_file(), f"Dockerfile COPY 了 {name}，但包里没有它"
 
 
 def test_build_command_assembly() -> None:

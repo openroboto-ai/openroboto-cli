@@ -56,7 +56,7 @@ stops happening.
 python3.11 -m venv .venv && source .venv/bin/activate
 pip install openroboto
 
-# 2. Configure: writes miner.yaml + train_strategy.py
+# 2. Create the workspace (config, strategy, README, .gitignore)
 openroboto init my-miner && cd my-miner
 #    Required in miner.yaml: subnet.hotkey_ss58, huggingface.token,
 #    huggingface.username, urls.control_json, subnet.wallet_password

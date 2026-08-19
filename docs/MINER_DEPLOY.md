@@ -59,7 +59,7 @@ The π0.5 base checkpoint needs no manual download step. Leave
 ## 3. Configuration
 
 ```bash
-openroboto init my-miner    # writes miner.yaml + a training strategy script
+openroboto init my-miner    # config + strategy + README + .gitignore
 cd my-miner
 nano miner.yaml
 ```
@@ -103,9 +103,10 @@ openroboto build
 Training runs in Docker because openpi needs `numpy<2.0` while bittensor needs
 `numpy>=2.0` — one interpreter cannot hold both.
 
-`build` uses `./openpi-runner` as the build context when it exists and otherwise
-pulls the public one, so there is nothing to clone. Override the image name with
-`--image` or `$OPENPI_RUNNER_IMAGE`.
+The build context ships **inside the package**, so this works with no clone, no
+network and no repository access. A local `./openpi-runner/` directory takes
+precedence if you have one (for editing the Dockerfile), and `--context` overrides
+both. Override the image name with `--image` or `$OPENPI_RUNNER_IMAGE`.
 
 > **One universal image** — no need to rebuild for custom training strategies.
 > Your strategy script is mounted in as a volume (see below).

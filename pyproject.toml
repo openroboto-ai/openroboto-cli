@@ -87,12 +87,11 @@ src = ["src"]
 # 不再需要为它们开豁免。**新增豁免要有理由** —— 一条 lint 豁免就是一块
 # 永远不会被检查的代码。
 extend-exclude = [
-    # 训练镜像定义，不是 Python 包的一部分。
-    "openpi-runner",
     "scripts",
-    # 模板是在训练容器里跑的独立脚本（依赖 openpi / torch，本包不装它们），
-    # 不参加本包的风格约束 —— 改它们的排版会让与容器侧的对照变难。
+    # 模板与 runner 都是在训练容器里跑的独立脚本（依赖 openpi / torch，
+    # 本包不装它们），不参加本包的风格约束 —— 改它们的排版会让与容器侧的对照变难。
     "src/openroboto/templates",
+    "src/openroboto/runner",
 ]
 
 [tool.ruff.lint]
@@ -104,8 +103,9 @@ ignore = ["RUF001", "RUF002", "RUF003"]
 # CLI 就是要往 stdout 打字给矿工看，T20（print）在命令层不适用。
 "src/openroboto/commands/*.py" = ["T20"]
 "src/openroboto/console.py" = ["T20"]
-# 模板是给矿工挂进容器的独立脚本，不参与本包的类型与风格约束。
+# 模板与容器侧脚本都不参与本包的类型与风格约束（见 [tool.mypy] 的说明）。
 "src/openroboto/templates/*" = ["T20", "B", "RUF"]
+"src/openroboto/runner/*" = ["T20", "B", "RUF", "E", "UP", "I"]
 
 [tool.mypy]
 strict = true
@@ -116,7 +116,10 @@ python_version = "3.11"
 # `type` 语句 —— 我们按矿工侧的 3.11 检查，跟进去只会得到 numpy 自己的语法报错。
 # 测试的正确性由 pytest 保证，不由类型检查保证。
 files = ["src/openroboto"]
-exclude = "src/openroboto/templates/"
+# `runner/train_runner.py` 也在容器里跑（openpi / torch，本包不装它们），
+# 和模板同一类：随包发布是为了让 `openroboto build` 离线可用，不是为了参加本包的
+# 类型约束。它只 import stdlib，容器侧的正确性由容器自己的运行保证。
+exclude = "src/openroboto/(templates|runner)/"
 
 [[tool.mypy.overrides]]
 # bittensor / huggingface_hub / torch 不带类型信息，且矿工机以外的环境（CI、本机）
@@ -151,6 +154,6 @@ testpaths = ["tests"]
 #
 # 60% 不高，因为大量代码路径要真 GPU / 真链 / 真 Docker 才走得到（AGENTS.md §4：
 # 那些只测参数拼装，不测真跑）。它的作用不是"证明测够了"，是"不许往下掉"。
-fail_under = 63.17
+fail_under = 63.36
 precision = 2
 show_missing = true
