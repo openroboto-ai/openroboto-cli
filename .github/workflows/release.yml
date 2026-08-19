@@ -10,7 +10,15 @@ name: Release
 #   · 往索引上传只认 v* tag（不可变的 git 引用，且它就是版本号本身）
 #   · 手动触发**永远**到不了正式 PyPI，`publish` job 的 `if` 钉死了这一点
 #   · 两条路跑的是同一份 gates、上传的是同一份产物，只换上传目标
-#   · 上传前有 environment 人工审批 —— 版本号不可重用，按下去就撤不回来
+#   · environment 限定部署来源：`pypi` 只接 `v*` tag、`testpypi` 只接 main
+#
+# 🔴 **少一道闸：没有人工审批。** required reviewers 在私有仓上要付费计划，
+# 而 openroboto-ai 目前是 free（2026-08-19 实测，API 返回 422）。也就是说
+# **`git push origin v0.1.0a1` 会一路发到 PyPI，中间没有第二双眼睛**，
+# 而上传不可撤销、版本号不可重用。
+# 补上它的办法：把仓库转公开（公开仓的 required reviewers 免费，而这个仓本来
+# 就要在上线时转公开），或者升级到 Team。在那之前，push tag 这个动作本身
+# 就是最后一道闸 —— 推之前请自己确认一次版本号。
 #
 # 内测版和正式版都发**正式 PyPI**，靠版本号区分（`v0.1.0a1` vs `v0.1.0`）：
 # pip 有正式版时不会选预发布版，所以内测者 `pip install openroboto==0.1.0a1`
@@ -128,11 +136,14 @@ jobs:
     # 会把两个 publish job 一起点着，而这一个是不可撤销的。
     if: startsWith(github.ref, 'refs/tags/v')
 
-    # environment 有两个作用，缺一不可：
-    #   1. GitHub 上给它配 required reviewers —— 上传不可撤销、版本号不可重用，
-    #      按下去之前必须有一个人类确认这确实是要发的那个 tag；
+    # environment 现在起两个作用：
+    #   1. 部署来源限定为 `v*` tag —— 即使有人改坏了上面那个 `if`，
+    #      非 tag 的触发也进不来（2026-08-19 配好，`gh api ... /environments/pypi`）；
     #   2. PyPI 的 trusted publisher 配置里填的就是这个名字，对不上 OIDC 直接被拒。
     #      改名字要同时改 pypi.org 上那条记录。
+    #
+    # 🔴 它**还不能**起第三个作用 —— 人工审批。见文件头那段：免费计划上
+    # 私有仓配不了 required reviewers。转公开或升 Team 之后，来这里把这条注释改掉。
     environment:
       name: pypi
       url: https://pypi.org/p/openroboto

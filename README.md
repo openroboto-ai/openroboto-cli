@@ -235,10 +235,16 @@ git tag v0.1.0a1 && git push origin v0.1.0a1    # internal testing build
 git tag v0.1.0   && git push origin v0.1.0      # stable
 ```
 
-The tag triggers the same gates every pull request runs, then waits for a human
-to approve the `pypi` environment. Uploads cannot be undone and a version number
-can never be reused, so that approval is the last thing standing between a typo
-and every miner.
+The tag triggers the same gates every pull request runs, and the `pypi`
+environment only accepts `v*` tags, so a stray branch build cannot reach the
+index.
+
+> ⚠️ **There is no human approval step yet.** Required reviewers need a paid plan
+> on a private repository, and this organisation is on the free one. Pushing the
+> tag publishes; uploads cannot be undone and a version number can never be
+> reused. Until the repository goes public (required reviewers are free there) or
+> the plan changes, *pushing the tag is the approval* — check the version before
+> you push.
 
 Testers install a pre-release by pinning it exactly — no extra index flags:
 
