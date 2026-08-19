@@ -32,40 +32,21 @@ jobs:
     timeout-minutes: 25
 
     # ─────────────────────────────────────────────────────────────────────────
-    # 两个仓都要 checkout，且必须是**平级的两个目录**。
+    # 2026-08-19：单仓 CI。
     #
-    # 原因在 pyproject.toml 的 [tool.uv.sources]：openroboto-protocol 还没发到
-    # PyPI，现在是 `path = "../openroboto-protocol"` 的 editable 依赖。
-    # 只 checkout 本仓的话，`uv sync --locked` 第一步就死：
-    #   error: Failed to generate package metadata for
-    #   `openroboto-protocol==0.2.0 @ editable+../openroboto-protocol`
-    #     Caused by: Distribution not found at: .../openroboto-protocol
-    # —— 不是"某几条用例 skip"，是整个 job 装不起来。所以这里不是"想不想多 checkout
-    # 一个仓"，是这条依赖今天只有这一种满足方式。
+    # 此前这里要 checkout **两个平级目录**，因为 openroboto-protocol 还没发 PyPI，
+    # pyproject 里是 `path = "../openroboto-protocol"` 的 editable 依赖 ——
+    # 少了那个目录 `uv sync --locked` 第一步就死，不是"某几条用例 skip"而是
+    # 整个 job 装不起来。协议包发布后（0.1.0 / 0.2.0 已在 PyPI），
+    # `[tool.uv.sources]` 和第二个 checkout 一起删掉了。
     #
-    # 协议包发到 PyPI 之后（openroboto-protocol 的 CI 里那个 build job 上面写着
-    # 为什么还没接 publish），删掉 [tool.uv.sources] 与下面第二个 checkout，
-    # 这个 job 就退回成普通的单仓 CI。
-    #
-    # 不钉 ref，跟 main：uv.lock 里写死 `openroboto-protocol==0.2.0`，协议包哪天
-    # 改了版本号而消费方没跟上，`--locked` 会当场红。这正是我们要知道的事 ——
-    # 钉死 ref 等于把这个信号关掉。
+    # 版本对不上的信号仍然保留、而且更强：`uv.lock` 里钉着
+    # `openroboto-protocol==0.2.0` 且带哈希，协议包发了新版而消费方没跟上时
+    # `--locked` 当场红 —— 不需要靠 checkout main 来制造这个信号。
     # ─────────────────────────────────────────────────────────────────────────
-    defaults:
-      run:
-        working-directory: openroboto-cli
-
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          path: openroboto-cli
-          persist-credentials: false
-
-      - name: Checkout openroboto-protocol (path dependency, see above)
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: openroboto-ai/openroboto-protocol
-          path: openroboto-protocol
           persist-credentials: false
 
       - name: Install uv
@@ -73,8 +54,7 @@ jobs:
         with:
           version: ${{ env.UV_VERSION }}
           enable-cache: true
-          # setup-uv 默认在仓库根找 uv.lock 做缓存 key，这里代码在子目录里。
-          cache-dependency-glob: openroboto-cli/uv.lock
+          cache-dependency-glob: uv.lock
 
       # --locked：依赖变了却没更新 uv.lock 时当场失败，而不是让 CI 自己悄悄重新
       # 解析一遍 —— 那样 CI 装的和矿工装的就不是同一套。
@@ -97,9 +77,9 @@ jobs:
       # skip 不是免费的绿灯。允许的 skip 只有一种理由：**这台 runner 上东西物理
       # 不存在**（backend 的同名步骤里，白名单放的就是这一种）。
       #
-      # 本仓的白名单是**空的**，而且这是个结论不是偷懒：上面已经把同级的
-      # openroboto-protocol 一起 checkout 了，本仓的用例又不需要 GPU、不需要真链、
-      # 不需要网络（AGENTS.md §4：涉及 docker run 与链交互的只测参数拼装）。
+      # 本仓的白名单是**空的**，而且这是个结论不是偷懒：协议包从 PyPI 装（不再
+      # 依赖同级检出），本仓的用例又不需要 GPU、不需要真链、不需要网络
+      #（AGENTS.md §4：涉及 docker run 与链交互的只测参数拼装）。
       # 于是"runner 上没有"这条唯一合法理由在这里不成立 —— 任何 skip 都红。
       #
       # 今天实测 0 条 skip。这一步防的是明天：有人加一条

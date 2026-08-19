@@ -165,15 +165,19 @@ future block hash and drand value do not exist at submission time.
 
 For contributors. Skip this if you installed from PyPI.
 
-`openroboto-protocol` is not on PyPI yet, so `pyproject.toml` resolves it from a
-sibling checkout. Clone both, or `uv sync` fails before installing anything:
-
 ```bash
-git clone https://github.com/openroboto-ai/openroboto-protocol
 git clone https://github.com/openroboto-ai/openroboto-cli
 cd openroboto-cli
 uv sync --locked
 ```
+
+One repository is enough: `openroboto-protocol` is installed from PyPI at the exact
+version pinned in `pyproject.toml`. To work against unreleased protocol changes,
+override it in your environment only —
+`uv pip install -e ../openroboto-protocol` — and do not commit a
+`[tool.uv.sources]` path entry. A path source **bypasses the version constraint**,
+which is how the pin once read `==1.0.0` while every local and CI run was actually
+using `0.2.0`.
 
 `--locked` is deliberate: it fails when `uv.lock` no longer matches `pyproject.toml`
 instead of silently resolving a different dependency tree. The interpreter is pinned to

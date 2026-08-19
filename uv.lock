@@ -1522,7 +1522,7 @@ dev = [
 requires-dist = [
     { name = "bittensor", specifier = ">=10.5,<11" },
     { name = "huggingface-hub", specifier = ">=0.24.0" },
-    { name = "openroboto-protocol", editable = "../openroboto-protocol" },
+    { name = "openroboto-protocol", specifier = "==0.2.0" },
     { name = "pyyaml", specifier = ">=6.0" },
 ]
 
@@ -1538,19 +1538,10 @@ dev = [
 [[package]]
 name = "openroboto-protocol"
 version = "0.2.0"
-source = { editable = "../openroboto-protocol" }
-
-[package.metadata]
-requires-dist = [{ name = "pydantic", marker = "extra == 'schemas'", specifier = ">=2.9,<3" }]
-provides-extras = ["schemas"]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "coverage", specifier = ">=7.4.3,<8.0.0" },
-    { name = "mypy", specifier = ">=1.8.0,<3.0.0" },
-    { name = "openroboto-protocol", extras = ["schemas"] },
-    { name = "pytest", specifier = ">=7.4.3,<10.0.0" },
-    { name = "ruff", specifier = ">=0.2.2,<1.0.0" },
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/0b/3e/a2a750948f7b53d225339e7452d5a64aa8651a35b7150bcc8d3c8aa0f6c2/openroboto_protocol-0.2.0.tar.gz", hash = "sha256:a073e42cba3b34e09d3bf8301d34e2a5b6b85d3c40d8e7a8cf0090a00e1f8897", size = 67469, upload-time = "2026-08-19T09:14:58.611Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/08/5b/37ad3bbd5a0a70a8795b75b584d8688a9b4d5369150f4015181c5c70bf8b/openroboto_protocol-0.2.0-py3-none-any.whl", hash = "sha256:e703156b76601b4ca9f1e292c0d3f646b557eb73a6be4cede9f27cc8d3c33355", size = 72233, upload-time = "2026-08-19T09:14:59.602Z" },
 ]
 
 [[package]]

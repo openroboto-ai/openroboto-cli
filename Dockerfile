@@ -39,21 +39,17 @@ ENV UV_PROJECT_ENVIRONMENT="/opt/venv"
 ENV PYTHONDONTWRITEBYTECODE=1
 
 # ─── Install the CLI ───────────────────────────────────
-# ⚠️ **构建上下文是上一级目录**（见 docker-compose.yml 的 `context: ..`），
-# 所以下面每条 COPY 的源路径都带 `openroboto-cli/` 前缀。
-# 原因：`openroboto-protocol` 还没发 PyPI，pyproject 里是 `../openroboto-protocol`
-# 的 path 依赖 —— context 设成 `.` 就 COPY 不到它，`uv pip install` 直接失败。
-# 协议包发布后可以把 context 改回 `.`，并删掉这里的 protocol COPY 与前缀。
+# 构建上下文就是本仓（`context: .`）。协议包从 PyPI 装 —— 2026-08-19 之前它是
+# `../openroboto-protocol` 的 path 依赖，逼得 context 必须设成上一级目录，
+# 于是本仓的 `.dockerignore` 失效、整棵 `rebuild/` 树（~620 MB，含后端 .env
+# 和生产库 dump）会被送进 daemon。协议包发布后这些绕法全部删掉了。
 #
-# 目录结构要和宿主一致（`/build/openroboto-cli` + `/build/openroboto-protocol`），
-# 否则 pyproject 里那个相对路径解析不到。
-WORKDIR /build/openroboto-cli
-COPY openroboto-protocol /build/openroboto-protocol
-# LICENSE 必须一起 COPY：pyproject 里 license-files = ["LICENSE"]，缺了它
+# 只 COPY 构建 wheel 需要的东西，改源码不会让依赖层失效。
+# LICENSE 必须在：pyproject 里 license-files = ["LICENSE"]，缺了它
 # build backend 报 `glob 'LICENSE' did not match any files`。
-COPY openroboto-cli/pyproject.toml openroboto-cli/uv.lock \
-     openroboto-cli/README.md openroboto-cli/LICENSE ./
-COPY openroboto-cli/src ./src
+WORKDIR /build
+COPY pyproject.toml uv.lock README.md LICENSE ./
+COPY src ./src
 RUN uv pip install --no-cache-dir .
 
 # 装完就不需要源码树了；工作目录换回 /app，矿工的 miner.yaml / state 挂在这里。

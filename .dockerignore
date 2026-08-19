@@ -4,9 +4,14 @@
 venv
 **/__pycache__
 *.pyc
+# 排除矿工自己的配置（`miner.yaml` / `validator.yaml` 在仓库根目录，含凭据），
+# 但**必须放行包内模板** —— `src/openroboto/templates/*.yaml` 是打进 wheel 的
+# 文件，`openroboto init` 靠它们生成配置。被 `*.yaml` 吞掉的表现是镜像构建成功、
+# 而容器里 `openroboto init` 在运行时才报模板找不到。
+# （此前那两条 `!*.example.yaml` 豁免指向的 `miner.example.yaml` /
+#  `validator.example.yaml` 已随旧结构删除，模板现在只有包里那一份。）
 *.yaml
-!*.example.yaml
-!**/*.example.yaml
+!src/openroboto/templates/*.yaml
 .env
 .env.*
 *.db

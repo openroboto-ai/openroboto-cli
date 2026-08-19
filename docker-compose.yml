@@ -1,8 +1,6 @@
 # 容器化跑 CLI。**可选** —— 直接 `pip install openroboto` 是主路径，
 # 这个文件是给"不想污染宿主 Python 环境"的人的。
 #
-# 构建上下文是上一级目录：`openroboto-protocol` 还没发到 PyPI，pyproject 里
-# 是同级 path 依赖，context 设成 `.` 就 COPY 不到它。协议包发布后可以改回 `.`。
 #
 # 训练容器由这个容器**调宿主 Docker** 起（红线 #2：openpi 要 numpy<2.0、
 # bittensor 要 numpy>=2.0，一个解释器装不下），所以挂了 docker.sock。
@@ -11,8 +9,7 @@ services:
   # 默认服务：训练。**不烧钱**，可以放心重跑。
   train:
     build:
-      context: ..
-      dockerfile: openroboto-cli/Dockerfile
+      context: .
     image: openroboto-cli:latest
     runtime: nvidia
     environment:

@@ -60,10 +60,14 @@ openroboto = "openroboto.cli:main"
 requires = ["uv_build>=0.10.11,<0.11.0"]
 build-backend = "uv_build"
 
-# openroboto-protocol 还没发到 PyPI。发布前这一段要删掉，否则 `uv sync`
-# 在没有兄弟目录的机器上会失败。矿工装的是 wheel，不受 [tool.uv.sources] 影响。
-[tool.uv.sources]
-openroboto-protocol = { path = "../openroboto-protocol", editable = true }
+# 2026-08-19：`openroboto-protocol` 已发到 PyPI（0.1.0 / 0.2.0），
+# 此处原有的 `[tool.uv.sources]` path 覆盖已删除 —— 现在从 PyPI 装，
+# `uv sync` 不再需要同级的 openroboto-protocol/ 检出。
+#
+# ⚠️ 别把它加回来。那个覆盖会**绕过版本约束**：上面 `==0.2.0` 曾经写成
+# `==1.0.0` 而本地检出是 0.2.0，本地和 CI 全绿，装进环境的其实是 0.2.0。
+# 要临时对着未发布的协议包改动开发，用 `uv pip install -e ../openroboto-protocol`
+# 显式覆盖，别写进 pyproject —— 那样至少是当次会话可见的，不会留在仓库里骗下一个人。
 
 [dependency-groups]
 dev = [
