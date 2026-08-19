@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import itertools
 import json
 from pathlib import Path
 
@@ -140,3 +141,43 @@ def test_parse_result_survives_broken_json(tmp_path: Path) -> None:
     metrics, proof = parse_result("---RESULT---\n{不是 JSON", str(tmp_path))
     assert metrics == {}
     assert proof == {}
+
+
+def test_every_bind_mount_source_is_an_absolute_path(tmp_path: Path) -> None:
+    """docker 不把相对路径当宿主目录，而两种失败方式都很贵。
+
+    - 源里含斜杠（`tmp/robot_train_vla_miner/round_1`）→ 守护进程**拒绝启动容器**：
+      `includes invalid characters for a local volume name`。
+    - 源里不含斜杠（`cache`）→ **静默**当成具名卷：容器挂到一个空目录上，
+      宿主的同名目录既不会被读也不会被写，而且没有任何报错。
+
+    这条实测发生过：`DEFAULT_OUTPUT_ROOT` 写的是 `Path("./tmp/robot_train_vla_miner")`，
+    `Path` 把 `./` 规范化掉，`str()` 出来就是 `tmp/…`，于是 `openroboto train`
+    带默认参数**根本起不来容器**。而基座缓存那条更阴：不报错，只是每轮重下几个 GB。
+
+    钉住"全部绝对"而不是逐条钉具体路径 —— 下一个新增的挂载点也会被这条抓住。
+    """
+    train = tmp_path / "input" / "train.json"
+    train.parent.mkdir(parents=True)
+    train.write_text("[]", encoding="utf-8")
+    script = tmp_path / "train_strategy.py"
+    script.write_text("def train(cfg, episodes, policy=None):\n    return {}, {}\n")
+
+    command = build_docker_command(
+        train_data_path="input/train.json",  # 相对
+        output_dir="tmp/robot_train_vla_miner/round_1",  # 相对，且带斜杠
+        checkpoint_path="cache/pi05_base",  # 相对，不带斜杠 —— 静默变具名卷
+        custom_train_script=str(script),
+    )
+
+    sources = [
+        value.rsplit(":", 1)[0]
+        for flag, value in itertools.pairwise(command)
+        if flag == "-v"
+    ]
+    assert sources, "一个挂载都没有？那这条命令读不到数据也写不出模型"
+    for source in sources:
+        assert source.startswith("/"), (
+            f"挂载源不是绝对路径：{source!r}\n"
+            f"docker 会把它当具名卷或直接拒绝启动，两种都不是你要的。"
+        )
