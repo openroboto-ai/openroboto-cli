@@ -1,7 +1,8 @@
-"""红线守卫：u16 权重归一化。
+"""Red-line guard: u16 weight normalisation.
 
-这是排放去向的最后一道换算。旧 `validator.py` 的三步（只留正权重 → 归一到
-sum=1.0 → `int(w * 65535)` 截断）逐字保留，这里把它钉死。
+This is the last conversion deciding where emissions go. The three steps of the old
+`validator.py` (keep positive weights only -> normalise to sum=1.0 -> truncate with
+`int(w * 65535)`) are preserved word for word, and pinned down here.
 """
 
 from __future__ import annotations
@@ -18,12 +19,13 @@ def test_only_positive_weights_are_kept() -> None:
 
 
 def test_weights_are_normalised_then_truncated_not_rounded() -> None:
-    """1/3 * 65535 = 21845.0；2/3 * 65535 = 43690.0 —— 截断与四舍五入在这里
-    恰好同值，所以再用一组会分叉的：0.7/0.3。"""
+    """1/3 * 65535 = 21845.0; 2/3 * 65535 = 43690.0 -- truncation and rounding happen to
+    agree here, so a diverging pair is used instead: 0.7/0.3."""
     result = normalize_weights({"a": 0.7, "b": 0.3}, ["a", "b"])
-    # 0.7 * 65535 = 45874.5 —— 截断给 45874，四舍五入会给 45875。
+    # 0.7 * 65535 = 45874.5 -- truncation gives 45874, rounding would give 45875.
     assert result.weights == [45874, 19660]
-    assert sum(result.weights) < U16_MAX  # 截断必然少几个单位，这是既有行为
+    # truncation necessarily loses a few units; this is the existing behaviour
+    assert sum(result.weights) < U16_MAX
 
 
 def test_uid_is_the_metagraph_index_not_the_dict_order() -> None:
@@ -40,7 +42,8 @@ def test_no_positive_weights_returns_empty_with_reason() -> None:
 
 
 def test_detail_lines_cover_every_weight() -> None:
-    """明细是权重设错时唯一的现场，每个参与的 uid 都要出现。"""
+    """The detail lines are the only evidence left when weights are set wrong, so every
+    participating uid must appear."""
     result = normalize_weights({"a": 1.0, "b": 3.0}, ["a", "b"])
     joined = "\n".join(result.detail)
     assert "uid=  0" in joined

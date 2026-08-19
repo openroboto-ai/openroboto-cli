@@ -25,23 +25,29 @@ README_TEMPLATE = {"miner": "README-miner.md", "validator": "README-validator.md
 
 
 def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    parser = subparsers.add_parser("init", help="生成开箱即用的工作区（零 clone）")
+    parser = subparsers.add_parser(
+        "init", help="Create a ready-to-use workspace (no clone required)"
+    )
     parser.add_argument(
-        "directory", nargs="?", default=".", help="目标目录，默认当前目录"
+        "directory",
+        nargs="?",
+        default=".",
+        help="target directory, defaults to the current one",
     )
     parser.add_argument(
         "-s",
         "--strategy",
         choices=STRATEGIES,
         default="simple",
-        help="释放哪一份策略脚本（默认 simple）",
+        help="which strategy script to unpack (default: simple)",
     )
     parser.add_argument(
         "--validator",
         action="store_true",
-        help="生成 validator.yaml（外部验证者），不生成策略脚本",
+        help="write validator.yaml (for external validators) instead of a "
+        "strategy script",
     )
-    parser.add_argument("--force", action="store_true", help="覆盖已存在的文件")
+    parser.add_argument("--force", action="store_true", help="overwrite existing files")
     parser.set_defaults(handler=run)
 
 
@@ -85,18 +91,21 @@ def run(args: argparse.Namespace) -> int:
     say("")
     if args.validator:
         say(
-            "下一步：填 validator.yaml 的 backend.public_key，"
-            "然后 `openroboto validator run`"
+            "Next: fill in backend.public_key in validator.yaml, "
+            "then run `openroboto validator run`"
         )
     else:
-        say("下一步（工作区的 README.md 里有完整说明）：")
-        say("  1. 填 miner.yaml 的 huggingface.token / username 与 subnet.hotkey_ss58")
-        say("  2. `openroboto doctor` —— 花钱之前把环境问题查掉")
+        say("Next steps (the workspace README.md has the full walkthrough):")
+        say(
+            "  1. Fill in huggingface.token / username and subnet.hotkey_ss58 "
+            "in miner.yaml"
+        )
+        say("  2. `openroboto doctor` — catch environment problems before you pay")
         say("  3. `openroboto build` → `openroboto train` →")
         say("     `openroboto check` → `openroboto submit`")
         say("")
-        say("⚠️  miner.yaml 里会有钱包密码和 HF token，已被 .gitignore 挡掉；")
-        say("    别把它移出忽略清单。")
+        say("⚠️  miner.yaml will hold your wallet password and HF token; .gitignore")
+        say("    already excludes it. Do not take it off the ignore list.")
     return 0
 
 
@@ -109,7 +118,7 @@ def _write(path: Path, content: str, force: bool) -> Path:
     """Write the file; skip when it already exists and --force was not given
     -- we must not silently overwrite a config the miner has filled in."""
     if path.exists() and not force:
-        hint(f"⏭️  已存在，跳过：{path}（要覆盖加 --force）")
+        hint(f"⏭️  Already exists, skipped: {path} (pass --force to overwrite)")
         return path
     path.write_text(content, encoding="utf-8")
     return path

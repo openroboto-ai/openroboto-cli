@@ -1,4 +1,4 @@
-"""配置解析与 control.json 抓取。"""
+"""Config parsing and control.json fetching."""
 
 from __future__ import annotations
 
@@ -42,7 +42,7 @@ def test_yaml_keys_are_unchanged_from_the_legacy_layout(tmp_path: Path) -> None:
 
     settings = Settings.load(str(path))
     assert settings.netuid == 80
-    assert settings.coldkey == "123"  # YAML 会把它读成 int，必须转字符串
+    assert settings.coldkey == "123"  # YAML reads this as an int; it must become a str
     assert settings.hotkey == "miner-hot"
     assert settings.control_json_url == "https://example.invalid/control.json"
     assert settings.hf_username == "someone"
@@ -62,7 +62,8 @@ def test_empty_sections_are_tolerated(tmp_path: Path) -> None:
 
 
 def test_chain_commands_refuse_to_run_without_netuid() -> None:
-    """旧代码默认 netuid=313（测试网）。漏配 netuid 会把真钱烧到别的子网上。"""
+    """The old code defaulted to netuid=313 (testnet). Forgetting to configure netuid
+    burns real money on a different subnet."""
     settings = Settings()
     assert settings.netuid == 0
     with pytest.raises(ConfigError) as excinfo:
@@ -86,7 +87,8 @@ def test_apply_control_only_touches_payment_and_training() -> None:
     assert settings.burn_rate_tao == 0.1
     assert settings.limit_price_rao == 5
     assert settings.vla_checkpoint_path == "gs://bucket/ckpt"
-    # dataset / round / public_key 不进 settings —— 它们是每轮的输入，不是配置
+    # dataset / round / public_key do not land in settings -- they are per-round inputs,
+    # not configuration
     assert settings.dataset_train_url == ""
     assert settings.backend_url == "https://backend.invalid"
 
@@ -118,7 +120,8 @@ def test_fetch_control_returns_payload_and_etag(
 
 
 def test_fetch_control_treats_304_as_unchanged(monkeypatch: pytest.MonkeyPatch) -> None:
-    """urllib 把 304 当异常抛。这条路径不能被误报成「拉取失败」。"""
+    """urllib raises 304 as an exception. This path must not be misreported as "fetch
+    failed"."""
 
     def _raise(*args: Any, **kwargs: Any) -> None:
         raise urllib.error.HTTPError("url", 304, "Not Modified", {}, None)  # type: ignore[arg-type]
@@ -143,9 +146,11 @@ def test_fetch_control_network_failure_is_infrastructure_error(
 def test_refresh_burn_rate_falls_back_to_local_config(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """control.json 拉不到时，费率退回 miner.yaml —— **不是**退回代码里的字面量。
+    """When control.json cannot be fetched, the rate falls back to miner.yaml -- **not**
+    to a literal in the code.
 
-    旧 `rt.py` 的兜底常量写着 0.01，而线上是 0.1；少烧十倍照样被拒且不退款。
+    The fallback constant in the old `rt.py` said 0.01 while production is 0.1; burning
+    ten times too little is still rejected, and still not refunded.
     """
     settings = Settings.from_mapping(
         {
@@ -173,24 +178,26 @@ def test_refresh_burn_rate_falls_back_to_local_config(
     assert any("0.1" in message for message in messages)
 
 
-# ─── environment：四个必须同源的字段 ─────────────────────────
+# ─── environment: the four fields that must share one source ─────────────────
 
 
 def test_environment_defaults_urls_but_never_netuid() -> None:
-    """环境预设填 URL，**不填 netuid**。
+    """The environment preset fills in URLs, and **never netuid**.
 
-    `netuid` 没有默认值是刻意的：忘了配就该失败，而不是悄悄挑一个子网 ——
-    挑错了烧的是真 TAO。环境只负责校验你自己写的那个。
+    `netuid` having no default is deliberate: forgetting to configure it should fail
+    rather than quietly pick a subnet -- picking the wrong one burns real TAO. The
+    environment only validates the one you wrote yourself.
     """
     cfg = Settings.from_mapping({"environment": "dev"})
     assert cfg.network == "test"
     assert "api-dev" in cfg.control_json_url
     assert "api-dev" in cfg.backend_url
-    assert cfg.netuid == 0, "环境不许替矿工决定 netuid"
+    assert cfg.netuid == 0, "the environment must not decide netuid for the miner"
 
 
 def test_explicit_fields_beat_the_environment_preset() -> None:
-    """预设是默认值不是强制值 —— 自建后端的人必须还能用。"""
+    """The preset provides defaults, not mandates -- people running their own backend
+    must still be able to use it."""
     cfg = Settings.from_mapping(
         {
             "environment": "dev",
@@ -198,14 +205,17 @@ def test_explicit_fields_beat_the_environment_preset() -> None:
         }
     )
     assert cfg.backend_url == "https://my-own-backend.example"
-    assert "api-dev" in cfg.control_json_url  # 没被显式覆盖的仍然来自预设
+    # whatever was not explicitly overridden still comes from the preset
+    assert "api-dev" in cfg.control_json_url
 
 
 def test_mainnet_netuid_with_dev_control_json_is_refused() -> None:
-    """会赔钱的半切换之一：按 dev 的 0.01 费率，在**主网**上烧。
+    """One of the half-switched setups that costs money: burning at the dev rate of
+    0.01 on **mainnet**.
 
-    dev 公布 burn_rate_tao=0.01、生产公布 0.1。这种组合下矿工烧掉十分之一的
-    费用，生产后端按金额核对判拒，**且不退款**。
+    dev publishes burn_rate_tao=0.01 and production publishes 0.1. In this combination
+    the miner burns one tenth of the fee, the production backend rejects on the amount
+    check, **and there is no refund**.
     """
     cfg = Settings.from_mapping(
         {
@@ -219,7 +229,8 @@ def test_mainnet_netuid_with_dev_control_json_is_refused() -> None:
 
 
 def test_testnet_netuid_with_mainnet_environment_is_refused() -> None:
-    """另一半：提交到测试网，却去问生产要状态 —— `status` 永远空且无从解释。"""
+    """The other half: submitting to testnet while asking production for status --
+    `status` stays empty forever with no explanation available."""
     cfg = Settings.from_mapping({"subnet": {"netuid": 313, "network": "test"}})
     with pytest.raises(ConfigError) as excinfo:
         cfg.require_for_chain()
@@ -227,7 +238,8 @@ def test_testnet_netuid_with_mainnet_environment_is_refused() -> None:
 
 
 def test_a_coherent_config_passes() -> None:
-    """别把正常配置也拦了 —— 比后端严不是安全方向。"""
+    """Do not block valid configs too -- being stricter than the backend is not a
+    safety direction."""
     Settings.from_mapping(
         {"subnet": {"netuid": 80, "network": "finney"}}
     ).require_for_chain()
@@ -237,7 +249,8 @@ def test_a_coherent_config_passes() -> None:
 
 
 def test_a_self_hosted_backend_is_not_treated_as_a_conflict() -> None:
-    """指向自己搭的后端是合法的，这个检查不该逼所有人用我们的域名。"""
+    """Pointing at your own backend is legitimate; this check must not force everyone
+    onto our domain."""
     Settings.from_mapping(
         {
             "subnet": {"netuid": 80, "network": "finney"},
@@ -248,7 +261,8 @@ def test_a_self_hosted_backend_is_not_treated_as_a_conflict() -> None:
 
 
 def test_an_unknown_environment_name_fails_instead_of_falling_back() -> None:
-    """打错环境名必须报错。悄悄退回 mainnet = 拿真钱做测试。"""
+    """A misspelled environment name must fail. Quietly falling back to mainnet means
+    testing with real money."""
     cfg = Settings.from_mapping({"environment": "staging"})
     with pytest.raises(ConfigError) as excinfo:
         cfg.require_for_chain()
@@ -256,7 +270,8 @@ def test_an_unknown_environment_name_fails_instead_of_falling_back() -> None:
 
 
 def test_local_environment_accepts_any_backend_url() -> None:
-    """自建后端（本地开发、staging、同事的机器）必须能配 —— 否则没法测。"""
+    """Self-hosted backends (local development, staging, a colleague's machine) must be
+    configurable -- otherwise there is no way to test."""
     cfg = Settings.from_mapping(
         {
             "environment": "local",
@@ -267,19 +282,20 @@ def test_local_environment_accepts_any_backend_url() -> None:
     )
     cfg.require_for_chain()
     assert cfg.backend_url == "http://localhost:8001"
-    assert cfg.netuid == 313  # local 不约束链，你说了算
+    assert cfg.netuid == 313  # local puts no constraint on the chain; you decide
 
 
 def test_local_without_urls_is_refused_rather_than_silently_using_production() -> None:
-    """这条是 local 的**要害**。
+    """This is the **critical** one for local.
 
-    不清掉内置默认值的话，`environment: local` 却忘了配 URL 的人会静默连上
-    **生产**后端 —— 而他以为自己在本地测。宁可拒绝启动。
+    If the built-in defaults are not cleared, someone who sets `environment: local` but
+    forgets to configure the URLs silently connects to the **production** backend --
+    while believing they are testing locally. Better to refuse to start.
     """
     cfg = Settings.from_mapping(
         {"environment": "local", "subnet": {"netuid": 313, "network": "test"}}
     )
-    assert cfg.backend_url == "", "local 必须清掉生产默认值"
+    assert cfg.backend_url == "", "local must clear the production defaults"
     assert cfg.control_json_url == ""
     with pytest.raises(ConfigError) as excinfo:
         cfg.require_for_chain()
@@ -287,7 +303,8 @@ def test_local_without_urls_is_refused_rather_than_silently_using_production() -
 
 
 def test_local_pointing_at_a_hosted_environment_is_a_contradiction() -> None:
-    """说 local 却填生产地址 —— 不是一套配置，是自相矛盾，得说出来。"""
+    """Saying local while filling in production addresses is not a configuration, it is
+    a self-contradiction, and it has to be said out loud."""
     cfg = Settings.from_mapping(
         {
             "environment": "local",

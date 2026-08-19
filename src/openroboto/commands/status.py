@@ -1,16 +1,21 @@
-"""`openroboto status` —— 查提交状态与被拒原因。
+"""`openroboto status` -- look up submission status and rejection reasons.
 
-两个端点都**不需要 API key**（2026-08-17 实测）：
+Both endpoints need **no API key** (measured 2026-08-17):
 
-- `/api/v1/submissions/history` —— 提交进到队列之后的状态；
-- `/api/v1/scan-rejections`     —— 提交在扫链阶段就被拒的原因
-  （burn 区块太旧、金额不对、模型撞哈希……）。
+- `/api/v1/submissions/history` -- the status after a submission has entered
+  the queue;
+- `/api/v1/scan-rejections`     -- why a submission was rejected already at
+  the chain-scan stage (burn block too old, wrong amount, model hash
+  collision, ...).
 
-「上链了但队列里什么都没有」就是靠第二个端点回答的 —— 这是矿工最常问的问题，
-以前只能手 curl。
+"It went on chain but there is nothing in the queue" is answered by the second
+endpoint -- the question miners ask most often, which previously could only be
+answered by curling by hand.
 
-被拒记录带 `reason` 时会多打两行：稳定错误码，以及**要不要再烧一笔 TAO 重试**。
-「基建抖了一下」和「你的模型格式不对」在这里必须一眼可分 —— 猜错的那一边是矿工付账。
+When a rejection record carries a `reason`, two extra lines are printed: the
+stable error code, and **whether to burn another TAO and retry**. "The
+infrastructure flapped" and "your model format is wrong" must be
+distinguishable here at a glance -- guessing wrong is paid for by the miner.
 """
 
 from __future__ import annotations
@@ -32,12 +37,16 @@ _Row = TypeVar("_Row", SubmissionHistoryItem, ScanRejection)
 
 
 def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    parser = subparsers.add_parser("status", help="查提交状态与拒绝原因")
+    parser = subparsers.add_parser(
+        "status", help="Look up submission status and rejection reasons"
+    )
     parser.add_argument("--config", default="miner.yaml")
-    parser.add_argument("--hotkey", default="", help="hotkey SS58，默认取 miner.yaml")
-    parser.add_argument("--round", type=int, default=0, help="只看某一轮")
     parser.add_argument(
-        "--limit", type=int, default=DEFAULT_LIMIT, help="每类最多显示几条"
+        "--hotkey", default="", help="hotkey SS58; defaults to the one in miner.yaml"
+    )
+    parser.add_argument("--round", type=int, default=0, help="Only show this round")
+    parser.add_argument(
+        "--limit", type=int, default=DEFAULT_LIMIT, help="Max rows shown per section"
     )
     parser.set_defaults(handler=run)
 
@@ -47,19 +56,19 @@ def run(args: argparse.Namespace) -> int:
     hotkey = args.hotkey or settings.hotkey_ss58
     if not hotkey:
         raise ConfigError(
-            "不知道查谁的提交 —— 用 `--hotkey <SS58>`，"
-            "或在 miner.yaml 填 subnet.hotkey_ss58"
+            "Don't know whose submissions to look up -- pass `--hotkey <SS58>`, "
+            "or set subnet.hotkey_ss58 in miner.yaml"
         )
 
-    say(f"后端: {settings.backend_url}")
+    say(f"backend: {settings.backend_url}")
     say(f"hotkey: {hotkey}")
     say("")
 
     history = fetch_submissions(settings.backend_url, hotkey, args.limit)
     submissions = _by_round(history.data, args.round)
-    say(f"提交（{len(submissions)} 条）")
+    say(f"Submissions ({len(submissions)})")
     if not submissions:
-        say("  （没有记录。如果你刚 announce，等一个扫链周期再看）")
+        say("  (No records. If you just ran announce, wait one chain-scan cycle.)")
     for row in submissions:
         say(
             f"  round={row.round_num} "
@@ -73,56 +82,65 @@ def run(args: argparse.Namespace) -> int:
     rejected = fetch_rejections(settings.backend_url, hotkey, args.limit)
     rejections = _by_round(rejected.data, args.round)
     say("")
-    say(f"扫链阶段被拒（{len(rejections)} 条）")
+    say(f"Rejected during chain scan ({len(rejections)})")
     if not rejections:
-        say("  （没有被拒记录）")
+        say("  (No rejections.)")
     for rejection in rejections:
         say(f"  round={rejection.round_num} burn_block={rejection.burn_block}")
-        say(f"    原因: {rejection.reject_reason or '?'}")
+        say(f"    reason: {rejection.reject_reason or '?'}")
         for line in explain(rejection.reason):
             say(f"    {line}")
     say_more_hint(rejected.meta.page.has_more, rejected.meta.page.total)
     if rejections:
         say("")
-        say("被拒的 burn 不退款。修掉原因后重新 `openroboto submit`（会烧新的一笔）。")
+        say(
+            "A rejected burn is not refunded. Fix the reason, then run "
+            "`openroboto submit` again (it burns a new one)."
+        )
     return 0
 
 
 def explain(reason: Reason | None) -> list[str]:
-    """把一条 `reason` 摊成矿工能照着做下一步的两行。
+    """Flatten one `reason` into the two lines a miner can act on.
 
-    `code` 是稳定机器码（写脚本按它分支），`retryable` 回答「还要不要再烧一笔」。
-    老字段 `reject_reason` 照旧打在上面一行 —— 这是加法，不是替换。
+    `code` is the stable machine code (scripts branch on it), and `retryable`
+    answers "do I have to burn another one". The old `reject_reason` field is
+    still printed on the line above -- this is an addition, not a replacement.
     """
     if reason is None:
         return []
     return [
-        f"错误码: {reason.code}（来自 {reason.source} 阶段）",
+        f"error code: {reason.code} (from the {reason.source} stage)",
         retry_advice(reason.retryable),
     ]
 
 
 def say_more_hint(has_more: bool, total: int) -> None:
-    """还有没显示出来的记录就说一声。
+    """Say so when there are records that were not displayed.
 
-    `has_more` 由后端算好（`meta.page`），这里不再拿 `offset + len(rows) < total`
-    自己推一遍 —— 那个表达式每复制一次就多一次算错的机会，而算错的表现是
-    「矿工以为自己只提交了这么几次」。
+    `has_more` is computed by the backend (`meta.page`); we no longer derive it
+    again here from `offset + len(rows) < total` -- every copy of that
+    expression is one more chance to get it wrong, and getting it wrong shows
+    up as "the miner believes they only submitted this many times".
     """
     if has_more:
-        say(f"  （共 {total} 条，这里只显示了前面几条；用 `--limit` 调大）")
+        say(f"  ({total} in total, only the first few shown -- raise `--limit`)")
 
 
 def display_status(row: SubmissionHistoryItem) -> str:
-    """把后端返回的状态词换成协议词表。
+    """Map the status word returned by the backend onto the protocol
+    vocabulary.
 
-    只读 `eval_status`。**旧的 `status` 列不在这里出现，因为模型里根本没有它** ——
-    两列有 52 行不一致，先读 `status` 正是历史上 95 条里 33 条状态显示错的根因。
+    Reads `eval_status` only. **The old `status` column does not appear here,
+    because the model does not have it at all** -- the two columns disagree on
+    52 rows, and reading `status` first is exactly the root cause of the 33
+    out of 95 records that historically displayed the wrong status.
 
-    TODO(阻断问题 ①)：worker 只认 `done` / `scored` / `failed`，后端给
-    `evaluated` / `eval_failed`。这里统一用 protocol 的词表显示；
-    等两边定案后，如果需要反向转换（协议词 → worker 词），加在这个函数旁边，
-    不要散到各个调用点。
+    TODO(blocking issue ①): the worker only knows `done` / `scored` /
+    `failed`, while the backend gives `evaluated` / `eval_failed`. Here we
+    display uniformly using the protocol's vocabulary; once both sides settle
+    it, if a reverse conversion is needed (protocol word → worker word), add
+    it next to this function and do not scatter it across the call sites.
     """
     return normalize_status(row.eval_status) if row.eval_status else "?"
 
@@ -138,7 +156,9 @@ def _by_round(rows: list[_Row], round_num: int) -> list[_Row]:
 
 
 def _load_settings(path: str) -> Settings:
-    """配置文件读不到也要能查 —— 这条命令是排障用的，不该被配置问题挡住。"""
+    """Querying must work even when the config file cannot be read -- this
+    command is for troubleshooting and must not be blocked by a config
+    problem."""
     try:
         return Settings.load(path)
     except ConfigError:

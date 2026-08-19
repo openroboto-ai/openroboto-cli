@@ -1,4 +1,4 @@
-"""链交互：连接、commitment 公告、权重。"""
+"""Chain interaction: connection, commitment announcement, weights."""
 
 from __future__ import annotations
 

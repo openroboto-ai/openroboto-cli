@@ -1,6 +1,6 @@
-"""命令层：init / check / build / status / round_state / preflight。
+"""Command layer: init / check / build / status / round_state / preflight.
 
-都是纯本地逻辑，不碰网络、不碰 GPU、不碰链。
+All pure local logic: no network, no GPU, no chain.
 """
 
 from __future__ import annotations
@@ -34,14 +34,15 @@ from openroboto.round_state import (
     save_state,
 )
 
-BIG_ENOUGH = 11 * 1024 * 1024  # 协议要求整仓 >= 10 MB，低于这个数判「只传了指针」
+BIG_ENOUGH = 11 * 1024 * 1024  # the protocol requires >= 10 MB per repo; below that it
+# is judged "only a pointer was uploaded"
 
 
 # ─── init ────────────────────────────────────────────────────
 
 
 def test_init_releases_config_and_strategy(tmp_path: Path) -> None:
-    """矿工全程零 clone：模板打在 wheel 里，init 释放出来。"""
+    """Miners clone nothing: the templates ship in the wheel and init unpacks them."""
     args = argparse.Namespace(
         directory=str(tmp_path / "my-miner"),
         strategy="simple",
@@ -53,7 +54,7 @@ def test_init_releases_config_and_strategy(tmp_path: Path) -> None:
     target = tmp_path / "my-miner"
     assert (target / "miner.yaml").is_file()
     assert "def train(" in (target / "train_strategy.py").read_text(encoding="utf-8")
-    # 模板必须能被自己的解析器读回来
+    # the template must be readable back by our own parser
     assert Settings.load(str(target / "miner.yaml")).netuid == 80
 
 
@@ -82,11 +83,13 @@ def test_init_validator_writes_validator_config_only(tmp_path: Path) -> None:
 
 
 def test_init_gitignores_the_file_holding_the_wallet_password(tmp_path: Path) -> None:
-    """`.gitignore` 必须挡住配置文件 —— 这是安全项，不是便利项。
+    """`.gitignore` must block the config file -- this is a security item, not a
+    convenience item.
 
-    `miner.yaml` 里有 `subnet.wallet_password` 和 `huggingface.token`，
-    而矿工版本化自己的 `train_strategy.py` 是完全合理的行为。少了这条，
-    第一次 `git add .` 就把钱包密码提交进去了，而且**不会有任何提示**。
+    `miner.yaml` holds `subnet.wallet_password` and `huggingface.token`, and it is
+    entirely reasonable for a miner to version their own `train_strategy.py`. Without
+    this line, the very first `git add .` commits the wallet password, and **there is
+    no warning of any kind**.
     """
     for validator in (False, True):
         target = tmp_path / ("val" if validator else "miner")
@@ -101,14 +104,16 @@ def test_init_gitignores_the_file_holding_the_wallet_password(tmp_path: Path) ->
         ignored = (target / ".gitignore").read_text(encoding="utf-8")
         assert "miner.yaml" in ignored
         assert "validator.yaml" in ignored
-        # 策略脚本反过来**必须**可提交 —— 它是矿工的成果，值得留历史。
+        # the strategy script, conversely, **must** stay committable -- it is the
+        # miner's own work and deserves a history.
         assert "train_strategy.py" not in ignored
 
 
 def test_init_writes_a_workspace_readme_that_names_the_next_command(
     tmp_path: Path,
 ) -> None:
-    """工作区自带手册。矿工不该为了知道下一步敲什么去翻网页。"""
+    """The workspace ships its own manual. A miner should not have to open a web page
+    to find out which command comes next."""
     args = argparse.Namespace(
         directory=str(tmp_path / "w"), strategy="simple", validator=False, force=False
     )
@@ -116,8 +121,8 @@ def test_init_writes_a_workspace_readme_that_names_the_next_command(
 
     readme = (tmp_path / "w" / "README.md").read_text(encoding="utf-8")
     for command in ("openroboto doctor", "openroboto train", "openroboto check"):
-        assert command in readme, f"README 没提 {command}"
-    # 跳过 check 的代价是不可退的 TAO，这句必须在
+        assert command in readme, f"README does not mention {command}"
+    # skipping check costs non-refundable TAO, so this sentence must be there
     assert "not refunded" in readme
 
 
@@ -127,11 +132,11 @@ def test_init_writes_a_workspace_readme_that_names_the_next_command(
 def _make_file(path: Path, size: int) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(b"")
-    os.truncate(path, size)  # 稀疏文件，不真写 11 MB
+    os.truncate(path, size)  # sparse file; does not actually write 11 MB
 
 
 def test_check_rejects_a_bare_lora_adapter(tmp_path: Path) -> None:
-    """这条路径就是「烧完 TAO 才发现传的是 adapter」的那一次。"""
+    """This path is the "burned the TAO, then found out an adapter was uploaded" run."""
     _make_file(tmp_path / "adapter_model.safetensors", BIG_ENOUGH)
     (tmp_path / "adapter_config.json").write_text("{}", encoding="utf-8")
 
@@ -182,28 +187,35 @@ def test_build_prefers_local_context(
 def test_build_falls_back_to_the_packaged_context(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """没有本地目录时用**包内**那份镜像定义 —— 矿工不用 clone、不用联网。
+    """With no local directory, use the image definition **inside the package** -- no
+    clone and no network access required from the miner.
 
-    这条替换了原先"退回 docker git 远程上下文"的用例。那条路对 pip 装的矿工
-    根本走不通：仓库上线前是私有的，`docker build <git-url>` 的匿名抓取返回 401。
-    而且它钉 `#main`，装固定版本 CLI 的人会用 main 的镜像定义构建，
-    与红线 #2 那套固定的容器接口对不上。
+    This replaced the earlier test for "fall back to the docker git remote context".
+    That path simply does not work for a miner who installed via pip: the repository is
+    private until launch, and the anonymous fetch of `docker build <git-url>` returns
+    401. It also pinned `#main`, so anyone on a fixed CLI version would build with
+    main's image definition, which does not match the fixed container interface of
+    red line #2.
     """
     monkeypatch.chdir(tmp_path)
     context = Path(build_command.resolve_context())
 
-    assert not context.is_absolute() or context.is_dir(), "上下文必须真实存在"
-    assert (context / "Dockerfile").is_file(), f"{context} 里没有 Dockerfile"
-    assert "github.com" not in str(context), "不该再依赖远程仓库"
+    assert not context.is_absolute() or context.is_dir(), "the context must exist"
+    assert (context / "Dockerfile").is_file(), f"no Dockerfile inside {context}"
+    assert "github.com" not in str(context), (
+        "must not depend on the remote repository any more"
+    )
 
 
 def test_packaged_runner_context_ships_a_self_contained_build(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """包内上下文必须自成一体：Dockerfile 里 COPY 的文件都得在。
+    """The packaged context must be self-contained: every file the Dockerfile COPYs
+    has to be present.
 
-    少一个文件的表现是 `docker build` 在矿工机器上失败，而我们这里全绿 ——
-    构建上下文的完整性没法靠 code review 保证。
+    A missing file shows up as `docker build` failing on the miner's machine while
+    everything here stays green -- the completeness of a build context cannot be
+    guaranteed by code review.
     """
     from openroboto import runner_context
 
@@ -216,9 +228,11 @@ def test_packaged_runner_context_ships_a_self_contained_build(
         for line in dockerfile.read_text(encoding="utf-8").splitlines()
         if line.strip().startswith("COPY ")
     ]
-    assert copied, "Dockerfile 一个 COPY 都没有？那这份上下文没有意义"
+    assert copied, "the Dockerfile has no COPY at all? then this context is pointless"
     for name in copied:
-        assert (context / name).is_file(), f"Dockerfile COPY 了 {name}，但包里没有它"
+        assert (context / name).is_file(), (
+            f"the Dockerfile COPYs {name}, but the package does not contain it"
+        )
 
 
 def test_build_command_assembly() -> None:
@@ -239,7 +253,7 @@ def test_state_round_trip_and_resolution(tmp_path: Path) -> None:
 
     assert load_state(3, base=tmp_path)["step"] == "training"
     assert is_step_done(load_state(3, base=tmp_path), "training")
-    # 4 号轮没跑完，自动判断要落回 3
+    # round 4 did not finish, so auto-resolution must fall back to 3
     assert resolve_round(0, base=tmp_path) == 3
     assert resolve_round(4, base=tmp_path) == 4
 
@@ -292,50 +306,59 @@ def test_preflight_rejects_a_short_commit_sha() -> None:
     assert any("hf_commit" in reason for reason in check_announce_ready(state, 1))
 
 
-# ─── burn 窗口（纯判定，边界照抄后端）─────────────────────────
+# ─── burn window (pure decision, boundary copied from the backend) ────────────
 
 
 def test_burn_window_boundary_matches_the_backend_exactly() -> None:
-    """后端是 `abs(diff) > window` 才拒。这三条把边界钉死。
+    """The backend only rejects on `abs(diff) > window`. These three cases pin the edge.
 
-    严一格就会拦掉后端本来会接受的提交；松一格矿工白烧。
+    One notch stricter blocks submissions the backend would have accepted; one notch
+    looser and the miner burns for nothing.
     """
-    # 正好等于窗口 → 放行（后端用 `>`，不是 `>=`）。
-    # 这里只断言"不阻塞"；贴边界的提醒会同时响，那是另一条用例的事。
+    # exactly equal to the window -> allowed (the backend uses `>`, not `>=`).
+    # only "not blocked" is asserted here; the near-the-edge warning fires at the same
+    # time, but that belongs to another test.
     assert check_burn_window(1_000, 1_050, 50)[0] == ""
 
-    # 超一个 → 阻塞
+    # one over -> blocked
     blocked, _ = check_burn_window(1_000, 1_051, 50)
-    # 断言数字而不是散文：措辞会被翻译、会被改写，而 51 与 50 是这条判定的事实。
+    # assert on the numbers, not the prose: wording gets translated and rewritten,
+    # while 51 and 50 are the facts of this decision.
     assert "51" in blocked and "50" in blocked
 
-    # 对称：burn 在 commit 之后同样算距离
+    # symmetry: a burn after the commit counts as distance too
     blocked_reverse, _ = check_burn_window(1_051, 1_000, 50)
-    # 对称性断言的是"两个方向都被拦"和"距离算出来一样"，
-    # 不比整句字符串 —— 措辞会变，abs() 的语义不会。
-    assert blocked_reverse, "burn 在 commit 之后同样超窗，必须也拦"
+    # the symmetry assertion is about "both directions are blocked" and "the distance
+    # comes out the same", not about the full sentence -- wording changes, the
+    # semantics of abs() do not.
+    assert blocked_reverse, (
+        "a burn after the commit is equally out of window and must also be blocked"
+    )
     assert "51" in blocked_reverse
 
 
 def test_burn_window_skips_when_either_block_is_unknown() -> None:
-    """区块为 0 时后端整段跳过，我们也跳过 —— 不能比后端更严。"""
+    """With a block of 0 the backend skips the whole section, so we skip it too -- we
+    must not be stricter than the backend."""
     assert check_burn_window(0, 1_000, 50) == ("", "")
     assert check_burn_window(1_000, 0, 50) == ("", "")
 
 
 def test_burn_window_warns_before_the_edge_without_blocking() -> None:
-    """贴边界要提醒（commitment 进块还要几个块），但**不能**算进阻塞判定。"""
+    """Close to the edge must warn (the commitment still needs a few blocks to be
+    included), but it **must not** count towards the blocking decision."""
     blocked, warning = check_burn_window(1_000, 1_048, 50)
-    assert blocked == ""  # 48 < 50，后端会接受
-    assert warning, "贴边界必须提醒"
+    assert blocked == ""  # 48 < 50, the backend will accept it
+    assert warning, "being close to the edge must produce a warning"
     assert "48" in warning and "50" in warning
 
 
 def test_preflight_size_estimate_includes_the_block_hash() -> None:
-    """旧预检把 block_hash 当空串，每次少算 64 字节 —— 边界上的 repo 名会
-    通过预检、烧掉 TAO，然后在上链那步炸。"""
+    """The old preflight treated block_hash as an empty string and so under-counted by
+    64 bytes every time -- a borderline repo name would pass preflight, burn the TAO,
+    and then blow up at the on-chain step."""
     size = payload_size(_ready_state(), 1)
-    assert size > 64  # 占位哈希确实进了估算
+    assert size > 64  # the placeholder hash really is part of the estimate
     assert size <= 512
 
 
@@ -346,7 +369,7 @@ def test_preflight_blocks_an_oversized_repository_name() -> None:
     assert any("512" in reason for reason in reasons)
 
 
-# ─── huggingface 小工具 ──────────────────────────────────────
+# ─── huggingface helpers ─────────────────────────────────────
 
 
 def test_commit_sha_is_parsed_from_the_commit_url() -> None:
@@ -362,7 +385,8 @@ def test_repo_id_follows_the_public_format() -> None:
 
 
 def test_repo_id_refuses_to_invent_a_fallback() -> None:
-    """旧代码在这里退回字面量 `miner`，模型会被传到没人评测的仓库里。"""
+    """The old code fell back to the literal `miner` here, so the model was uploaded to
+    a repository nobody evaluates."""
     with pytest.raises(ConfigError):
         build_repo_id(Settings(), "")
 
@@ -408,7 +432,8 @@ def test_status_round_filter() -> None:
 
 
 def test_status_explains_a_rejection_reason() -> None:
-    """矿工要的两件事：稳定错误码，以及「还要不要再烧一笔」。"""
+    """The two things a miner needs: a stable error code, and "do I have to burn
+    again"."""
     reason = Reason(
         code="BURN_TX_TOO_OLD",
         message="烧的那笔交易太旧了",
@@ -436,12 +461,14 @@ def test_status_only_mentions_more_rows_when_there_are_more(
 
 
 def test_doctor_flags_every_field_needed_before_spending() -> None:
-    """doctor 是花钱之前的最后一道拦截，缺项必须逐条点名。"""
+    """doctor is the last gate before money is spent, so every missing item must be
+    named individually."""
     results = doctor_command.check_settings(Settings())
     failed = {r.name for r in results if not r.ok}
-    # 断言条数与关键字段，不断言显示名 —— 显示名是给人看的，会被翻译/改写。
+    # assert on the count and the key fields, not on the display names -- display names
+    # are for humans and get translated or rewritten.
     assert "netuid" in failed and "hotkey_ss58" in failed
-    assert len(failed) == 4, f"空配置应当报 4 项，实际 {failed}"
+    assert len(failed) == 4, f"an empty config should report 4 items, got {failed}"
 
 
 def test_doctor_passes_on_a_complete_config() -> None:
@@ -456,24 +483,26 @@ def test_doctor_passes_on_a_complete_config() -> None:
 
 
 def test_doctor_renders_required_and_optional_differently() -> None:
-    required = doctor_command.CheckResult("A", False, "缺", required=True)
-    optional = doctor_command.CheckResult("B", False, "缺", required=False)
+    required = doctor_command.CheckResult("A", False, "missing", required=True)
+    optional = doctor_command.CheckResult("B", False, "missing", required=False)
     assert required.render().startswith("❌")
     assert optional.render().startswith("⚠️")
 
 
 def test_doctor_python_check_matches_the_supported_floor() -> None:
-    assert doctor_command.MIN_PYTHON == (3, 11)  # 矿工侧就是 3.11，不是 3.12
+    assert doctor_command.MIN_PYTHON == (3, 11)  # miners are on 3.11, not 3.12
     assert doctor_command.check_python().ok
 
 
 def test_doctor_control_check_applies_the_rate_it_fetched(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """`check_control` 必须把抓到的费率**写进 settings**，不只是显示出来。
+    """`check_control` must **write the fetched rate into settings**, not just display
+    it.
 
-    `check_wallet` 在它之后跑，靠 `settings.burn_rate_tao` 判断余额够不够。
-    只显示不应用的话，余额那项永远报「费率未知」—— 而且不会有人发现。
+    `check_wallet` runs after it and relies on `settings.burn_rate_tao` to decide
+    whether the balance is enough. If the rate is only displayed and not applied, the
+    balance check always reports "rate unknown" -- and nobody would notice.
     """
     from openroboto.config.control import ControlFetch
 
@@ -491,16 +520,18 @@ def test_doctor_control_check_applies_the_rate_it_fetched(
 
     result = doctor_command.check_control(settings)
     assert result.ok
-    assert settings.burn_rate_tao == 0.1  # 应用了，不是只印出来
+    assert settings.burn_rate_tao == 0.1  # applied, not merely printed
     assert "0.1" in result.detail
 
 
 def test_doctor_balance_check_does_not_crash_on_an_unknown_rate(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """费率未知时不能拿 `None` 去比余额，也不能假装够。
+    """With an unknown rate we must not compare the balance against `None`, and must
+    not pretend it is sufficient.
 
-    doctor 是花钱前的自检入口，「查不出来」要如实报成查不出来。
+    doctor is the self-check entry point before money is spent, so "could not
+    determine" has to be reported honestly as such.
     """
 
     class _Subtensor:
@@ -510,7 +541,7 @@ def test_doctor_balance_check_does_not_crash_on_an_unknown_rate(
         def close(self) -> None:
             pass
 
-    # `check_wallet` 里是惰性 import，所以要打在源模块上。
+    # `check_wallet` imports lazily, so the patch has to go on the source module.
     import openroboto.chain as chain_module
 
     monkeypatch.setattr(chain_module, "get_subtensor", lambda network: _Subtensor())

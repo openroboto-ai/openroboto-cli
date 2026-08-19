@@ -1,12 +1,16 @@
-"""烧钱之前的自检。
+"""The self-check that runs before spending money.
 
-burn 之后才发现 commitment 发不出去 = TAO 白烧且不退款。所以 `burn` 与 `submit`
-都在**花钱之前**跑这一遍：断点里该有的字段齐不齐、payload 编得出来吗、超没超 512 字节。
+Finding out only after the burn that the commitment cannot be sent = the TAO
+is burned for nothing and is not refunded. So both `burn` and `submit` run
+this pass **before spending anything**: are the fields that should be in the
+checkpoint all there, can the payload be encoded, does it exceed 512 bytes.
 
-旧 `rt.py::check_announce_ready` 估算 payload 大小时把 `h`（区块哈希）当成空串，
-而真正上链时它是 64 个十六进制字符 —— 也就是**每次都少算 64 字节**。
-一个刚好卡在边界上的 hf_repo_id 会顺利通过预检、烧掉 TAO，然后在上链那步炸掉。
-这里用一个 64 字符的占位哈希估算，宁可高估。
+The old `rt.py::check_announce_ready` treated `h` (the block hash) as an empty
+string when estimating the payload size, while on chain it is 64 hexadecimal
+characters -- meaning **it undercounted by 64 bytes every single time**. An
+hf_repo_id sitting right on the boundary would sail through the preflight,
+burn the TAO, and then blow up at the on-chain step. Here the estimate uses a
+64-character placeholder hash, preferring to overestimate.
 """
 
 from __future__ import annotations
@@ -21,56 +25,73 @@ from openroboto_protocol.commitment import (
 
 HF_COMMIT_LEN = 40
 BLOCK_HASH_PLACEHOLDER = "f" * 64
-"""估算用的占位区块哈希，长度与真实值一致。"""
+"""Placeholder block hash used for estimation, the same length as a real
+one."""
 
 COMMIT_LAG_BLOCKS = 5
-"""commitment 从发出到进块的余量估计（区块）。
+"""Estimated margin (in blocks) between sending a commitment and it being
+included in a block.
 
-窗口只剩这么点时先提醒一句：检查是在**当前**区块做的，而 commitment 真正进块
-还要再晚几个块，正好卡边界的提交会在后端那边超窗。**不能把它算进阻塞判定** ——
-那样就比后端严，会拦掉后端本来会接受的提交。
+When only this much of the window is left, emit a warning first: the check is
+performed at the **current** block, while the commitment is actually included
+a few blocks later, so a submission sitting exactly on the boundary will
+overrun the window on the backend's side. **It must not be folded into the
+blocking decision** -- that would be stricter than the backend and would
+reject submissions the backend would have accepted.
 """
 
 
 def check_burn_window(
     burn_block: int, commit_block: int, window: int
 ) -> tuple[str, str]:
-    """burn 与 commitment 的区块距离还在后端窗口内吗？
+    """Is the block distance between burn and commitment still inside the
+    backend's window?
 
-    返回 `(阻塞原因, 提醒)`，都是空串表示没问题。**纯函数**：不碰链、不打印，
-    判定和呈现分开（呈现在 `commands/announce.py`）。
+    Returns `(blocking reason, warning)`; both being empty strings means
+    everything is fine. **A pure function**: it does not touch the chain and
+    does not print, keeping the decision separate from the presentation (the
+    presentation lives in `commands/announce.py`).
 
-    判定照抄后端 `scanner/burn_verify.py:68-75`，三处细节必须一致，
-    否则这个检查会拦住本来能过的提交：
+    The decision is copied verbatim from the backend's
+    `scanner/burn_verify.py:68-75`; three details must match, otherwise this
+    check will block submissions that would have passed:
 
-    1. `abs(burn_block - commit_block)`：**对称**，burn 在前在后都算距离；
-    2. `> window` 才拒 —— 正好等于窗口是**放行**的；
-    3. 任一区块为 0（未知）时后端**整段跳过**这项检查，这里也跳过。
+    1. `abs(burn_block - commit_block)`: **symmetric**, the distance counts
+       whether the burn came before or after;
+    2. it rejects only when `> window` -- being exactly equal to the window
+       **passes**;
+    3. when either block is 0 (unknown), the backend **skips this whole
+       check**, and so does this function.
     """
     if burn_block <= 0 or commit_block <= 0:
-        return "", ""  # 后端此时也不查，不要比后端更严
+        return "", ""  # the backend does not check either; never be stricter
 
     diff = abs(commit_block - burn_block)
     if diff > window:
         return (
-            f"burn 距今已经 {diff} 个区块，超出后端窗口 {window} —— "
-            f"现在公告上去会被判 `rejected`，而且**已经烧掉的 TAO 不退**。\n"
-            f"   burn 在区块 {burn_block}，当前区块 {commit_block}。\n"
-            f"   → 这一轮的这笔 burn 作废了。下次 `openroboto submit` 一次跑完，"
-            f"或者 burn 完立刻 announce，别隔太久",
+            f"The burn is {diff} blocks old, past the backend window of {window} "
+            f"-- announcing now will be `rejected`, and **the TAO you already "
+            f"burned is not refunded**.\n"
+            f"   The burn is in block {burn_block}, the current block is "
+            f"{commit_block}.\n"
+            f"   \u2192 this round's burn is wasted. Next time run `openroboto "
+            f"submit` in one go, or announce immediately after burning -- do not "
+            f"leave a long gap",
             "",
         )
 
     if diff > window - COMMIT_LAG_BLOCKS:
         return "", (
-            f"burn 距今 {diff} 个区块，窗口是 {window} —— 贴着边界了，"
-            f"commitment 进块时可能刚好超出。别再等了"
+            f"The burn is {diff} blocks old and the window is {window} -- that is "
+            f"right on the edge, and the commitment may land just past it once it "
+            f"is included in a block. Do not wait any longer"
         )
     return "", ""
 
 
 def check_announce_ready(state: dict[str, Any], round_num: int) -> list[str]:
-    """返回阻止提交的原因列表；空列表表示可以往下走。"""
+    """Return the list of reasons blocking the submission; an empty list means
+    it is fine to continue."""
     reasons: list[str] = []
 
     hf_repo_id = str(state.get("hf_repo_id", ""))
@@ -79,19 +100,23 @@ def check_announce_ready(state: dict[str, Any], round_num: int) -> list[str]:
     hotkey_ss58 = str(state.get("hotkey_ss58", ""))
 
     if not hf_repo_id:
-        reasons.append("断点里没有 hf_repo_id —— 先跑 `openroboto upload`")
-    if not hf_url:
-        reasons.append("断点里没有 hf_url —— 先跑 `openroboto upload`")
-    if len(hf_commit) != HF_COMMIT_LEN:
-        shown = hf_commit[:12] if hf_commit else "空"
         reasons.append(
-            f"hf_commit 不合法（{shown}，应为 40 位十六进制）—— "
-            "重跑 `openroboto upload`"
+            "No hf_repo_id in the checkpoint state -- run `openroboto upload` first"
+        )
+    if not hf_url:
+        reasons.append(
+            "No hf_url in the checkpoint state -- run `openroboto upload` first"
+        )
+    if len(hf_commit) != HF_COMMIT_LEN:
+        shown = hf_commit[:12] if hf_commit else "empty"
+        reasons.append(
+            f"Invalid hf_commit ({shown}, expected 40 hexadecimal characters) "
+            "-- run `openroboto upload` again"
         )
     if not hotkey_ss58:
         reasons.append(
-            "断点里没有 hotkey_ss58 —— "
-            "在 miner.yaml 补 subnet.hotkey_ss58 后重跑 upload"
+            "No hotkey_ss58 in the checkpoint state -- "
+            "add subnet.hotkey_ss58 to miner.yaml and run upload again"
         )
 
     if hf_repo_id and hotkey_ss58:
@@ -99,15 +124,16 @@ def check_announce_ready(state: dict[str, Any], round_num: int) -> list[str]:
             payload_size(state, round_num)
         except CommitmentTooLargeError as exc:
             reasons.append(
-                f"commitment payload 超长（{exc.size} > 512 字节）—— "
-                "换一个更短的 HF 仓库名"
+                f"The commitment payload is too large ({exc.size} > 512 bytes) "
+                "-- pick a shorter HF repo name"
             )
 
     return reasons
 
 
 def payload_size(state: dict[str, Any], round_num: int) -> int:
-    """预估上链 payload 的字节数（用占位区块哈希与 burn 字段）。"""
+    """Estimate the byte size of the on-chain payload (using the placeholder
+    block hash and the burn fields)."""
     payload = CommitmentPayload(
         hotkey_ss58=str(state.get("hotkey_ss58", "")),
         block_hash=BLOCK_HASH_PLACEHOLDER,

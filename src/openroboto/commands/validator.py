@@ -1,11 +1,14 @@
-"""`openroboto validator run` —— 外部验证者常驻进程（旧 `validator.py`）。
+"""`openroboto validator run` -- the external validator's long-running process
+(the old `validator.py`).
 
-验证者**不跑评测**：后端算好权重，它只负责读回来设到链上。
-control.json 每轮会刷新 `public_key`，所以循环里顺带更新它 ——
-key 轮换时验证者不用重启。
+A validator **does not run evaluations**: the backend computes the weights,
+and it is only responsible for reading them back and setting them on chain.
+control.json refreshes `public_key` every round, so the loop updates it along
+the way -- a validator does not have to be restarted when the key rotates.
 
-旧循环里每 60 秒调一次 `scan_chain_submissions()` 但**返回值一处都没用** ——
-一次全量 metagraph 同步加上逐个 hotkey 读 commitment，纯粹白烧 RPC。这次去掉。
+The old loop called `scan_chain_submissions()` every 60 seconds but **used the
+return value in exactly zero places** -- a full metagraph sync plus reading the
+commitment of every hotkey one by one, pure wasted RPC. It is removed here.
 """
 
 from __future__ import annotations
@@ -30,13 +33,15 @@ POLL_INTERVAL_SEC = 60
 
 
 def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    parser = subparsers.add_parser("validator", help="外部验证者")
+    parser = subparsers.add_parser("validator", help="External validator")
     inner = parser.add_subparsers(dest="validator_command", required=True)
 
-    run_parser = inner.add_parser("run", help="常驻：读后端权重并设到链上")
+    run_parser = inner.add_parser(
+        "run", help="Long-running: read weights from the backend and set them on chain"
+    )
     run_parser.add_argument("--config", default="validator.yaml")
     run_parser.add_argument(
-        "--once", action="store_true", help="只跑一轮就退出（cron / 调试用）"
+        "--once", action="store_true", help="Run one cycle and exit (cron / debugging)"
     )
     run_parser.set_defaults(handler=run)
 
@@ -45,9 +50,9 @@ def run(args: argparse.Namespace) -> int:
     settings = Settings.load(args.config)
     settings.require_for_chain()
 
-    say(f"验证者启动 | network={settings.network} netuid={settings.netuid}")
-    say(f"  后端: {settings.backend_url}")
-    say(f"  设权重间隔: {settings.weight_interval_min} 分钟")
+    say(f"validator started | network={settings.network} netuid={settings.netuid}")
+    say(f"  backend: {settings.backend_url}")
+    say(f"  weight-setting interval: {settings.weight_interval_min} min")
 
     subtensor = get_subtensor(settings.network)
     wallet = open_wallet(settings)
@@ -66,7 +71,7 @@ def run(args: argparse.Namespace) -> int:
                     apply_control(settings, fetched.control)
                     new_key = fetched.control.get("public_key", "")
                     if isinstance(new_key, str) and new_key and new_key != public_key:
-                        logger.info("control.json 里的 public_key 已更新")
+                        logger.info("public_key in control.json has been updated")
                         public_key = new_key
 
             now = time.time()
@@ -74,24 +79,27 @@ def run(args: argparse.Namespace) -> int:
                 if _set_weights_once(settings, subtensor, wallet, public_key):
                     last_weight_set = now
         except (BackendError, ControlFetchError) as exc:
-            # 基建故障：后端抖动 / control.json 拉不到。常驻进程不该因此退出。
-            logger.warning("本轮跳过：%s", exc)
-        except Exception as exc:  # 未知异常同样不能让常驻进程死掉
-            logger.error("循环异常：%s", exc, exc_info=True)
+            # Infrastructure failure: the backend flapped, or control.json
+            # could not be fetched. A long-running process must not exit for
+            # that.
+            logger.warning("skipping this cycle: %s", exc)
+        except Exception as exc:  # an unknown exception must not kill it either
+            logger.error("loop error: %s", exc, exc_info=True)
 
         if args.once:
             return 0
-        logger.info("%d 秒后再看一次", POLL_INTERVAL_SEC)
+        logger.info("checking again in %d seconds", POLL_INTERVAL_SEC)
         time.sleep(POLL_INTERVAL_SEC)
 
 
 def _set_weights_once(
     settings: Settings, subtensor: object, wallet: object, public_key: str
 ) -> bool:
-    """取一次权重并设到链上。返回是否真的设成功。"""
+    """Fetch the weights once and set them on chain. Returns whether they were
+    actually set successfully."""
     weights = fetch_weights(settings.backend_url, public_key)
     if not weights:
-        logger.warning("后端没有给出权重，本轮不设")
+        logger.warning("the backend returned no weights; not setting any this cycle")
         return False
 
     metagraph = get_metagraph(settings.netuid, settings.network, subtensor)

@@ -4,7 +4,8 @@
 > **Scope**: how clients read `control.json`. Not how the owner publishes it.
 > **Authority note**: `control.json` carries **only** `payment` / `dataset` / `training` /
 > `process`. It is not a backend configuration source — see
-> `openroboto-backend/docs/adr/01-control-json不是后端配置源.md`.
+> `openroboto-backend/docs/adr/01-control-json不是后端配置源.md` ("control.json is
+> not a backend config source").
 
 `control.json` is a public, read-only contract consumed by miners and the weight-setting validator. This repository documents how clients interpret the file. It does not include tools or procedures for changing subnet state.
 

@@ -1,16 +1,20 @@
-"""发起 burn 付费（链上 `add_stake_burn`）。
+"""Initiate the burn payment (on-chain `add_stake_burn`).
 
-⚠️ **红线：burn 金额换算与区块。** 下面三处逐字保留旧 `payment.py` 的写法：
+⚠️ **Red line: burn amount conversion and block.** The three places below preserve
+the old `payment.py` formulation verbatim:
 
-1. `int(amount_tao * 1e9)` —— TAO → Rao 的换算，**不许改成 `round()` 或 Decimal**。
-   后端按金额核对，差 1 Rao 就是拒绝，而拒绝不退款。
-2. `limit` 缺省值 `0xFFFFFFFFFFFFFFFF`（max u64 = 接受市价）。
-3. `wait_for_inclusion=True, wait_for_finalization=False` —— 必须等打包，
-   因为 `burn_block` 要写进 commitment，后端拿它算 burn 与 commit 的区块差
-   （生效窗口 50 个块，超了拒且不退）。
+1. `int(amount_tao * 1e9)` — the TAO → Rao conversion, which **must not be changed
+   to `round()` or Decimal**. The backend checks against the amount; being off by
+   1 Rao means rejection, and rejection means no refund.
+2. The `limit` default `0xFFFFFFFFFFFFFFFF` (max u64 = accept the market price).
+3. `wait_for_inclusion=True, wait_for_finalization=False` — inclusion must be
+   awaited, because `burn_block` goes into the commitment and the backend uses it
+   to compute the block distance between burn and commit (the effective window is
+   50 blocks; going over means rejected and not refunded).
 
-**校验**那一半（`verify_burn_on_chain`）没有搬过来：CLI 一处都不调它，
-它是后端 / 评测方的活，该进 protocol 包共享。见 SCOPE.md 待定 #3。
+The **verification** half (`verify_burn_on_chain`) was not moved over: the CLI
+never calls it, it is the backend's / evaluator's job, and it should go into the
+protocol package to be shared. See SCOPE.md open item #3.
 """
 
 from __future__ import annotations
@@ -24,16 +28,16 @@ logger = logging.getLogger(__name__)
 
 RAO_PER_TAO = 1e9
 MAX_U64 = 0xFFFFFFFFFFFFFFFF
-"""limit 传 max u64 = 接受任何市价。"""
+"""Passing max u64 as the limit = accept any market price."""
 
 
 class BurnError(Exception):
-    """burn 没发出去。TAO 没动，可以直接重试。"""
+    """The burn was never sent. The TAO has not moved, so retrying directly is safe."""
 
 
 @dataclass(frozen=True)
 class BurnReceipt:
-    """一次 burn 的凭据。两个字段都要写进 commitment。"""
+    """Proof of one burn. Both fields go into the commitment."""
 
     tx_hash: str
     block_number: int
@@ -47,14 +51,15 @@ def execute_stake_burn(
     hotkey_ss58: str | None = None,
     limit_price_rao: int = 0,
 ) -> BurnReceipt:
-    """在链上烧掉 `amount_tao`，返回 tx 与区块号。
+    """Burn `amount_tao` on chain and return the tx and block number.
 
     Raises:
-        BurnError: 交易失败或没能确定区块号。
+        BurnError: the transaction failed, or the block number could not be
+            determined.
     """
     target_hotkey = hotkey_ss58 or wallet.hotkey.ss58_address
     logger.info(
-        "🔥 发起 burn：%s TAO | netuid=%d | hotkey=%s...",
+        "🔥 Sending burn: %s TAO | netuid=%d | hotkey=%s...",
         amount_tao,
         netuid,
         target_hotkey[:8],
@@ -78,25 +83,28 @@ def execute_stake_burn(
     )
 
     if not receipt.is_success:
-        raise BurnError(f"burn 交易失败：{receipt.error_message}")
+        raise BurnError(f"The burn transaction failed: {receipt.error_message}")
 
     tx_hash = str(receipt.extrinsic_hash)
     block_number = resolve_burn_block(subtensor, receipt, tx_hash)
     if not block_number:
         raise BurnError(
-            f"burn 已提交（tx={tx_hash[:16]}...）但确定不了区块号。\n"
-            "  → 不要重复烧。用 `openroboto status` 查这笔是否已被扫链收下"
+            f"The burn was submitted (tx={tx_hash[:16]}...) but its block number "
+            f"could not be determined.\n"
+            "  \u2192 do not burn again. Run `openroboto status` to check whether "
+            "the chain scanner has picked this one up"
         )
 
-    logger.info("✅ burn 已提交 | tx=%s... block=%d", tx_hash[:16], block_number)
+    logger.info("✅ Burn submitted | tx=%s... block=%d", tx_hash[:16], block_number)
     return BurnReceipt(tx_hash=tx_hash, block_number=block_number)
 
 
 def resolve_burn_block(subtensor: Any, receipt: Any, tx_hash: str) -> int:
-    """确定 burn 落在哪个区块。三条路依次试。
+    """Determine which block the burn landed in. Three routes, tried in order.
 
-    SDK 即使 `wait_for_inclusion=True` 也可能不填 `block_number`；而这个值是
-    commitment 里的 `bb`，后端用它算区块窗口 —— 填 0 等于自己把提交判死。
+    Even with `wait_for_inclusion=True` the SDK may leave `block_number` unset; but
+    this value is `bb` in the commitment, which the backend uses to compute the
+    block window — filling in 0 is sentencing your own submission to death.
     """
     block_number = getattr(receipt, "block_number", None)
     if block_number:
@@ -106,8 +114,8 @@ def resolve_burn_block(subtensor: Any, receipt: Any, tx_hash: str) -> int:
     if block_hash:
         try:
             return int(subtensor.substrate.get_block_number(block_hash))
-        except Exception as exc:  # SDK 版本差异，失败就走扫块
-            logger.debug("get_block_number 失败：%s", exc)
+        except Exception as exc:  # SDK version differences; on failure, scan blocks
+            logger.debug("get_block_number failed: %s", exc)
 
     return scan_recent_blocks_for_tx(subtensor, tx_hash)
 
@@ -119,9 +127,10 @@ def scan_recent_blocks_for_tx(
     wait_sec: float = 2.0,
     depth: int = 15,
 ) -> int:
-    """在最近 `depth` 个块里找这笔交易，找不到返回 0。
+    """Look for this transaction in the last `depth` blocks; return 0 if not found.
 
-    交易刚提交时可能还在传播，所以带重试与退避。
+    A freshly submitted transaction may still be propagating, hence the retries and
+    backoff.
     """
     bare_hash = tx_hash.replace("0x", "")
     for attempt in range(max_retries):
@@ -137,8 +146,8 @@ def scan_recent_blocks_for_tx(
                         found = extrinsic.get("extrinsic_hash", "")
                         if found in (tx_hash, bare_hash, f"0x{bare_hash}"):
                             return number
-        except Exception as exc:  # 扫块是兜底，链抖动不该让流程炸掉
-            logger.debug("扫块失败（第 %d 次）：%s", attempt + 1, exc)
+        except Exception as exc:  # fallback scan; chain jitter must not break the run
+            logger.debug("Block scan failed (attempt %d): %s", attempt + 1, exc)
         if attempt < max_retries - 1:
             time.sleep(wait_sec)
     return 0

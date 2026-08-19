@@ -140,21 +140,24 @@ def check_coherent(
 
     problems: list[str] = []
     if env.host is None:
-        # 自建后端：不约束链，但**必须**说清后端在哪。
+        # Self-hosted backend: the chain is left unconstrained, but you
+        # **must** say where the backend is.
         for label, url in (
             ("urls.control_json", control_json_url),
             ("backend.url", backend_url),
         ):
             if not url:
                 problems.append(
-                    f"environment=local 必须显式配置 {label} —— "
-                    f"不配的话它会保持内置默认值，也就是**生产**地址，"
-                    f"你会以为在本地测，实际在跟主网后端说话。"
+                    f"environment=local requires {label} to be set explicitly -- "
+                    f"left unset it keeps the built-in default, which is the "
+                    f"**production** address. You would think you were testing "
+                    f"locally while actually talking to the mainnet backend."
                 )
             elif host_of(url) in {e.host for e in ENVIRONMENTS.values() if e.host}:
                 problems.append(
-                    f"environment=local 但 {label} 指向托管环境"
-                    f"（{host_of(url)}）—— 这不是一套配置，是自相矛盾。"
+                    f"environment=local, yet {label} points at a hosted environment "
+                    f"({host_of(url)}) -- that is not one configuration, it is a "
+                    f"contradiction."
                 )
         return problems
 

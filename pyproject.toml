@@ -8,34 +8,42 @@ license-files = ["LICENSE"]
 authors = [{ name = "OpenRoboto", email = "cameron@moonshotcommons.com" }]
 keywords = ["bittensor", "openroboto", "subnet", "miner", "cli"]
 
-# ⚠️ 3.11，不是 3.12。矿工机器上跑的就是 3.11
-# （openpi-runner/Dockerfile 与 SETUP_NATIVE.md 都写死 python3.11）。
-# 写 3.12 等于所有现有矿工装不上这个包。
+# ⚠️ 3.11, not 3.12. Miner machines run 3.11
+# (both openpi-runner/Dockerfile and SETUP_NATIVE.md hardcode python3.11).
+# Writing 3.12 means no existing miner can install this package.
 requires-python = ">=3.11"
 
-# 依赖要轻（AGENTS.md 红线 #4）。矿工只想提交模型，不该被迫装一堆东西。
-# 这里每一条都有人在用：
-#   openroboto-protocol —— commitment 编码 / checkpoint 格式判定，不许本地复制一份
-#   pyyaml             —— miner.yaml
-#   bittensor          —— 链交互（burn / commitment / set_weights）
-#   huggingface_hub    —— 模型上传
-# HTTP 一律用 stdlib urllib，不引 requests。
+# Keep dependencies light (AGENTS.md red line #4). A miner only wants to submit a
+# model and must not be forced to install a pile of things. Every entry here has a
+# real user:
+#   openroboto-protocol — commitment encoding / checkpoint format detection; a local
+#                         copy is not allowed
+#   pyyaml             — miner.yaml
+#   bittensor          — chain interaction (burn / commitment / set_weights)
+#   huggingface_hub    — model upload
+# HTTP always goes through stdlib urllib; requests is not pulled in.
 dependencies = [
-    # 精确钉死，不是 `>=`。版本号**就是**契约版本：浮动范围意味着矿工侧和后端侧
-    # 可能解析到不同的代码，而"两边能被证明装的是同一份"正是这个包唯一的存在理由。
-    # `.github/workflows/protocol-guards.yml` 会检查这一条（只查有没有 `==`，
-    # 具体版本对不对它管不了 —— 那要靠这里和协议包保持同步）。
+    # Pinned exactly, not `>=`. The version number **is** the contract version: a
+    # floating range means the miner side and the backend side may resolve to
+    # different code, and "both sides can be proven to have installed the same
+    # thing" is the only reason this package exists.
+    # `.github/workflows/protocol-guards.yml` enforces this (it only checks that
+    # `==` is present; whether the specific version is correct is beyond it — that
+    # depends on keeping this in sync with the protocol package).
     #
-    # ⚠️ 这个号必须等于 `../openroboto-protocol/pyproject.toml` 的 version。
-    # 曾经写成 `==1.0.0` 而协议包是 `0.2.0`：`[tool.uv.sources]` 的 path 覆盖
-    # 会**绕过版本约束**，所以本地和 CI 全都是绿的，装进环境的其实是 0.2.0。
-    # 等到发布前撤掉那段 path 覆盖、真从 PyPI 装，才会炸 —— 而那时正在发版。
+    # ⚠️ This number must equal the version in `../openroboto-protocol/pyproject.toml`.
+    # It was once written as `==1.0.0` while the protocol package was `0.2.0`: the
+    # path override in `[tool.uv.sources]` **bypasses the version constraint**, so
+    # local and CI were both green while what was actually installed was 0.2.0.
+    # It only blows up once the path override is removed before a release and the
+    # install really comes from PyPI — and that is exactly release time.
     "openroboto-protocol==0.2.0",
     "pyyaml>=6.0",
-    # 生产矿工机上跑的是 10.5.0（旧 requirements.txt 钉死这个版本）。
-    # 用到的两个 API 是 SDK 私有面：`publish_metadata_extrinsic`（commitment）
-    # 与 `substrate.compose_call("add_stake_burn")`（burn），大版本升级必然会动，
-    # 所以上界锁在 11。
+    # Production miner machines run 10.5.0 (the old requirements.txt pinned that
+    # version). The two APIs used are private surface of the SDK:
+    # `publish_metadata_extrinsic` (commitment) and
+    # `substrate.compose_call("add_stake_burn")` (burn); a major version bump is
+    # bound to move them, so the upper bound is locked at 11.
     "bittensor>=10.5,<11",
     "huggingface_hub>=0.24.0",
 ]
@@ -60,14 +68,18 @@ openroboto = "openroboto.cli:main"
 requires = ["uv_build>=0.10.11,<0.11.0"]
 build-backend = "uv_build"
 
-# 2026-08-19：`openroboto-protocol` 已发到 PyPI（0.1.0 / 0.2.0），
-# 此处原有的 `[tool.uv.sources]` path 覆盖已删除 —— 现在从 PyPI 装，
-# `uv sync` 不再需要同级的 openroboto-protocol/ 检出。
+# 2026-08-19: `openroboto-protocol` is now published on PyPI (0.1.0 / 0.2.0), so the
+# `[tool.uv.sources]` path override that used to live here has been deleted — the
+# install comes from PyPI now, and `uv sync` no longer needs a sibling
+# openroboto-protocol/ checkout.
 #
-# ⚠️ 别把它加回来。那个覆盖会**绕过版本约束**：上面 `==0.2.0` 曾经写成
-# `==1.0.0` 而本地检出是 0.2.0，本地和 CI 全绿，装进环境的其实是 0.2.0。
-# 要临时对着未发布的协议包改动开发，用 `uv pip install -e ../openroboto-protocol`
-# 显式覆盖，别写进 pyproject —— 那样至少是当次会话可见的，不会留在仓库里骗下一个人。
+# ⚠️ Do not add it back. That override **bypasses the version constraint**: the
+# `==0.2.0` above was once written as `==1.0.0` while the local checkout was 0.2.0;
+# local and CI were both green and what was installed was actually 0.2.0.
+# To develop temporarily against unreleased protocol changes, use
+# `uv pip install -e ../openroboto-protocol` as an explicit override; do not write it
+# into pyproject — that way it is at least visible for that session only and does not
+# stay in the repo to fool the next person.
 
 [dependency-groups]
 dev = [
@@ -82,52 +94,63 @@ dev = [
 target-version = "py311"
 line-length = 88
 src = ["src"]
-# 2026-08-19：旧结构（`rt.py` / `miner.py` / `validator.py` / `payment.py` /
-# `utils/` / `protocol/` / `miner/` / `requirements.txt`）已整体删除，所以这里
-# 不再需要为它们开豁免。**新增豁免要有理由** —— 一条 lint 豁免就是一块
-# 永远不会被检查的代码。
+# 2026-08-19: the old structure (`rt.py` / `miner.py` / `validator.py` / `payment.py` /
+# `utils/` / `protocol/` / `miner/` / `requirements.txt`) was deleted wholesale, so no
+# exemptions are needed for it here any more. **A new exemption must come with a
+# reason** — one lint exemption is one block of code that will never be checked again.
 extend-exclude = [
     "scripts",
-    # 模板与 runner 都是在训练容器里跑的独立脚本（依赖 openpi / torch，
-    # 本包不装它们），不参加本包的风格约束 —— 改它们的排版会让与容器侧的对照变难。
+    # The templates and the runner are both standalone scripts that run inside the
+    # training container (they depend on openpi / torch, which this package does not
+    # install); they do not take part in this package's style constraints — reformatting
+    # them would make diffing against the container side harder.
     "src/openroboto/templates",
     "src/openroboto/runner",
 ]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "T20", "RUF"]
-# 注释与 docstring 写中文，中文标点会被 RUF001-003 当作同形字逐个报出来，对本仓是纯噪音。
+# Comments and docstrings contain CJK text, and CJK punctuation gets reported one by
+# one by RUF001-003 as ambiguous characters, which is pure noise for this repo.
 ignore = ["RUF001", "RUF002", "RUF003"]
 
 [tool.ruff.lint.per-file-ignores]
-# CLI 就是要往 stdout 打字给矿工看，T20（print）在命令层不适用。
+# The CLI is meant to print to stdout for miners to read, so T20 (print) does not
+# apply at the command layer.
 "src/openroboto/commands/*.py" = ["T20"]
 "src/openroboto/console.py" = ["T20"]
-# 模板与容器侧脚本都不参与本包的类型与风格约束（见 [tool.mypy] 的说明）。
+# Templates and container-side scripts take part in neither the type nor the style
+# constraints of this package (see the note in [tool.mypy]).
 "src/openroboto/templates/*" = ["T20", "B", "RUF"]
 "src/openroboto/runner/*" = ["T20", "B", "RUF", "E", "UP", "I"]
 
 [tool.mypy]
 strict = true
 python_version = "3.11"
-# 只查新结构；旧文件与模板（模板在容器里跑，依赖 openpi/torch）不参加。
+# Only the new structure is checked; old files and templates (templates run inside the
+# container and depend on openpi/torch) are out.
 #
-# 不查 `tests/`：pytest 的 stub 会把 numpy 拖进来，而 numpy 的 stub 用了 3.12 才有的
-# `type` 语句 —— 我们按矿工侧的 3.11 检查，跟进去只会得到 numpy 自己的语法报错。
-# 测试的正确性由 pytest 保证，不由类型检查保证。
+# `tests/` is not checked: pytest's stubs drag numpy in, and numpy's stubs use the
+# `type` statement that only exists in 3.12 — we check against the miner side's 3.11,
+# so following them in would only produce numpy's own syntax errors.
+# The correctness of tests is guaranteed by pytest, not by the type checker.
 files = ["src/openroboto"]
-# `runner/train_runner.py` 也在容器里跑（openpi / torch，本包不装它们），
-# 和模板同一类：随包发布是为了让 `openroboto build` 离线可用，不是为了参加本包的
-# 类型约束。它只 import stdlib，容器侧的正确性由容器自己的运行保证。
+# `runner/train_runner.py` also runs inside the container (openpi / torch, which this
+# package does not install), same category as the templates: it ships with the package
+# so that `openroboto build` works offline, not so that it takes part in this package's
+# type constraints. It imports stdlib only, and the container side's correctness is
+# guaranteed by the container actually running.
 exclude = "src/openroboto/(templates|runner)/"
 
 [[tool.mypy.overrides]]
-# bittensor / huggingface_hub / torch 不带类型信息，且矿工机以外的环境（CI、本机）
-# 未必装得上 bittensor（它拖 torch）。所有链交互都在函数体内延迟 import，
-# 这样 `openroboto check` / `init` / `status` 在没有 bittensor 的机器上也能跑。
+# bittensor / huggingface_hub / torch ship no type information, and environments other
+# than miner machines (CI, a dev laptop) may not even be able to install bittensor (it
+# drags torch in). All chain interaction is imported lazily inside function bodies, so
+# that `openroboto check` / `init` / `status` also run on machines without bittensor.
 #
-# `follow_imports = "skip"` 是必需的：numpy 的 stub 用了 3.12 才有的 `type` 语句，
-# 而我们按 3.11 检查（矿工侧的版本）—— 跟进去只会检出 numpy 自己的语法差异。
+# `follow_imports = "skip"` is required: numpy's stubs use the `type` statement that
+# only exists in 3.12, while we check against 3.11 (the miner side's version) —
+# following them in would only surface numpy's own syntax differences.
 module = [
     "bittensor",
     "bittensor.*",
@@ -145,15 +168,20 @@ follow_imports = "skip"
 testpaths = ["tests"]
 
 [tool.coverage.report]
-# 门槛就是**实测值本身**，不是一个好看的整数，也不留余量 ——
-# 留 5 个点等于允许覆盖率静默回退 5 个点，掉下去的正好是没人替它写测试的那部分。
-# 数字看着怪是故意的：它是 `coverage run --source=src -m pytest` 今天跑出来的值。
+# The threshold is **the measured value itself**, not a good-looking round number, and
+# no slack is left — leaving 5 points means allowing coverage to silently regress by 5
+# points, and what drops out is exactly the part nobody wrote a test for.
+# The number looking odd is deliberate: it is what
+# `coverage run --source=src -m pytest` produced today.
 #
-# precision 必须写：默认 precision=0 时 coverage 拿**四舍五入后**的值和门槛比，
-# 59.5% 会被舍成 60% 通过 —— 半个点的静默回退，正是这条门槛要拦的东西。
+# precision must be set: with the default precision=0, coverage compares the **rounded**
+# value against the threshold, so 59.5% would be rounded up to 60% and pass — half a
+# point of silent regression, which is exactly what this gate is here to stop.
 #
-# 60% 不高，因为大量代码路径要真 GPU / 真链 / 真 Docker 才走得到（AGENTS.md §4：
-# 那些只测参数拼装，不测真跑）。它的作用不是"证明测够了"，是"不许往下掉"。
+# 60% is not high, because a large number of code paths are only reachable with a real
+# GPU / real chain / real Docker (AGENTS.md §4: those only test argument assembly, not
+# a real run). Its purpose is not to "prove there are enough tests", it is "must not
+# go down".
 fail_under = 64.46
 precision = 2
 show_missing = true

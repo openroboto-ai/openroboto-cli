@@ -1,4 +1,4 @@
-"""训练：容器调用、数据准备、单轮编排。"""
+"""Training: container invocation, data preparation, single-round orchestration."""
 
 from __future__ import annotations
 

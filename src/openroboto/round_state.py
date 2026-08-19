@@ -1,14 +1,18 @@
-"""每一轮的断点文件 `state/round_N.json`。
+"""The per-round checkpoint file `state/round_N.json`.
 
-train → upload → burn → announce 是四条**分别可能失败**的命令，中间状态必须落盘：
-训练跑了六个小时，upload 断在网络上，重跑不能从头训。文件格式与旧
-`miner.py` / `rt.py` 写的完全一致 —— 正在跑的矿工升级 CLI 之后，
-手上那份 `state/round_1.json` 要能被直接读下去。
+train → upload → burn → announce are four commands that **can each fail
+independently**, so the intermediate state must hit disk: training ran for six
+hours, upload died on the network, and rerunning must not retrain from
+scratch. The file format is exactly identical to what the old `miner.py` /
+`rt.py` wrote -- after a miner who is mid-run upgrades the CLI, the
+`state/round_1.json` they already have must still be readable as is.
 
-唯一的变化是**目录位置**：旧代码把 state 放在 `<仓库目录>/state`
-（`os.path.dirname(__file__)`）。装成 pip 包之后那个位置在 site-packages 里，
-所以改成相对**当前工作目录**的 `./state`。矿工原本就是在仓库目录里敲命令，
-路径实际没变。
+The only change is **the directory location**: the old code put state in
+`<repository directory>/state` (`os.path.dirname(__file__)`). Once installed
+as a pip package that location is inside site-packages, so it became `./state`
+relative to **the current working directory**. Miners were already typing
+commands inside the repository directory, so in practice the path did not
+change.
 """
 
 from __future__ import annotations
@@ -18,14 +22,16 @@ from pathlib import Path
 from typing import Any
 
 STATE_DIR = Path("state")
-"""断点目录，相对当前工作目录。"""
+"""Checkpoint directory, relative to the current working directory."""
 
 DEFAULT_OUTPUT_ROOT = Path("./tmp/robot_train_vla_miner")
-"""训练输出根目录。名字沿用旧默认值 —— 矿工的脚本和 systemd unit 里写着它。"""
+"""Root directory for training output. The name keeps the old default --
+miners' scripts and systemd units have it written down."""
 
 
 class StateError(Exception):
-    """断点文件缺失或无法判断轮次。消息里必须给出下一步怎么办。"""
+    """The checkpoint file is missing, or the round cannot be determined. The
+    message must say what to do next."""
 
 
 def state_path(round_num: int, base: Path = STATE_DIR) -> Path:
@@ -33,7 +39,9 @@ def state_path(round_num: int, base: Path = STATE_DIR) -> Path:
 
 
 def load_state(round_num: int, base: Path = STATE_DIR) -> dict[str, Any]:
-    """读一轮的断点。文件不存在或读坏了都当空 —— 空状态会让上游命令从头做。"""
+    """Read one round's checkpoint. A missing file or a corrupt read both count
+    as empty -- an empty state makes the upstream command start from
+    scratch."""
     path = state_path(round_num, base)
     try:
         loaded = json.loads(path.read_text(encoding="utf-8"))
@@ -43,7 +51,7 @@ def load_state(round_num: int, base: Path = STATE_DIR) -> dict[str, Any]:
 
 
 def save_state(round_num: int, state: dict[str, Any], base: Path = STATE_DIR) -> None:
-    """写一轮的断点。目录不存在就建。"""
+    """Write one round's checkpoint. Creates the directory if it is absent."""
     base.mkdir(parents=True, exist_ok=True)
     state_path(round_num, base).write_text(
         json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8"
@@ -51,15 +59,18 @@ def save_state(round_num: int, state: dict[str, Any], base: Path = STATE_DIR) ->
 
 
 def is_step_done(state: dict[str, Any], step: str) -> bool:
-    """某一步是否已经跑完。`step` + `status` 两个字段一起判，缺一不可。"""
+    """Whether a given step has already finished. The `step` and `status`
+    fields are judged together; neither one may be omitted."""
     return state.get("step") == step and state.get("status") == "completed"
 
 
 def resolve_round(explicit: int, base: Path = STATE_DIR) -> int:
-    """定位要操作哪一轮：显式 `--round` 优先，否则取最新一个跑完的轮次。
+    """Work out which round to operate on: an explicit `--round` wins,
+    otherwise take the most recent round that finished.
 
     Raises:
-        StateError: 一个完成的断点都没有 —— 此时猜轮次等于猜矿工要花的钱，宁可停。
+        StateError: There is not a single completed checkpoint -- guessing the
+            round here is guessing with the miner's money, so stop instead.
     """
     if explicit and explicit > 0:
         return explicit
@@ -77,13 +88,15 @@ def resolve_round(explicit: int, base: Path = STATE_DIR) -> int:
             return round_num
 
     raise StateError(
-        "无法自动判断轮次：state/ 下没有已完成的断点。\n"
-        "  → 用 `--round N` 显式指定，或先跑 `openroboto train`"
+        "Cannot determine the round automatically: no completed checkpoint "
+        "under state/.\n"
+        "  \u2192 pass `--round N` explicitly, or run `openroboto train` first"
     )
 
 
 def resolve_output_dir(round_num: int, base: Path = STATE_DIR) -> str:
-    """这一轮的模型输出目录。断点里记了就用记的，否则按默认规则拼。"""
+    """This round's model output directory. Use what the checkpoint recorded if
+    it recorded anything, otherwise build it from the default rule."""
     recorded = load_state(round_num, base).get("round_output")
     if isinstance(recorded, str) and recorded:
         return recorded
@@ -91,6 +104,7 @@ def resolve_output_dir(round_num: int, base: Path = STATE_DIR) -> str:
 
 
 def training_metrics(round_num: int, base: Path = STATE_DIR) -> dict[str, Any]:
-    """这一轮训练出来的指标，会随模型一起传到 HF。"""
+    """The metrics produced by this round's training; they are uploaded to HF
+    together with the model."""
     metrics = load_state(round_num, base).get("training_metrics")
     return metrics if isinstance(metrics, dict) else {}

@@ -1,7 +1,9 @@
-"""跑完一轮训练：下数据 → 进容器 → 收指标与训练证明。
+"""Run one training round: download data, run the container, collect metrics and
+the training proof.
 
-对应旧 `miner/trainer_vla.py::train_vla`。产物两个文件，都会随模型一起上传：
-`metrics.json`（训练指标）与 `training_proof.json`（训练证明）。
+Corresponds to the old `miner/trainer_vla.py::train_vla`. Two artifact files, both
+uploaded along with the model: `metrics.json` (training metrics) and
+`training_proof.json` (the training proof).
 """
 
 from __future__ import annotations
@@ -30,36 +32,49 @@ DOWNLOAD_TIMEOUT_SEC = 300
 DOWNLOAD_RETRIES = 3
 
 PI05_BASE_CHECKPOINT = "gs://openpi-assets/checkpoints/pi05_base"
-"""π0.5 基座 checkpoint 的公开地址。control.json 不指定时用它。"""
+"""Public address of the π0.5 base checkpoint.
+
+Used when control.json does not specify one.
+"""
 
 LOCAL_CHECKPOINT_CACHE = Path("cache/pi05_base")
-"""基座 checkpoint 的本地缓存目录，相对当前工作目录。
+"""Local cache directory for the base checkpoint, relative to the current working
+directory.
 
-`gs://` 路径不能直接挂进容器，所以这里准备一个空目录挂进去，让容器里的
-openpi 自己下载 —— 下一轮训练就能命中缓存，不用重下几个 GB。
+A `gs://` path cannot be mounted into the container directly, so an empty directory
+is prepared and mounted instead, letting the openpi inside the container do the
+download itself — the next training round then hits the cache instead of
+re-downloading several GB.
 """
 
 
 def resolve_checkpoint(configured: str) -> str:
-    """决定挂进容器的 checkpoint 路径。
+    """Decide which checkpoint path gets mounted into the container.
 
-    `gs://` 开头一律换成本地缓存目录（不存在就建空的）；其余路径原样返回。
-    与旧 `miner.py` 的分支一致。
+    Anything starting with `gs://` is always replaced by the local cache directory
+    (created empty if it does not exist); every other path is returned unchanged.
+    Matches the branching in the old `miner.py`.
     """
     path = configured or PI05_BASE_CHECKPOINT
     if not path.startswith("gs://"):
         return path
     LOCAL_CHECKPOINT_CACHE.mkdir(parents=True, exist_ok=True)
     if any(LOCAL_CHECKPOINT_CACHE.iterdir()):
-        logger.info("✅ 命中本地基座缓存：%s", LOCAL_CHECKPOINT_CACHE)
+        logger.info("✅ Local base-model cache hit: %s", LOCAL_CHECKPOINT_CACHE)
     else:
-        logger.info("📥 基座缓存为空，容器内下载后会落在：%s", LOCAL_CHECKPOINT_CACHE)
+        logger.info(
+            "📥 Base-model cache is empty; the container will download it into: %s",
+            LOCAL_CHECKPOINT_CACHE,
+        )
     return str(LOCAL_CHECKPOINT_CACHE)
 
 
 @dataclass
 class TrainParams:
-    """一轮训练的超参。来自 control.json 的 `training` 段。"""
+    """Hyperparameters for one training round.
+
+    Comes from the `training` section of control.json.
+    """
 
     epochs: int = 3
     batch_size: int = 4
@@ -81,14 +96,14 @@ class TrainParams:
 
 @dataclass
 class TrainOutcome:
-    """一轮训练的结果。"""
+    """The result of one training round."""
 
     metrics: dict[str, Any] = field(default_factory=dict)
     proof: dict[str, Any] = field(default_factory=dict)
 
 
 def download_dataset(url: str, dest: str) -> str:
-    """把数据集下到本地，失败重试。返回落盘路径。"""
+    """Download the dataset locally, retrying on failure. Returns the written path."""
     path = Path(dest)
     path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -98,18 +113,18 @@ def download_dataset(url: str, dest: str) -> str:
             request = build_request(url)
             with urlopen(request, DOWNLOAD_TIMEOUT_SEC) as response:
                 path.write_bytes(response.read())
-            logger.info("✅ 已下载 %s（%d 字节）", dest, path.stat().st_size)
+            logger.info("✅ Downloaded %s (%d bytes)", dest, path.stat().st_size)
             return dest
         except (OSError, urllib.error.URLError) as exc:
             last_error = exc
             wait = min(2**attempt, 30)
             logger.warning(
-                "下载失败（第 %d/%d 次）：%s", attempt, DOWNLOAD_RETRIES, exc
+                "Download failed (attempt %d/%d): %s", attempt, DOWNLOAD_RETRIES, exc
             )
             if attempt < DOWNLOAD_RETRIES:
                 time.sleep(wait)
 
-    raise OSError(f"数据集下载失败 {url}：{last_error}")
+    raise OSError(f"Dataset download failed for {url}: {last_error}")
 
 
 def train_round(
@@ -122,7 +137,7 @@ def train_round(
     val_json_path: str | None = None,
     custom_train_script: str | None = None,
 ) -> TrainOutcome:
-    """加载数据 → 跑容器 → 组装指标与训练证明。"""
+    """Load the data → run the container → assemble metrics and the training proof."""
     started = time.time()
     started_at = datetime.now(UTC).isoformat()
 
@@ -194,7 +209,7 @@ def train_round(
     )
 
     logger.info(
-        "✅ 训练完成 %.1fs | loss=%s | steps=%s",
+        "✅ Training finished in %.1fs | loss=%s | steps=%s",
         duration,
         metrics["final_loss"],
         proof["total_steps"],
@@ -203,7 +218,7 @@ def train_round(
 
 
 def file_hash(path: str, prefix_len: int = HASH_PREFIX_LEN) -> str:
-    """单个文件的 SHA256 前 N 位。"""
+    """The first N characters of a single file's SHA256."""
     digest = hashlib.sha256()
     with open(path, "rb") as f:
         for chunk in iter(lambda: f.read(8192), b""):
@@ -212,10 +227,12 @@ def file_hash(path: str, prefix_len: int = HASH_PREFIX_LEN) -> str:
 
 
 def directory_hash(directory: Path, prefix_len: int = HASH_PREFIX_LEN) -> str:
-    """目录里所有权重文件的 SHA256 前 N 位。目录不存在给空串。
+    """The first N characters of the SHA256 over all weight files in a directory.
 
-    遍历顺序固定（目录名与文件名都排序），否则同一份权重在两台机器上
-    会算出不同的哈希。
+    Returns an empty string if the directory does not exist.
+
+    The walk order is fixed (both directory names and file names are sorted);
+    otherwise the same weights would hash differently on two machines.
     """
     if not directory.is_dir():
         return ""
@@ -235,7 +252,10 @@ def directory_hash(directory: Path, prefix_len: int = HASH_PREFIX_LEN) -> str:
 
 
 def _gpu_stats() -> tuple[str, float]:
-    """(GPU 名, 峰值显存 GB)。宿主没装 torch 就给 ("cpu", 0.0)。"""
+    """(GPU name, peak VRAM in GB).
+
+    If the host has no torch installed, returns ("cpu", 0.0).
+    """
     try:
         import torch
     except ImportError:

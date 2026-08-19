@@ -1,10 +1,13 @@
-"""红线守卫：训练容器的调用方式。
+"""Red-line guard: how the training container is invoked.
 
-这个文件的存在意义是**逐字比对** `docker run` 的参数表。openpi 与 bittensor
-的 numpy 版本冲突让训练只能跑在容器里，挂载点和环境变量名就是宿主与容器之间
-唯一的接口；改一个字符，矿工的训练要么读不到数据要么写不出模型。
+This file exists to compare the `docker run` argument list **word for word**. The numpy
+version conflict between openpi and bittensor means training can only run in a
+container, so the mount points and environment variable names are the only interface
+between host and container; change one character and the miner's training either cannot
+read the data or cannot write out the model.
 
-期望值来自旧 `miner/training_pipeline_vla.py::_run_openpi_docker`。
+The expected values come from the old
+`miner/training_pipeline_vla.py::_run_openpi_docker`.
 """
 
 from __future__ import annotations
@@ -47,7 +50,8 @@ def test_minimal_command_matches_legacy_shape() -> None:
 
 
 def test_gcs_checkpoint_is_passed_as_env_not_mount() -> None:
-    """`gs://` 路径不能挂载，必须原样传给容器让 openpi 自己下。"""
+    """A `gs://` path cannot be mounted; it must be passed to the container verbatim so
+    openpi downloads it itself."""
     command = build_docker_command(
         train_data_path="/tmp/data/train.json",
         output_dir="/out",
@@ -71,7 +75,8 @@ def test_local_checkpoint_is_mounted_by_parent_directory() -> None:
 
 
 def test_custom_strategy_uses_volume_mount_and_env(tmp_path: Path) -> None:
-    """策略脚本靠 volume mount 注入，换训练逻辑不用重建镜像 —— 红线 #2。"""
+    """The strategy script is injected via volume mount, so changing the training logic
+    does not require rebuilding the image -- red line #2."""
     script = tmp_path / "my_strategy.py"
     script.write_text("def train(cfg, episodes, policy): ...", encoding="utf-8")
 
@@ -104,7 +109,8 @@ def test_validation_set_and_gpu_selection_are_optional() -> None:
 
 
 def test_image_comes_from_environment_override(monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    """矿工自建镜像时用 OPENPI_RUNNER_IMAGE 覆盖，这条不能丢。"""
+    """Miners running their own image override it with OPENPI_RUNNER_IMAGE; this must
+    not be dropped."""
     monkeypatch.delenv("OPENPI_RUNNER_IMAGE", raising=False)
     assert runner_image() == DEFAULT_IMAGE
 
@@ -119,7 +125,7 @@ def test_image_comes_from_environment_override(monkeypatch) -> None:  # type: ig
 
 
 def test_parse_result_prefers_stdout_marker(tmp_path: Path) -> None:
-    stdout = "训练日志...\n---RESULT---\n" + json.dumps(
+    stdout = "training log...\n---RESULT---\n" + json.dumps(
         {"metrics": {"final_loss": 0.5}, "proof": {"total_steps": 10}}
     )
     metrics, proof = parse_result(stdout, str(tmp_path))
@@ -128,11 +134,12 @@ def test_parse_result_prefers_stdout_marker(tmp_path: Path) -> None:
 
 
 def test_parse_result_falls_back_to_output_files(tmp_path: Path) -> None:
-    """容器日志被截断时，输出目录里的文件是唯一的结果来源。"""
+    """When the container log is truncated, the files in the output directory are the
+    only source of results."""
     (tmp_path / "metrics.json").write_text('{"final_loss": 0.25}', encoding="utf-8")
     (tmp_path / "proof.json").write_text('{"total_steps": 7}', encoding="utf-8")
 
-    metrics, proof = parse_result("没有标记的日志", str(tmp_path))
+    metrics, proof = parse_result("a log with no marker", str(tmp_path))
     assert metrics == {"final_loss": 0.25}
     assert proof == {"total_steps": 7}
 
@@ -144,18 +151,24 @@ def test_parse_result_survives_broken_json(tmp_path: Path) -> None:
 
 
 def test_every_bind_mount_source_is_an_absolute_path(tmp_path: Path) -> None:
-    """docker 不把相对路径当宿主目录，而两种失败方式都很贵。
+    """docker does not treat a relative path as a host directory, and both failure modes
+    are expensive.
 
-    - 源里含斜杠（`tmp/robot_train_vla_miner/round_1`）→ 守护进程**拒绝启动容器**：
-      `includes invalid characters for a local volume name`。
-    - 源里不含斜杠（`cache`）→ **静默**当成具名卷：容器挂到一个空目录上，
-      宿主的同名目录既不会被读也不会被写，而且没有任何报错。
+    - source containing a slash (`tmp/robot_train_vla_miner/round_1`) -> the daemon
+      **refuses to start the container**:
+      `includes invalid characters for a local volume name`.
+    - source without a slash (`cache`) -> **silently** treated as a named volume: the
+      container mounts an empty directory, the host directory of the same name is
+      neither read nor written, and nothing reports an error.
 
-    这条实测发生过：`DEFAULT_OUTPUT_ROOT` 写的是 `Path("./tmp/robot_train_vla_miner")`，
-    `Path` 把 `./` 规范化掉，`str()` 出来就是 `tmp/…`，于是 `openroboto train`
-    带默认参数**根本起不来容器**。而基座缓存那条更阴：不报错，只是每轮重下几个 GB。
+    This actually happened: `DEFAULT_OUTPUT_ROOT` was written as
+    `Path("./tmp/robot_train_vla_miner")`, `Path` normalises the `./` away, `str()`
+    comes out as `tmp/...`, and so `openroboto train` with default arguments **could
+    not start a container at all**. The base-model cache case is nastier: no error, it
+    just re-downloads several GB every round.
 
-    钉住"全部绝对"而不是逐条钉具体路径 —— 下一个新增的挂载点也会被这条抓住。
+    Pin "all absolute" rather than pinning each specific path -- the next mount point
+    someone adds gets caught by this one too.
     """
     train = tmp_path / "input" / "train.json"
     train.parent.mkdir(parents=True)
@@ -164,9 +177,9 @@ def test_every_bind_mount_source_is_an_absolute_path(tmp_path: Path) -> None:
     script.write_text("def train(cfg, episodes, policy=None):\n    return {}, {}\n")
 
     command = build_docker_command(
-        train_data_path="input/train.json",  # 相对
-        output_dir="tmp/robot_train_vla_miner/round_1",  # 相对，且带斜杠
-        checkpoint_path="cache/pi05_base",  # 相对，不带斜杠 —— 静默变具名卷
+        train_data_path="input/train.json",  # relative
+        output_dir="tmp/robot_train_vla_miner/round_1",  # relative, with a slash
+        checkpoint_path="cache/pi05_base",  # relative, no slash -- silent named volume
         custom_train_script=str(script),
     )
 
@@ -175,9 +188,12 @@ def test_every_bind_mount_source_is_an_absolute_path(tmp_path: Path) -> None:
         for flag, value in itertools.pairwise(command)
         if flag == "-v"
     ]
-    assert sources, "一个挂载都没有？那这条命令读不到数据也写不出模型"
+    assert sources, (
+        "no mounts at all? then this command can neither read data nor write a model"
+    )
     for source in sources:
         assert source.startswith("/"), (
-            f"挂载源不是绝对路径：{source!r}\n"
-            f"docker 会把它当具名卷或直接拒绝启动，两种都不是你要的。"
+            f"mount source is not an absolute path: {source!r}\n"
+            f"docker will either treat it as a named volume or refuse to start; "
+            f"neither is what you want."
         )

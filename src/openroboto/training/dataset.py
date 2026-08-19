@@ -1,13 +1,16 @@
-"""LIBERO 回合数据的加载与转换。
+"""Loading and conversion of LIBERO episode data.
 
-容器读到的是**转换后**的样本（`observation/image`、`actions`、`prompt` 这套键名），
-不是下载下来的原始 JSON —— 这层转换在旧 `miner/trainer_vla.py` 里，搬过来时
-键名一个没动。
+What the container reads is the **converted** samples (the `observation/image`,
+`actions`, `prompt` set of key names), not the raw JSON that was downloaded — that
+conversion layer lived in the old `miner/trainer_vla.py`, and not one key name was
+touched when it was moved here.
 
-回合的字段校验原本依赖已删除的 `protocol/types.py::VLAEpisode`：那是一个
-dataclass，缺字段时 `cls(**clean)` 直接抛 `TypeError`，而调用方没接
-—— 一条坏样本能让整轮训练在加载阶段崩掉。这里改成逐条校验、跳过并计数，
-坏数据只损失那一条。
+Field validation for episodes used to depend on the now-deleted
+`protocol/types.py::VLAEpisode`: that was a dataclass, so a missing field made
+`cls(**clean)` raise `TypeError` outright, and the caller did not catch it — one
+bad sample could crash a whole training round at the loading stage. This was
+changed to validate entry by entry, skipping and counting, so bad data only costs
+you that one entry.
 """
 
 from __future__ import annotations
@@ -26,31 +29,34 @@ REQUIRED_FIELDS = (
     "language_instruction",
     "license",
 )
-"""一条回合必须齐的字段。与旧 `EPISODE_REQUIRED_FIELDS` 相同。"""
+"""Fields an episode must have. Same as the old `EPISODE_REQUIRED_FIELDS`."""
 
 ALLOWED_LICENSES = frozenset(
     {"CC-BY-4.0", "CC-BY-SA-4.0", "CC0-1.0", "Apache-2.0", "MIT", "OpenRail"}
 )
-"""数据集允许的许可证。与旧 `ALLOWED_LICENSES` 相同。"""
+"""Licenses accepted for datasets. Same as the old `ALLOWED_LICENSES`."""
 
 DEFAULT_LICENSE = "CC-BY-4.0"
 
 
 def validate_episode(episode: dict[str, Any]) -> list[str]:
-    """校验一条回合，返回问题列表；空列表表示可用。"""
+    """Validate one episode and return the list of problems; empty means usable."""
     problems = [
-        f"缺字段: {field}" for field in REQUIRED_FIELDS if episode.get(field) is None
+        f"missing field: {field}"
+        for field in REQUIRED_FIELDS
+        if episode.get(field) is None
     ]
     license_name = episode.get("license", DEFAULT_LICENSE)
     if license_name is not None and license_name not in ALLOWED_LICENSES:
-        problems.append(f"许可证不被接受: {license_name}")
+        problems.append(f"license not accepted: {license_name}")
     return problems
 
 
 def load_episodes(json_path: str) -> list[dict[str, Any]]:
-    """从 JSON 文件读回合列表，跳过校验不过的条目。
+    """Read the episode list from a JSON file, skipping entries that fail validation.
 
-    兼容三种顶层形状：列表、`{"episodes": [...]}`、`{"data": [...]}`。
+    Three top-level shapes are accepted: a list, `{"episodes": [...]}`, and
+    `{"data": [...]}`.
     """
     with open(json_path, encoding="utf-8") as f:
         raw = json.load(f)
@@ -58,7 +64,9 @@ def load_episodes(json_path: str) -> list[dict[str, Any]]:
     if isinstance(raw, dict):
         raw = raw.get("episodes", raw.get("data", [raw]))
     if not isinstance(raw, list):
-        raise ValueError(f"{json_path} 不是回合列表，实际是 {type(raw).__name__}")
+        raise ValueError(
+            f"{json_path} is not a list of episodes, got {type(raw).__name__}"
+        )
 
     episodes: list[dict[str, Any]] = []
     skipped = 0
@@ -70,13 +78,15 @@ def load_episodes(json_path: str) -> list[dict[str, Any]]:
         if problems:
             skipped += 1
             logger.warning(
-                "跳过回合 %s：%s", sample.get("episode_id", "?"), "; ".join(problems)
+                "Skipping episode %s: %s",
+                sample.get("episode_id", "?"),
+                "; ".join(problems),
             )
             continue
         episodes.append(sample)
 
     logger.info(
-        "从 %s 读到 %d 条可用回合（跳过 %d 条）", json_path, len(episodes), skipped
+        "Read %s: %d usable episodes (%d skipped)", json_path, len(episodes), skipped
     )
     return episodes
 
@@ -84,7 +94,10 @@ def load_episodes(json_path: str) -> list[dict[str, Any]]:
 def prepare_samples(
     episodes: list[dict[str, Any]], max_episodes: int | None = None
 ) -> list[dict[str, Any]]:
-    """把回合转成 openpi 训练样本。键名是容器侧读的，不能改。"""
+    """Convert episodes into openpi training samples.
+
+    The key names are what the container side reads and must not be changed.
+    """
     if max_episodes:
         episodes = episodes[:max_episodes]
 
@@ -100,5 +113,5 @@ def prepare_samples(
                 "prompt": episode.get("language_instruction", ""),
             }
         )
-    logger.info("准备了 %d 条 π₀.₅ 训练样本", len(samples))
+    logger.info("Prepared %d π₀.₅ training samples", len(samples))
     return samples

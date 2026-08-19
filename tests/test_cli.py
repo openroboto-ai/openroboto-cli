@@ -1,4 +1,4 @@
-"""命令装配。每个子命令都要能被解析到对应的 handler。"""
+"""Command wiring. Every subcommand must parse through to its handler."""
 
 from __future__ import annotations
 
@@ -23,7 +23,8 @@ COMMANDS = (
 
 
 def test_every_documented_command_is_registered() -> None:
-    """AGENTS.md 的命令面就是这一串。少一个都是矿工的脚本断掉。"""
+    """This list is the command surface in AGENTS.md. Any one missing breaks a miner's
+    scripts."""
     parser = build_parser()
     registered = {
         name
@@ -48,7 +49,8 @@ def test_validator_requires_a_subcommand() -> None:
 
 
 def test_version_reports_cli_and_protocol() -> None:
-    """`rt.py` 一处版本号都没有 —— 报障时问不出客户端版本。"""
+    """`rt.py` had no version number anywhere -- when a fault was reported there was no
+    way to ask which client version was running."""
     text = version_string()
     assert __version__ in text
     assert "openroboto-protocol" in text
@@ -67,7 +69,8 @@ def test_unknown_command_exits_with_argparse_code() -> None:
 def test_known_errors_become_one_line_messages(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """配置缺失是矿工的常态，不该甩堆栈。"""
+    """A missing config is the normal state for a miner, and must not throw a stack
+    trace at them."""
     assert main(["upload", "--config", "/nonexistent/miner.yaml"]) == 1
     captured = capsys.readouterr()
     assert "openroboto init" in captured.err

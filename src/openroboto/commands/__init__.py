@@ -1,6 +1,7 @@
-"""一个子命令一个模块，模块名就是命令名。
+"""One module per subcommand; the module name is the command name.
 
-每个模块只暴露两个东西：
-- `add_parser(subparsers)` —— 注册参数，`set_defaults(handler=run)`；
-- `run(args) -> int` —— 干活，返回退出码。
+Each module exposes exactly two things:
+- `add_parser(subparsers)` -- registers the arguments and calls
+  `set_defaults(handler=run)`;
+- `run(args) -> int` -- does the work and returns the exit code.
 """

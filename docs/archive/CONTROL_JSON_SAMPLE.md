@@ -1,12 +1,13 @@
-> # ⚠️ 已归档 —— 内容已并入 `../control_json.md`
+> # ⚠️ Archived — the content has been merged into `../control_json.md`
 >
-> **状态**：superseded · **归档日期**：2026-08-19
-> **替代者**：`docs/control_json.md`（契约说明 + 字段表 + 示例三合一）
+> **Status**: superseded · **Archived on**: 2026-08-19
+> **Superseded by**: `docs/control_json.md` (contract description + field table +
+> sample, all in one)
 >
-> **为什么**：control.json 一件事原本摊在三个文件里 —— 契约说明
-> （`control_json.md`）、示例讲解（本文件）、示例本体
-> （`control_json_example.json`）。本文件全文只有 15 行，且只是在说
-> 「示例在隔壁那个 json 里」。
+> **Why**: the single topic of control.json used to be spread across three files —
+> the contract description (`control_json.md`), the sample walkthrough (this file),
+> and the sample itself (`control_json_example.json`). This file is only 15 lines
+> long in total, and all it says is "the sample is in that json next door".
 
 ---
 

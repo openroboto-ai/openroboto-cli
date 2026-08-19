@@ -1,8 +1,11 @@
-"""`openroboto train` —— 跑一轮训练（旧 `miner.py` 的 Step 1-2）。
+"""`openroboto train` -- run one round of training (Step 1-2 of the old
+`miner.py`).
 
-轮次、数据集、超参都来自 control.json；训练本身在 openpi-runner 容器里跑
-（红线 #2，见 `training/container.py`）。跑完把断点写进 `state/round_N.json`，
-后面的 upload / burn / announce 从那里接着走。
+The round, the dataset and the hyperparameters all come from control.json;
+training itself runs inside the openpi-runner container (red line #2, see
+`training/container.py`). When it finishes, the checkpoint is written into
+`state/round_N.json`, and the later upload / burn / announce continue from
+there.
 """
 
 from __future__ import annotations
@@ -32,16 +35,18 @@ ACTIVE_STATUS = "active"
 
 
 def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    parser = subparsers.add_parser("train", help="跑一轮训练")
+    parser = subparsers.add_parser("train", help="Run one round of training")
     parser.add_argument("--config", default="miner.yaml")
     parser.add_argument(
-        "--output-dir", default=str(DEFAULT_OUTPUT_ROOT), help="训练输出根目录"
+        "--output-dir",
+        default=str(DEFAULT_OUTPUT_ROOT),
+        help="root directory for training output",
     )
     parser.add_argument(
         "-s",
         "--strategy",
         default="",
-        help="自定义训练脚本，覆盖 miner.yaml 的 custom_train_script",
+        help="custom training script; overrides custom_train_script in miner.yaml",
     )
     parser.set_defaults(handler=run)
 
@@ -50,19 +55,25 @@ def run(args: argparse.Namespace) -> int:
     settings = Settings.load(args.config)
 
     if not settings.control_json_url:
-        fail("未配置 urls.control_json —— 没有它就不知道现在是第几轮、训哪份数据")
+        fail(
+            "urls.control_json is not set — without it there is no way to know "
+            "which round it is or which dataset to train on"
+        )
         return 1
 
     control = fetch_control(settings.control_json_url).control
     if control is None:
-        fail("control.json 返回 304 但本地没有缓存，重试一次即可")
+        fail("control.json returned 304 but there is no local cache — just retry")
         return 1
     apply_control(settings, control)
 
     round_num = int(control.get("round", 0))
     status = str(control.get("status", ""))
     if status != ACTIVE_STATUS:
-        fail(f"当前轮次 {round_num} 状态是 `{status}`，不是 `active`，现在训了也没处交")
+        fail(
+            f"round {round_num} is `{status}`, not `active` — anything you train "
+            "now has nowhere to be submitted"
+        )
         return 1
 
     say(f"🦞 Round {round_num} | hotkey={settings.hotkey} | HF={settings.hf_username}")
@@ -71,16 +82,16 @@ def run(args: argparse.Namespace) -> int:
     output_dir = str(Path(args.output_dir) / f"round_{round_num}")
 
     if is_step_done(state, "training"):
-        say(f"⏭️  Round {round_num} 已经训练完成（state/round_{round_num}.json）")
-        say(f"    → 下一步 `openroboto check {state.get('round_output', output_dir)}`")
+        say(f"⏭️  Round {round_num} is already trained (state/round_{round_num}.json)")
+        say(f"    → next: `openroboto check {state.get('round_output', output_dir)}`")
         return 0
 
     dataset = _section(control, "dataset")
     train_url = dataset.get("train_url") or settings.dataset_train_url
     if not train_url:
         fail(
-            "训练集地址为空：control.json 的 dataset.train_url 与 "
-            "miner.yaml 的 urls.dataset_train 都没有"
+            "no training set URL: neither dataset.train_url in control.json nor "
+            "urls.dataset_train in miner.yaml is set"
         )
         return 1
     val_url = dataset.get("val_url") or settings.dataset_val_url
@@ -90,8 +101,8 @@ def run(args: argparse.Namespace) -> int:
     strategy = args.strategy or settings.custom_train_script
     if strategy and not Path(strategy).is_file():
         fail(
-            f"找不到训练脚本 {strategy} —— "
-            "检查 miner.yaml 的 custom_train_script 或 -s 参数"
+            f"training script {strategy} not found — "
+            "check custom_train_script in miner.yaml or the -s argument"
         )
         return 1
 
@@ -124,7 +135,7 @@ def run(args: argparse.Namespace) -> int:
             try:
                 val_path = download_dataset(val_url, str(Path(tmpdir) / "val.json"))
             except OSError:
-                say("⏭️  没有验证集，继续")
+                say("⏭️  No validation set, continuing")
 
         outcome = train_round(
             train_json_path=train_path,
@@ -141,9 +152,10 @@ def run(args: argparse.Namespace) -> int:
         state["error"] = "training_result_invalid"
         save_state(round_num, state)
         fail(
-            "训练结果无效（final_loss 缺失或为 0），多半是容器里 OOM 了。\n"
-            "  → 看容器日志，或把 batch_size 调小；"
-            f"断点已标 failed：state/round_{round_num}.json"
+            "training result is invalid (final_loss missing or 0), most likely an "
+            "OOM inside the container.\n"
+            "  → check the container logs, or lower batch_size; "
+            f"the round is marked failed: state/round_{round_num}.json"
         )
         return 1
 
@@ -155,11 +167,14 @@ def run(args: argparse.Namespace) -> int:
         state["hotkey_ss58"] = settings.hotkey_ss58
     save_state(round_num, state)
 
-    say(f"✅ 训练完成，模型在 {output_dir}")
+    say(f"✅ Training finished, model is in {output_dir}")
     say("")
-    say("⚠️  默认训练产物是 LoRA adapter，直接提交**必被拒**（评测器不做合并）。")
-    say("    先把 adapter 合进 π0.5 基座导出完整 checkpoint，然后：")
-    say(f"    openroboto check {output_dir}      # 免费，本地判定，别跳过")
+    say(
+        "⚠️  The default training output is a LoRA adapter; submitting it as-is "
+        "**will be rejected** (the evaluator does not merge)."
+    )
+    say("    Merge the adapter into the π0.5 base, export a full checkpoint, then:")
+    say(f"    openroboto check {output_dir}      # free, local, do not skip it")
     say(f"    openroboto submit --round {round_num}")
     return 0
 

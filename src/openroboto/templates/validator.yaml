@@ -4,7 +4,7 @@
 # backend and sets them on chain; it runs no benchmarks itself.
 
 # ─── Bittensor subnet ───────────────────────────────────────
-environment: mainnet   # mainnet | dev（见 miner.yaml 的说明）
+environment: mainnet   # mainnet | dev (see miner.yaml for the full list)
 
 subnet:
   network: finney                  # finney | test | local

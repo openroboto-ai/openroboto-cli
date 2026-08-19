@@ -1,4 +1,6 @@
-"""付费：发起 burn。校验规则属于后端 / 评测方，不在这里。"""
+"""Payment: initiating the burn. Verification rules belong to the backend /
+evaluator and are not here.
+"""
 
 from __future__ import annotations
 

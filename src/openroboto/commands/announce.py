@@ -1,7 +1,10 @@
-"""`openroboto announce` —— 把提交写上链（旧 `rt.py announce`）。
+"""`openroboto announce` -- write the submission on chain (the old
+`rt.py announce`).
 
-**burn 之后必须做完这一步**：没有 commitment，那笔 burn 在后端眼里不存在。
-payload 的字节由 `openroboto-protocol` 生成，本仓不再拼一份 JSON。
+**This step must be completed after a burn**: without a commitment, that burn
+does not exist as far as the backend is concerned. The payload bytes are
+produced by `openroboto-protocol`; this repo no longer assembles a JSON of its
+own.
 """
 
 from __future__ import annotations
@@ -23,7 +26,9 @@ from openroboto.round_state import load_state, resolve_round, save_state
 
 
 def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    parser = subparsers.add_parser("announce", help="把提交公告写上链")
+    parser = subparsers.add_parser(
+        "announce", help="Commit the submission announcement on chain"
+    )
     parser.add_argument("--config", default="miner.yaml")
     parser.add_argument("--round", type=int, default=0)
     parser.set_defaults(handler=run)
@@ -36,22 +41,27 @@ def run(args: argparse.Namespace) -> int:
 
     if not perform_announce(settings, round_num, state):
         return 1
-    say("   → 用 `openroboto status` 看后端有没有收下这次提交")
+    say("   → Run `openroboto status` to see whether the backend took the submission")
     return 0
 
 
 def perform_announce(settings: Settings, round_num: int, state: dict[str, Any]) -> bool:
-    """发 commitment，成功后把 step 标成 announce。"""
+    """Send the commitment and, on success, mark the step as announce."""
     settings.require_for_chain()
 
     hf_repo_id = str(state.get("hf_repo_id", ""))
     hf_url = str(state.get("hf_url", ""))
     if not hf_repo_id or not hf_url:
-        raise ConfigError("断点里没有 HF 仓库信息 —— 先跑 `openroboto upload`")
+        raise ConfigError(
+            "No HF repo info in the checkpoint -- run `openroboto upload` first"
+        )
 
-    # commit SHA 取 URL 里那个（上传返回的就是本次 commit）；URL 不带 commit 段时
-    # 退回断点里 `repo_info().sha` 存的那个。旧代码只认 URL，取不到就把 `c` 写成空串 ——
-    # 后端拿不到 commit 就没法核对模型，等于烧了 TAO 交了一份废提交。
+    # Take the commit SHA from the URL (what the upload returns is this very
+    # commit); when the URL carries no commit segment, fall back to the one
+    # stored in the checkpoint from `repo_info().sha`. The old code only knew
+    # about the URL and wrote `c` as an empty string when it could not get one
+    # -- without a commit the backend cannot verify the model, which amounts to
+    # burning TAO and handing in a worthless submission.
     hf_commit = commit_sha_from_url(hf_url) or str(state.get("hf_commit", ""))
 
     subtensor = get_subtensor(settings.network)
@@ -59,7 +69,10 @@ def perform_announce(settings: Settings, round_num: int, state: dict[str, Any]) 
         wallet = open_wallet(settings)
         current_block = subtensor.get_current_block()
         block_hash = subtensor.get_block_hash(current_block)
-        say(f"📡 上链 | round={round_num} repo={hf_repo_id} block={current_block}")
+        say(
+            f"📡 committing on chain | round={round_num} "
+            f"repo={hf_repo_id} block={current_block}"
+        )
 
         burn_block = int(state.get("burn_block", 0) or 0)
         if not _burn_window_ok(settings, burn_block, current_block):
@@ -80,25 +93,30 @@ def perform_announce(settings: Settings, round_num: int, state: dict[str, Any]) 
 
     if not result.ok:
         fail(
-            "commitment 没有确认上链。burn 已经发生，**不要重复 burn**。\n"
-            "   这有可能只是等待超时而交易其实进了块，所以先查一次："
-            "`openroboto status`。\n"
-            "   确认后端没收到，再重跑 `openroboto announce`"
-            "（断点里的 burn_tx 会复用）"
+            "The commitment was not confirmed on chain. The burn already"
+            " happened -- **do not burn again**.\n"
+            "   This may be only a wait timeout while the transaction did make"
+            " it into a block, so check once first: `openroboto status`.\n"
+            "   Once you have confirmed the backend did not receive it, run"
+            " `openroboto announce` again (the burn_tx in the checkpoint is"
+            " reused)"
         )
         return False
 
     if result.confirmed:
         say(
-            f"✅ commitment 已上链 | ref={result.extrinsic_ref} "
+            f"✅ commitment on chain | ref={result.extrinsic_ref} "
             f"fee={result.fee_tao:.6f} TAO"
         )
     else:
-        # SDK 报成功但没给区块号（`payment/burn.py:98` 记着这个 SDK 行为）。
-        # 不当失败处理 —— 交易确实发出去了；但也不能声称"已上链"。
+        # The SDK reported success but gave back no block number
+        # (`payment/burn.py:98` records this SDK behavior). Do not treat it as
+        # a failure -- the transaction really was sent; but do not claim it is
+        # "on chain" either.
         say(
-            f"✅ commitment 已提交 | fee={result.fee_tao:.6f} TAO\n"
-            f"   ⚠️  SDK 没给回区块号，落块情况请用 `openroboto status` 核实"
+            f"✅ commitment submitted | fee={result.fee_tao:.6f} TAO\n"
+            f"   ⚠️  The SDK returned no block number -- use `openroboto status`"
+            f" to verify it made it into a block"
         )
     state["step"] = "announce"
     state["status"] = "completed"
@@ -107,7 +125,8 @@ def perform_announce(settings: Settings, round_num: int, state: dict[str, Any]) 
 
 
 def _burn_window_ok(settings: Settings, burn_block: int, current_block: int) -> bool:
-    """跑一遍窗口检查并把结论说给矿工听。判定本身在 `preflight` 里（纯函数）。"""
+    """Run the window check and tell the miner the conclusion. The decision
+    itself lives in `preflight` (a pure function)."""
     blocked, warning = check_burn_window(
         burn_block, current_block, settings.burn_block_window
     )

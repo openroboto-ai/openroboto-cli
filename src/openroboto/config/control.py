@@ -1,16 +1,20 @@
-"""control.json 的抓取与应用 —— **全仓唯一一处实现**。
+"""Fetching and applying control.json — **the only implementation in the repo**.
 
-搬家之前这段逻辑在 `validator.py` / `miner.py` / `rt.py` 里各写了一遍：
-三份 User-Agent、三套 ETag 处理、三种失败时的兜底。`rt.py` 那份还把
-`burn_rate_tao` 的兜底值写成 0.01，而线上是 0.1 —— 抓取失败时矿工会**少烧十倍**，
-后端按金额核对直接拒，TAO 照样没了。
+Before the move, this logic was written out once each in `validator.py` /
+`miner.py` / `rt.py`: three User-Agents, three sets of ETag handling, three
+different fallbacks on failure. The one in `rt.py` also wrote the `burn_rate_tao`
+fallback as 0.01 while production is 0.1 — on a fetch failure the miner would
+**burn ten times too little**, the backend would check against the amount and
+reject it outright, and the TAO would be gone all the same.
 
-收敛成一处之后，**兜底值一个都不剩**：抓不到费率就是抓不到，由 `commands/burn.py`
-拒绝烧（`Settings.burn_rate_tao` 默认 `None`）。这里只负责刷新和说清楚状态，
-**不负责替矿工猜一个金额** —— 猜错的代价是不可退的 TAO。
+After collapsing this into one place, **not a single fallback value is left**: if
+the rate cannot be fetched, then it cannot be fetched, and `commands/burn.py`
+refuses to burn (`Settings.burn_rate_tao` defaults to `None`). This module only
+refreshes and states the situation clearly; it **does not guess an amount on the
+miner's behalf** — the price of guessing wrong is non-refundable TAO.
 
-control.json **只承载 payment / dataset / training / process**，
-它不是后端配置源（见 openroboto-backend/docs/adr/01）。
+control.json **carries only payment / dataset / training / process**; it is not a
+configuration source for the backend (see openroboto-backend/docs/adr/01).
 """
 
 from __future__ import annotations
@@ -27,69 +31,83 @@ FETCH_TIMEOUT_SEC = 30
 
 
 class ControlFetchError(Exception):
-    """control.json 拉不下来 / 解不开。
+    """control.json could not be fetched / could not be parsed.
 
-    这是**基建故障**，不是矿工配错了。调用方要按基建故障处理：
-    train 停下（没有 round 号就没法训），burn / validator 退回本地配置继续。
+    This is an **infrastructure failure**, not a miner misconfiguration. Callers
+    must treat it as one: train stops (without a round number there is nothing to
+    train), while burn / validator fall back to the local config and carry on.
     """
 
 
 @dataclass(frozen=True)
 class ControlFetch:
-    """一次抓取的结果。"""
+    """The result of one fetch."""
 
     control: dict[str, Any] | None
-    """control.json 的内容；`None` 表示服务端回了 304，内容没变。"""
+    """The content of control.json.
+
+    `None` means the server replied 304 and the content is unchanged.
+    """
 
     etag: str
-    """本次的 ETag，下次带上去省流量。服务端不给就沿用上一次的。"""
+    """This fetch's ETag, sent next time to save bandwidth.
+
+    If the server does not give one, the previous one is kept.
+    """
 
 
 def fetch_control(url: str, etag: str = "") -> ControlFetch:
-    """HTTP 抓 control.json，支持 ETag 条件请求。
+    """Fetch control.json over HTTP, with ETag conditional request support.
 
     Args:
-        url: control.json 的直链。
-        etag: 上一次拿到的 ETag，为空则无条件抓。
+        url: the direct link to control.json.
+        etag: the ETag from last time; empty means fetch unconditionally.
 
     Raises:
-        ControlFetchError: 网络错误、超时、或返回的不是合法 JSON 对象。
+        ControlFetchError: network error, timeout, or a response that is not a
+            valid JSON object.
     """
     request = build_request(url, {"If-None-Match": etag} if etag else None)
 
     try:
         with urlopen(request, FETCH_TIMEOUT_SEC) as response:
             new_etag = response.headers.get("ETag", "").strip('"') or etag
-            # urllib 对 304 会抛 HTTPError（见下），这一支是少数服务端
-            # 直接回 304 body 的情况。
+            # urllib raises HTTPError for 304 (see below); this branch is for the
+            # few servers that return a 304 body directly.
             if response.status == 304:
                 return ControlFetch(None, new_etag)
             payload = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         if exc.code == 304:
             return ControlFetch(None, etag)
-        raise ControlFetchError(f"control.json 返回 HTTP {exc.code}：{url}") from exc
+        raise ControlFetchError(
+            f"control.json returned HTTP {exc.code}: {url}"
+        ) from exc
     except (OSError, urllib.error.URLError) as exc:
-        raise ControlFetchError(f"control.json 拉取失败（网络问题）：{exc}") from exc
+        raise ControlFetchError(
+            f"Failed to fetch control.json (network problem): {exc}"
+        ) from exc
     except json.JSONDecodeError as exc:
-        raise ControlFetchError(f"control.json 不是合法 JSON：{exc}") from exc
+        raise ControlFetchError(f"control.json is not valid JSON: {exc}") from exc
 
     if not isinstance(payload, dict):
         raise ControlFetchError(
-            f"control.json 顶层必须是对象，实际是 {type(payload).__name__}"
+            "The top level of control.json must be an object, got "
+            f"{type(payload).__name__}"
         )
     return ControlFetch(payload, new_etag)
 
 
 def apply_control(settings: Settings, control: dict[str, Any]) -> None:
-    """把 control.json 里子网说了算的字段盖到 settings 上。
+    """Overwrite settings with the fields control.json gets to decide for the subnet.
 
-    只有 `payment` 与 `training` 两段会改 settings：
-    - `payment.burn_rate_tao` / `payment.limit_price_rao` —— 本轮费率，必须听子网的；
-    - `training.vla_checkpoint_path` / `training.vla_model_id` —— 基座模型。
+    Only the `payment` and `training` sections change settings:
+    - `payment.burn_rate_tao` / `payment.limit_price_rao` — this round's rate, where
+      the subnet has the final say;
+    - `training.vla_checkpoint_path` / `training.vla_model_id` — the base model.
 
-    `dataset` 与 `process` 段由 train 命令直接读，不进 settings（它们是每轮变的
-    输入，不是配置）。
+    The `dataset` and `process` sections are read directly by the train command and
+    do not enter settings (they are per-round inputs, not configuration).
     """
     payment = control.get("payment") or {}
     if isinstance(payment, dict):
@@ -107,16 +125,21 @@ def apply_control(settings: Settings, control: dict[str, Any]) -> None:
 
 
 def refresh_burn_rate(settings: Settings, logger: Any) -> None:
-    """burn 之前刷一次费率。抓不到就保持原值，并明确说出来。
+    """Refresh the rate once before burning.
 
-    烧多了不退、烧少了后端按金额拒（也不退）—— 所以这行日志必须让矿工看见
-    自己实际会烧多少。**这里不填兜底值**：`burn_rate_tao` 仍是 `None` 时由
-    `commands/burn.py` 拒绝上链，见本模块 docstring。
+    If it cannot be fetched, keep the current value and say so explicitly.
+
+    Burning too much is not refunded, and burning too little gets rejected by the
+    backend on the amount check (also not refunded) — so this log line must let the
+    miner see how much they will actually burn. **No fallback value is filled in
+    here**: if `burn_rate_tao` is still `None`, `commands/burn.py` refuses to go on
+    chain; see this module's docstring.
     """
     if not settings.control_json_url:
         logger.warning(
-            "未配置 urls.control_json，无法确认本轮费率（miner.yaml 的 "
-            "payment.burn_rate_tao=%s）。费率对不上会被后端拒且不退款",
+            "urls.control_json is not configured, so this round's burn rate "
+            "cannot be confirmed (payment.burn_rate_tao=%s in miner.yaml). A "
+            "mismatched rate is rejected by the backend and not refunded",
             settings.burn_rate_tao,
         )
         return
@@ -124,11 +147,12 @@ def refresh_burn_rate(settings: Settings, logger: Any) -> None:
         fetched = fetch_control(settings.control_json_url)
     except ControlFetchError as exc:
         logger.warning(
-            "control.json 拉取失败（%s），保持 miner.yaml 的 burn_rate_tao=%s",
+            "Failed to fetch control.json (%s), keeping burn_rate_tao=%s from "
+            "miner.yaml",
             exc,
             settings.burn_rate_tao,
         )
         return
     if fetched.control is not None:
         apply_control(settings, fetched.control)
-    logger.info("burn_rate_tao=%s TAO（来自 control.json）", settings.burn_rate_tao)
+    logger.info("burn_rate_tao=%s TAO (from control.json)", settings.burn_rate_tao)

@@ -1,0 +1,31 @@
+# Written by `openroboto init`. Versioning your workspace is a good idea --
+# your training strategy is worth keeping history for. These are the things that
+# must NOT go in.
+
+# ─── Credentials ────────────────────────────────────────────
+# miner.yaml holds subnet.wallet_password and huggingface.token. Committing it,
+# even to a private repository, puts your wallet password in a place that gets
+# cloned, backed up and searched. Keep your own copy outside version control.
+miner.yaml
+validator.yaml
+
+# ─── Per-round state ────────────────────────────────────────
+# state/round_N.json records the burn transaction for a round. `openroboto
+# submit` reads it to resume without paying twice, so it matters -- but it is
+# machine-local truth about your own submissions, not source code.
+state/
+
+# ─── Big things and generated things ────────────────────────
+cache/                  # π0.5 base checkpoint cache, several GB
+tmp/                    # training output root (tmp/robot_train_vla_miner/round_N)
+logs/
+*.safetensors
+*.pt
+*.pth
+*.ckpt
+
+# ─── Python ─────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+.venv/
+venv/

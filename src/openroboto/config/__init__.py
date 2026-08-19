@@ -1,4 +1,4 @@
-"""配置：矿工自己的 `miner.yaml` + 子网的 `control.json`。"""
+"""Config: the miner's own `miner.yaml` + the subnet's `control.json`."""
 
 from __future__ import annotations
 

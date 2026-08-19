@@ -1,10 +1,13 @@
-"""`openroboto submit` —— 上传 → 烧 → 公告，一条龙（旧 `rt.py submit`）。
+"""`openroboto submit` -- upload → burn → announce, end to end (the old
+`rt.py submit`).
 
-三步复用 `upload` / `burn` / `announce` 三个模块里的同一份实现。
-旧 `rt.py` 把三步在 `cmd_submit` 里**又抄了一遍**，结果两处的自检和跳过条件
-慢慢长歪；这里只有一份。
+The three steps reuse the very same implementations from the `upload` /
+`burn` / `announce` modules. The old `rt.py` **copied all three again** inside
+`cmd_submit`, and the self-checks and skip conditions in the two places
+gradually grew apart; here there is only one copy.
 
-断点让这条命令天然可重入：上传过就不重传，烧过就不重烧。
+The checkpoint makes this command naturally re-entrant: what has been uploaded
+is not uploaded again, what has been burned is not burned again.
 """
 
 from __future__ import annotations
@@ -25,12 +28,14 @@ from openroboto.round_state import (
 
 
 def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    parser = subparsers.add_parser("submit", help="上传 → 烧 → 公告")
+    parser = subparsers.add_parser("submit", help="upload → burn → announce")
     parser.add_argument("--config", default="miner.yaml")
     parser.add_argument("--round", type=int, default=0)
     parser.add_argument("--output-dir", default="")
     parser.add_argument(
-        "--force", action="store_true", help="忽略已完成状态，重新烧一次并重发公告"
+        "--force",
+        action="store_true",
+        help="ignore the completed state, burn again and re-announce",
     )
     parser.set_defaults(handler=run)
 
@@ -44,11 +49,14 @@ def run(args: argparse.Namespace) -> int:
     say(f"🦞 submit | round={round_num}")
 
     if state.get("step") == "announce" and not args.force:
-        say("⏭️  这一轮已经提交完成。要重来加 --force（会再烧一次 TAO）")
+        say(
+            "⏭️  this round is already submitted. Pass --force to redo it "
+            "(that burns TAO again)"
+        )
         return 0
 
     if args.force:
-        say("⚡ --force：忽略断点里的 burn，会**再烧一笔**")
+        say("⚡ --force: ignoring the burn in the checkpoint -- this **burns again**")
         state.pop("burn_tx_hash", None)
         state.pop("burn_block", None)
         save_state(round_num, state)
@@ -57,7 +65,7 @@ def run(args: argparse.Namespace) -> int:
 
     if state.get("burn_tx_hash"):
         say(
-            f"⏭️  已烧过：tx={str(state['burn_tx_hash'])[:16]}... "
+            f"⏭️  already burned: tx={str(state['burn_tx_hash'])[:16]}... "
             f"block={state.get('burn_block')}"
         )
     elif not perform_burn(settings, round_num, state):
@@ -66,5 +74,5 @@ def run(args: argparse.Namespace) -> int:
     if not perform_announce(settings, round_num, state):
         return 1
 
-    say("✅ 提交完成。`openroboto status` 查后端有没有收下")
+    say("✅ submitted. Run `openroboto status` to see whether the backend accepted it")
     return 0

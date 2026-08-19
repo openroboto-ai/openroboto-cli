@@ -1,11 +1,15 @@
-"""把一次提交公告写上链。
+"""Write a submission announcement onto the chain.
 
-**payload 的字节由 `openroboto_protocol.commitment.encode()` 产生，本仓不许再写一份。**
-后端扫链用同一个模块解码；两边各写一份 JSON 拼装，就是矿工烧了 TAO 没人看见。
+**The payload bytes are produced by `openroboto_protocol.commitment.encode()`; this
+repo must not write a second implementation.** The backend decodes with the same
+module when it scans the chain; if each side writes its own JSON assembly, the
+result is a miner who burned TAO that nobody sees.
 
-上链走 `publish_metadata_extrinsic(data_type="BigRaw")`。`BigRaw` 与 `RawN`
-的区别只是**字节长度**（≤128 用 `RawN`），不是客户端版本 —— 见 protocol 包
-`commitment.py` 的模块 docstring，那里记着 2026-08 那次「Raw119 是旧客户端」的误判。
+Submission goes through `publish_metadata_extrinsic(data_type="BigRaw")`. The
+difference between `BigRaw` and `RawN` is only the **byte length** (`RawN` for
+≤128), not the client version — see the module docstring of `commitment.py` in the
+protocol package, which records the 2026-08 misdiagnosis that "Raw119 means an old
+client".
 """
 
 from __future__ import annotations
@@ -21,30 +25,34 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class SubmitResult:
-    """一次 commitment 提交的结果。"""
+    """The result of one commitment submission."""
 
     ok: bool
     extrinsic_hash: str
     block_height: int
     extrinsic_index: int
     fee_tao: float
-    #: 链上**确实**给回了包含这笔 extrinsic 的区块。
+    #: The chain **actually** gave back the block containing this extrinsic.
     #:
-    #: 和 `ok` 不是一回事：`ok` 只说 SDK 认为提交成功，
-    #: `confirmed` 说我们拿到了 receipt、知道它落在哪个区块。
-    #: 两者分开是因为「以为公告上链了、其实没上」是矿工白烧 TAO 的一条主路径。
+    #: Not the same thing as `ok`: `ok` only says the SDK considers the submission
+    #: successful, while `confirmed` says we got a receipt and know which block it
+    #: landed in. They are kept separate because "thinking the announcement is on
+    #: chain when it is not" is one of the main paths to a miner burning TAO for
+    #: nothing.
     confirmed: bool = False
 
     @property
     def extrinsic_ref(self) -> str:
-        """`区块-序号` 形式的引用，报障时贴这个最省事。
+        """A `block-index` style reference; the easiest thing to paste in a bug report.
 
-        **没确认就不给区块号。** 以前这里会退回 `get_current_block()`，
-        于是未确认的提交也会打印出一个像真的一样的 `6123456-0` ——
-        矿工据此认为公告已上链，而它可能根本没进块。
+        **No block number unless it is confirmed.** This used to fall back to
+        `get_current_block()`, so an unconfirmed submission would still print a
+        perfectly real-looking `6123456-0` — the miner would conclude from it that
+        the announcement was on chain, when it might never have made it into a
+        block at all.
         """
         if not self.confirmed or not self.block_height:
-            return "未确认"
+            return "unconfirmed"
         return f"{self.block_height}-{self.extrinsic_index}"
 
 
@@ -58,7 +66,11 @@ def build_payload(
     burn_tx_hash: str,
     burn_block: int,
 ) -> CommitmentPayload:
-    """拼出上链 payload。字段含义与链上键名的对应关系在 protocol 包里定义。"""
+    """Assemble the on-chain payload.
+
+    The mapping between field meanings and on-chain key names is defined in the
+    protocol package.
+    """
     return CommitmentPayload(
         hotkey_ss58=hotkey_ss58,
         block_hash=block_hash,
@@ -73,28 +85,32 @@ def build_payload(
 def submit_announcement(
     subtensor: Any, wallet: Any, netuid: int, payload: CommitmentPayload
 ) -> SubmitResult:
-    """把 payload 作为 commitment 发到链上。**等到进块才返回。**
+    """Send the payload to the chain as a commitment. **Returns only after inclusion.**
 
-    旧 `utils/chain.py:108-109` 这两个参数都是 `False`，且没有注释说明为什么 ——
-    于是「TAO 已经烧掉、公告其实没上链」时命令照样打印成功
-    （backend `AGENTS.md` §7 已知缺陷表里的最后一条）。矿工的钱不退，
-    所以这里宁可多等一个区块（~12 秒）也要给出真实结论。
+    In the old `utils/chain.py:108-109` both of these parameters were `False`, with
+    no comment explaining why — so when "the TAO was already burned but the
+    announcement never made it on chain", the command still printed success (the
+    last row of the known-defects table in the backend `AGENTS.md` §7). The miner's
+    money is not refunded, so here we would rather wait one more block (~12 s) in
+    order to report a truthful conclusion.
 
-    - `wait_for_inclusion=True`：拿到 receipt 才知道落在哪个区块，
-      也才让 `SubmitResult.confirmed` 有意义。后端扫链看的就是进块，
-      **不需要 finality**。
-    - `wait_for_finalization=False`：finality 还要再等 ~30 秒以上，
-      对这条业务没有额外价值，纯粹拖长矿工等待。
+    - `wait_for_inclusion=True`: only with a receipt do we know which block it
+      landed in, and only then does `SubmitResult.confirmed` mean anything. What
+      the backend's chain scanner looks at is inclusion; it **does not need
+      finality**.
+    - `wait_for_finalization=False`: finality means waiting another ~30 s or more,
+      which adds no value for this workflow and purely lengthens the miner's wait.
 
-    超时/RPC 抖动**不报成失败**：extrinsic 可能仍会进块，
-    谎报失败会让矿工以为要重来。返回 `ok=False, confirmed=False`，
-    由命令层提示先查 `openroboto status`。
+    A timeout or RPC jitter is **not reported as a failure**: the extrinsic may
+    still be included, and falsely reporting failure would make the miner think
+    they have to start over. It returns `ok=False, confirmed=False`, and the
+    command layer tells the miner to check `openroboto status` first.
     """
     from bittensor.core.extrinsics.serving import publish_metadata_extrinsic
 
-    data = encode(payload)  # 超 512 字节直接抛 CommitmentTooLargeError
+    data = encode(payload)  # over 512 bytes raises CommitmentTooLargeError
     logger.info(
-        "上链 commitment | repo=%s round=%d size=%d bytes",
+        "Committing on chain | repo=%s round=%d size=%d bytes",
         payload.hf_repo_id,
         payload.round_num,
         len(data),
@@ -111,13 +127,20 @@ def submit_announcement(
             wait_for_finalization=False,
         )
     except (TypeError, AttributeError, NameError):
-        # 我们自己写错了（调用签名不对、SDK 改了接口）—— 这时**什么都没发出去**。
-        # 报成"结论未知"会让矿工去查 status、等着，而 burn 的 50 个区块窗口
-        # 同时在流走：一个我们的 bug 就变成了矿工的一笔 TAO。让它炸出来。
+        # We got it wrong ourselves (bad call signature, SDK changed its interface)
+        # — in that case **nothing was sent at all**. Reporting it as "outcome
+        # unknown" would send the miner off to check status and wait, while the
+        # 50-block burn window drains away at the same time: a bug of ours turns
+        # into a miner's TAO. Let it blow up.
         raise
     except Exception as exc:
-        # 基建故障（RPC 断、等待超时），不是矿工的错，也不代表没上链。
-        logger.warning("等待 commitment 进块时出错，结论未知：%s", exc)
+        # Infrastructure failure (RPC dropped, wait timed out) — not the miner's
+        # fault, and not proof that it failed to reach the chain.
+        logger.warning(
+            "Error while waiting for the commitment to be included in a block, "
+            "outcome unknown: %s",
+            exc,
+        )
         return SubmitResult(
             ok=False,
             extrinsic_hash="",
@@ -130,17 +153,20 @@ def submit_announcement(
 
 
 def parse_extrinsic_result(result: Any) -> SubmitResult:
-    """把 SDK 返回的 ExtrinsicResponse 解成 `SubmitResult`。
+    """Parse the SDK's ExtrinsicResponse into a `SubmitResult`.
 
-    SDK 在不同版本里返回的形状不一样（有 `extrinsic_receipt` 的、只有布尔的、
-    费用字段两个名字的），所以逐个 `getattr` 兜底 —— 这部分的判定顺序沿用旧
-    `utils/chain.py::_parse_result`。
+    The SDK returns different shapes across versions (some with
+    `extrinsic_receipt`, some with only a bool, and two different names for the fee
+    field), so each field falls back through `getattr` — the decision order in this
+    part follows the old `utils/chain.py::_parse_result`.
 
-    **改掉的一处**：旧实现在拿不到 receipt 时用 `subtensor.get_current_block()`
-    填 `block_height`，注释说"只是为了让日志里有个区块号"。但它同时喂给了
-    `extrinsic_ref`，于是未确认的提交也会打印出一个看起来完全正常的区块引用。
-    现在拿不到 receipt 就是 `confirmed=False`，不编区块号
-    （`subtensor` 参数因此不再需要）。
+    **One thing that was changed**: when no receipt was available, the old
+    implementation filled `block_height` from `subtensor.get_current_block()`, with
+    a comment saying it was "just so the log has a block number in it". But that
+    value also fed `extrinsic_ref`, so an unconfirmed submission would print a
+    block reference that looked entirely normal. Now, no receipt means
+    `confirmed=False` and no invented block number (which is why the `subtensor`
+    parameter is no longer needed).
     """
     extrinsic_hash = ""
     block_height = 0
@@ -183,6 +209,7 @@ def parse_extrinsic_result(result: Any) -> SubmitResult:
         block_height=block_height,
         extrinsic_index=extrinsic_index,
         fee_tao=fee_tao,
-        # 有区块号 = receipt 真的回来了。`wait_for_inclusion=True` 下这就是进块。
+        # A block number means the receipt really came back. Under
+        # `wait_for_inclusion=True` that is exactly inclusion in a block.
         confirmed=ok and block_height > 0,
     )

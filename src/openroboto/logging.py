@@ -1,7 +1,10 @@
-"""日志装配。控制台 + 按天切分的文件，两个 handler 一次配好。
+"""Logging assembly. Console plus a per-day file: both handlers configured in
+one go.
 
-来自旧的 `utils/logger.py`。行为保持：同名 logger 重复调用不会叠加 handler
-（矿工的 `validator run` 是常驻进程，叠 handler 会让同一行日志打十几遍）。
+Comes from the old `utils/logger.py`. The behavior is preserved: calling it
+again for the same logger name does not stack up handlers (a miner's
+`validator run` is a long-running process, and stacked handlers would print
+the same log line a dozen times).
 """
 
 from __future__ import annotations
@@ -17,17 +20,17 @@ _DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 def setup_logger(
     name: str, log_dir: str = "logs", level: str = "INFO"
 ) -> logging.Logger:
-    """建一个带控制台与文件两个 handler 的 logger。
+    """Build a logger with both a console and a file handler.
 
     Args:
-        name: logger 名，同时是日志文件名前缀。
-        log_dir: 日志目录，相对当前工作目录。
-        level: 日志级别名，不认识的值退回 INFO。
+        name: Logger name, which is also the log file name prefix.
+        log_dir: Log directory, relative to the current working directory.
+        level: Log level name; an unrecognized value falls back to INFO.
     """
     logger = logging.getLogger(name)
     logger.setLevel(getattr(logging, level.upper(), logging.INFO))
 
-    # 重复调用只改级别，不再加 handler。
+    # A repeated call only changes the level; it does not add a handler again.
     if logger.handlers:
         return logger
 

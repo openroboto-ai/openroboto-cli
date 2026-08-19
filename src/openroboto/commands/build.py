@@ -33,16 +33,21 @@ BUILD_TIMEOUT_SEC = 7200
 
 
 def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    parser = subparsers.add_parser("build", help="构建 openpi-runner 训练镜像")
+    parser = subparsers.add_parser(
+        "build", help="Build the openpi-runner training image"
+    )
     parser.add_argument(
         "--context",
         default="",
-        help=f"构建上下文。默认用包内那份；本地有 ./{OPENPI_RUNNER_CONTEXT}/ 时优先它",
+        help="build context; defaults to the copy inside the package, but a local "
+        f"./{OPENPI_RUNNER_CONTEXT}/ takes precedence",
     )
     parser.add_argument(
-        "--image", default="", help="镜像名，默认取 $OPENPI_RUNNER_IMAGE"
+        "--image", default="", help="image name, defaults to $OPENPI_RUNNER_IMAGE"
     )
-    parser.add_argument("--no-cache", action="store_true", help="不用构建缓存")
+    parser.add_argument(
+        "--no-cache", action="store_true", help="build without the layer cache"
+    )
     parser.set_defaults(handler=run)
 
 
@@ -74,7 +79,7 @@ def run(args: argparse.Namespace) -> int:
     image = args.image or runner_image()
     context = resolve_context(args.context)
     if not args.context and not Path(OPENPI_RUNNER_CONTEXT).is_dir():
-        hint(f"用包内的镜像定义构建（{context}）")
+        hint(f"Building from the image definition inside the package ({context})")
 
     command = build_command(image, context, args.no_cache)
     say(f"🐳 {' '.join(command)}")
@@ -82,15 +87,18 @@ def run(args: argparse.Namespace) -> int:
     try:
         completed = subprocess.run(command, timeout=BUILD_TIMEOUT_SEC, check=False)
     except FileNotFoundError:
-        fail("找不到 docker。→ 先装 Docker，再跑 `openroboto doctor` 确认")
+        fail(
+            "docker not found. → Install Docker, then run `openroboto doctor` "
+            "to confirm"
+        )
         return 1
     except subprocess.TimeoutExpired:
-        fail(f"构建超过 {BUILD_TIMEOUT_SEC}s，已中止")
+        fail(f"build ran longer than {BUILD_TIMEOUT_SEC}s and was aborted")
         return 1
 
     if completed.returncode != 0:
-        fail(f"镜像构建失败（docker 退出码 {completed.returncode}）")
+        fail(f"image build failed (docker exit code {completed.returncode})")
         return 1
 
-    say(f"✅ 镜像就绪：{image}")
+    say(f"✅ Image ready: {image}")
     return 0

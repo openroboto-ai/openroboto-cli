@@ -15,19 +15,18 @@ import torch
 
 
 def train(cfg: dict, episodes: list, policy) -> tuple:
-    """训练入口函数：接收配置、训练数据和策略对象，执行训练并返回指标与证明。
-
-    Training entry function.
+    """Training entry point: take the config, the training data and the policy
+    object, run the training, and return the metrics and the proof.
 
     Args:
-        cfg: config dict / 配置字典
+        cfg: config dict
             checkpoint_path, train_data, output_dir, epochs,
             batch_size, learning_rate, lora_r, lora_alpha, hotkey, ...
-        episodes: training data list[dict] / 训练数据列表
-        policy: openpi policy object (π₀.₅ checkpoint loaded) / openpi 策略对象
+        episodes: training data list[dict]
+        policy: openpi policy object (π₀.₅ checkpoint loaded)
 
     Returns:
-        (metrics, proof) two dicts / 训练指标和证明字典
+        (metrics, proof): two dicts — the training metrics and the training proof.
     """
 
     start = time.time()
@@ -87,13 +86,11 @@ def train(cfg: dict, episodes: list, policy) -> tuple:
 
 
 def _dummy_loss(policy, episode):
-    """替换为实际的损失函数。
-
-    Replace with your actual loss function.
+    """Replace with your actual loss function.
 
     Args:
-        policy: openpi 策略对象
-        episode: 单个训练片段
+        policy: openpi policy object
+        episode: a single training episode
 
     Returns:
         loss tensor
@@ -102,12 +99,10 @@ def _dummy_loss(policy, episode):
 
 
 def _gpu_name() -> str:
-    """获取 GPU 设备名称，如不可用则返回 'cpu'。
-
-    Get GPU device name via torch, or return 'cpu' if unavailable.
+    """Get the GPU device name via torch, or return 'cpu' if it is unavailable.
 
     Returns:
-        GPU 设备名称字符串
+        the GPU device name, as a string
     """
     try:
         import torch

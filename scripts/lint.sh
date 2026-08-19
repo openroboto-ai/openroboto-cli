@@ -1,25 +1,32 @@
 #!/usr/bin/env bash
 #
-# 静态检查门禁。CI 跑的就是这个脚本 —— 两边各写一份命令列表，
-# 测的就是两个系统，本地绿 CI 红的来源之一。
+# Static-check gate. CI runs this very script — writing one command list on each side
+# means testing two systems, and that is one of the sources of "green locally, red in
+# CI".
 #
-# 三个工具各管一段，都不能删：
-#   mypy strict  类型正确性（只查 src，理由见 pyproject.toml 的 [tool.mypy]）
-#   ruff check   lint（含 T20 禁 print，命令层与模板另有豁免）
-#   ruff format  格式
+# Each of the three tools covers one area, and none of them may be dropped:
+#   mypy strict  type correctness (src only; reason in pyproject.toml's [tool.mypy])
+#   ruff check   lint (including T20, which bans print; the command layer and the
+#                templates have their own exemptions)
+#   ruff format  formatting
 #
-# 路径写死 `src tests`，不写 `.`：
-#   - 从 openroboto-subnet 继承来的旧文件（rt.py / miner.py / utils/ …）已经在
-#     pyproject 的 extend-exclude 里，写 `.` 也扫不到；
-#   - 但 `.` 会把 docs/*.md 里的 python 代码块也交给 ruff format，
-#     实测 docs/MINER.md 当场红。那份文档的去留归 SCOPE.md 的迁移决定管，
-#     不该由格式门禁替它拍板。
-#   门禁的范围就是新结构本身：搬进 src/ 的代码，和守着它的 tests/。
+# The paths are hardcoded as `src tests`, not `.`:
+#   - the old files inherited from openroboto-subnet (rt.py / miner.py / utils/ ...)
+#     are already in pyproject's extend-exclude, so `.` would not reach them anyway;
+#   - but `.` would also hand the python code blocks inside docs/*.md to ruff format,
+#     and docs/MINER.md was measured to go red immediately. Whether that document
+#     stays is governed by the migration decision in SCOPE.md, and the formatting gate
+#     must not make that call on its behalf.
+#   The scope of the gate is the new structure itself: the code moved into src/, and
+#   the tests/ guarding it.
 #
-# 一律带 `uv run` 前缀：不激活 venv 也能裸跑 `bash scripts/lint.sh`。
+# Everything is prefixed with `uv run`: `bash scripts/lint.sh` runs bare, without
+# activating a venv.
 
-# set -e：任一工具失败立刻退出，退出码原样传出去（CI 只看退出码）。
-# set -x：把真正执行的命令打出来，红的时候不用猜是哪一条。
+# set -e: exit immediately when any tool fails, passing the exit code through
+#         unchanged (CI only looks at the exit code).
+# set -x: print the commands as they are actually executed, so when it goes red there
+#         is no guessing which one it was.
 set -e
 set -x
 

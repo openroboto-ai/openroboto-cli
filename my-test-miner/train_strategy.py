@@ -5,21 +5,12 @@ RobotTrain — Simple Training Strategy
 A minimal training script that generates valid LoRA adapter files
 for testing the full pipeline (miner → HF → chain → backend → validator).
 
-Usage — point `openroboto train` at this file, either way:
+Usage (miner sets CUSTOM_TRAIN_SCRIPT env var):
+    CUSTOM_TRAIN_SCRIPT=/path/to/simple_strategy.py python miner.py --config config.yaml
 
-    openroboto train -s /path/to/simple_strategy.py
-
-or set it once in miner.yaml:
-
-    custom_train_script: /path/to/simple_strategy.py
-
-`openroboto train` mounts the file into the training container for you:
-
+This script is mounted into the Docker container:
     -v /path/to/simple_strategy.py:/data/scripts/simple_strategy.py
     -e CUSTOM_TRAIN=/data/scripts/simple_strategy.py
-
-You do not run docker yourself; the two lines above are shown so that a failing
-run is diagnosable from `docker ps`.
 """
 
 import json

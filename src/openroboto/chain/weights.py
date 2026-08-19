@@ -1,9 +1,11 @@
-"""外部验证者的权重归一化与上链。
+"""Weight normalization and on-chain submission for external validators.
 
-⚠️ **红线：u16 归一化。** `normalize_weights()` 的表达式是链上排放的最后一道换算，
-搬家时逐字保留旧 `validator.py` 的写法 —— 只保留正权重、先归一到 sum=1.0、
-再 `int(w * 65535)` 截断（不是四舍五入）。改成 `round()` 会让每个矿工的权重
-差 1 个 u16 单位，与后端算出来的期望值对不上。
+⚠️ **Red line: u16 normalization.** The expression in `normalize_weights()` is the
+last conversion step before on-chain emissions; the old `validator.py` formulation
+was preserved verbatim during the move — keep only positive weights, first normalize
+to sum=1.0, then truncate with `int(w * 65535)` (not rounding). Changing it to
+`round()` would shift every miner's weight by 1 u16 unit, which no longer matches
+the expected value the backend computes.
 """
 
 from __future__ import annotations
@@ -15,27 +17,34 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 U16_MAX = 65535
-"""Bittensor 权重的定点上限。"""
+"""Fixed-point ceiling for Bittensor weights."""
 
 
 @dataclass(frozen=True)
 class NormalizedWeights:
-    """归一化结果。uids 与 weights 一一对应，顺序即上链顺序。"""
+    """Normalization result.
+
+    `uids` and `weights` correspond one-to-one, and their order is the order
+    submitted on chain.
+    """
 
     uids: list[int]
     weights: list[int]
     detail: list[str]
-    """逐条明细，直接打进日志 —— 权重设错时这几行是唯一的现场。"""
+    """Per-entry detail, written straight into the log.
+
+    When weights are set wrong, these lines are the only evidence left.
+    """
 
 
 def normalize_weights(
     weights_raw: dict[str, float], hotkeys: list[str]
 ) -> NormalizedWeights:
-    """把后端给的 `{hotkey: 权重}` 换成链要的 `(uid, u16)`。
+    """Convert the backend's `{hotkey: weight}` into the `(uid, u16)` the chain wants.
 
     Args:
-        weights_raw: 后端 `/api/weights` 的原始权重，键是 hotkey。
-        hotkeys: metagraph 里的 hotkey 列表，下标即 uid。
+        weights_raw: raw weights from the backend `/api/weights`, keyed by hotkey.
+        hotkeys: the hotkey list from the metagraph; the index is the uid.
     """
     positive: dict[int, float] = {}
     detail: list[str] = []
@@ -46,16 +55,16 @@ def normalize_weights(
             detail.append(f"  uid={uid:3d} hotkey={hotkey[:12]}... raw={weight:.6f}")
 
     if not positive:
-        return NormalizedWeights([], [], ["没有正权重"])
+        return NormalizedWeights([], [], ["no positive weights"])
 
     total = sum(positive.values())
     normed = {uid: weight / total for uid, weight in positive.items()}
 
     uids = list(normed.keys())
-    # 红线表达式：截断，不是四舍五入。
+    # Red-line expression: truncate, not round.
     weights = [int(w * U16_MAX) for w in normed.values()]
 
-    detail.append(f"  原始合计={total:.6f}，归一化到 sum=1.0")
+    detail.append(f"  raw total={total:.6f}, normalized to sum=1.0")
     detail.extend(
         f"  → uid={uid:3d} u16={w:5d} ({normed[uid]:.6f})"
         for uid, w in zip(uids, weights, strict=True)
@@ -70,17 +79,23 @@ def set_weights_on_chain(
     weights_raw: dict[str, float],
     hotkeys: list[str],
 ) -> bool:
-    """归一化后设权重。全零权重不发交易（发了也只是白付手续费）。"""
+    """Normalize, then set the weights.
+
+    If there are no positive weights, no transaction is sent (sending one would
+    only waste the fee).
+    """
     normalized = normalize_weights(weights_raw, hotkeys)
     for line in normalized.detail:
         logger.info("[set_weights]%s", line)
 
     if not normalized.uids:
-        logger.warning("[set_weights] 没有正权重，本次不设")
+        logger.warning("[set_weights] no positive weights, skipping this round")
         return False
 
     logger.info(
-        "[set_weights] 设 %d 个非零权重 | netuid=%d", len(normalized.uids), netuid
+        "[set_weights] setting %d non-zero weights | netuid=%d",
+        len(normalized.uids),
+        netuid,
     )
     result = subtensor.set_weights(
         wallet=wallet,
@@ -92,13 +107,14 @@ def set_weights_on_chain(
 
 
 def _is_success(result: Any) -> bool:
-    """判断 set_weights 的返回是不是成功。
+    """Decide whether the return value of set_weights means success.
 
-    SDK 有三种返回形状（旧的布尔、标准的 `is_success`、timelock 版的
-    `success` + `error=None`），旧 `validator.py` 的判定顺序原样保留。
+    The SDK has three return shapes (the old bool, the standard `is_success`, and
+    the timelock version's `success` + `error=None`); the decision order from the
+    old `validator.py` is preserved as-is.
     """
     if not result:
-        logger.warning("[set_weights] set_weights 返回假值")
+        logger.warning("[set_weights] set_weights returned a falsy value")
         return False
 
     success = bool(
@@ -114,9 +130,9 @@ def _is_success(result: Any) -> bool:
         )
     )
     if success:
-        logger.info("[set_weights] ✅ 链上确认")
+        logger.info("[set_weights] ✅ confirmed on chain")
         return True
 
     message = getattr(result, "status_message", "") or str(result)
-    logger.error("[set_weights] ❌ 链上失败 | msg=%s", message)
+    logger.error("[set_weights] ❌ failed on chain | msg=%s", message)
     return False

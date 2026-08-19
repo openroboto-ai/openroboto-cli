@@ -1,4 +1,4 @@
-"""HuggingFace：仓库命名与模型上传。"""
+"""HuggingFace: repository naming and model upload."""
 
 from __future__ import annotations
 

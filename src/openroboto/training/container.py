@@ -72,17 +72,21 @@ def build_docker_command(
     data_dir = os.path.dirname(os.path.abspath(train_data_path))
     train_name = os.path.basename(train_data_path)
 
-    # ⚠️ **每一个 `-v` 的源都必须是绝对路径。** docker 对不以 `/` 开头的源不当路径：
-    #   - 含斜杠 → 直接拒绝启动容器
-    #     （`"tmp/…" includes invalid characters for a local volume name`）
-    #   - 不含斜杠 → **静默**当成具名卷，容器看到的是一个空目录，
-    #     宿主那个同名目录一个字节都不会被读到或写到
+    # ⚠️ **The source of every `-v` must be an absolute path.** Docker does not
+    # treat a source that does not start with `/` as a path:
+    #   - with a slash → it refuses to start the container outright
+    #     (`"tmp/…" includes invalid characters for a local volume name`)
+    #   - without a slash → it **silently** treats it as a named volume, the
+    #     container sees an empty directory, and not a single byte of the
+    #     host directory of that name is ever read or written
     #
-    # 这两条都实测过。默认输出根是 `Path("./tmp/robot_train_vla_miner")`，
-    # 而 `Path` 会把 `./` 规范化掉，`str()` 出来就是 `tmp/…` —— 于是
-    # `openroboto train` 用默认配置**根本起不来容器**。
-    # 基座缓存那条更阴：`cache` 不含斜杠，不报错，只是永远读不到宿主的缓存，
-    # 每轮重下几个 GB，而"命中缓存"的日志照常打印。
+    # Both were reproduced. The default output root is
+    # `Path("./tmp/robot_train_vla_miner")`, and `Path` normalises the `./` away,
+    # so `str()` yields `tmp/…` — which means `openroboto train` with the default
+    # config **cannot start the container at all**.
+    # The base-model cache is the nastier one: `cache` has no slash, raises no
+    # error, it just never sees the host cache — several GB re-downloaded every
+    # round, while the "cache hit" log line prints as usual.
     output_mount = Path(output_dir).resolve()
 
     command = [
@@ -147,7 +151,7 @@ def detect_free_gpus() -> str:
             check=False,
         )
     except (OSError, subprocess.SubprocessError) as exc:
-        logger.debug("nvidia-smi 不可用：%s", exc)
+        logger.debug("nvidia-smi unavailable: %s", exc)
         return ""
 
     if result.returncode != 0:
@@ -166,9 +170,9 @@ def detect_free_gpus() -> str:
             free.append(str(index))
 
     if free:
-        logger.info("🎯 检测到空闲 GPU：%s", ",".join(free))
+        logger.info("🎯 Free GPUs detected: %s", ",".join(free))
     else:
-        logger.warning("⚠️  没有空闲 GPU，使用全部卡")
+        logger.warning("⚠️  No free GPU found, using every card")
     return ",".join(free)
 
 
@@ -187,7 +191,7 @@ def remove_stale_container(name: str = CONTAINER_NAME) -> None:
         )
         container_id = listed.stdout.strip()
         if container_id:
-            logger.info("清理残留容器 %s", container_id)
+            logger.info("Removing leftover container %s", container_id)
             subprocess.run(
                 ["docker", "rm", "-f", container_id],
                 capture_output=True,
@@ -196,7 +200,7 @@ def remove_stale_container(name: str = CONTAINER_NAME) -> None:
                 check=False,
             )
     except (OSError, subprocess.SubprocessError) as exc:
-        logger.debug("清理容器失败（可忽略）：%s", exc)
+        logger.debug("Container cleanup failed (safe to ignore): %s", exc)
 
 
 def parse_result(stdout: str, output_dir: str) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -217,7 +221,9 @@ def parse_result(stdout: str, output_dir: str) -> tuple[dict[str, Any], dict[str
             proof = parsed.get("proof", {})
         except json.JSONDecodeError:
             logger.warning(
-                "容器输出里的 %s 段不是合法 JSON，改读输出目录", RESULT_MARKER
+                "The %s section of the container output is not valid JSON, "
+                "falling back to the output directory",
+                RESULT_MARKER,
             )
 
     for name, target in (("metrics.json", "metrics"), ("proof.json", "proof")):
@@ -257,7 +263,9 @@ def run_training(
         TrainingError: the data is empty, or the container exited non-zero.
     """
     if not train_samples:
-        raise TrainingError("训练集为空 —— 检查 control.json 的 dataset.train_url")
+        raise TrainingError(
+            "Training set is empty -- check dataset.train_url in control.json"
+        )
 
     os.makedirs(output_dir, exist_ok=True)
     remove_stale_container()
@@ -287,13 +295,15 @@ def run_training(
             custom_train_script=custom_train_script,
             visible_devices=detect_free_gpus(),
         )
-        logger.info("🐳 启动 openpi-runner：%s", " ".join(command))
+        logger.info("🐳 Starting openpi-runner: %s", " ".join(command))
 
-        # 这两条不是"防御性编程"，是这个命令最可能遇到的两种环境故障。
-        # 不转成 TrainingError 的话它们会一路裸抛到顶层：矿工看到的是
-        # `FileNotFoundError: [Errno 2] ... 'docker'` 加二十行 traceback，
-        # 而 AGENTS.md §4 要求报错能自助排查。`build` 与 `doctor` 早就这么做了，
-        # 唯独真正长时间调 docker 的这条路径漏了。
+        # These two are not "defensive programming", they are the two environment
+        # failures this command is most likely to hit. Without turning them into a
+        # TrainingError they propagate raw to the top level: the miner sees
+        # `FileNotFoundError: [Errno 2] ... 'docker'` plus twenty lines of
+        # traceback, while AGENTS.md §4 requires errors a miner can act on.
+        # `build` and `doctor` have done this all along; only this path -- the one
+        # that actually drives docker for hours -- was missed.
         try:
             completed = subprocess.run(
                 command,
@@ -304,27 +314,34 @@ def run_training(
             )
         except FileNotFoundError as exc:
             raise TrainingError(
-                "找不到 docker —— 训练必须跑在容器里：openpi 要 numpy<2.0、"
-                "bittensor 要 numpy>=2.0，一个解释器装不下两个。\n"
-                "  → 装 Docker：https://get.docker.com\n"
-                "  → 装完先 `openroboto doctor`，它会把 GPU / 驱动 / 镜像一起查掉"
+                "docker not found -- training has to run inside a container: "
+                "openpi needs numpy<2.0 and bittensor needs numpy>=2.0, and one "
+                "interpreter cannot hold both.\n"
+                "  \u2192 install Docker: https://get.docker.com\n"
+                "  \u2192 then run `openroboto doctor` first, it checks GPU, "
+                "drivers and the image in one go"
             ) from exc
         except subprocess.TimeoutExpired as exc:
             hours = TRAIN_TIMEOUT_SEC // 3600
             raise TrainingError(
-                f"训练容器跑了超过 {hours} 小时仍未结束，已中止。\n"
-                f"  这通常不是你的策略脚本写错了，而是卡在下载基座或数据上。\n"
-                f"  → `docker logs {CONTAINER_NAME}` 看它最后停在哪一步\n"
-                f"  → 确认磁盘还有空间（基座 checkpoint 有几个 GB）"
+                f"The training container ran for more than {hours} hours without "
+                f"finishing and was aborted.\n"
+                f"  This usually is not a bug in your strategy script -- it is "
+                f"stuck downloading the base model or the dataset.\n"
+                f"  \u2192 run `docker logs {CONTAINER_NAME}` to see which step it "
+                f"stopped at\n"
+                f"  \u2192 make sure you still have disk space (the base "
+                f"checkpoint is several GB)"
             ) from exc
 
         metrics, proof = parse_result(completed.stdout, output_dir)
 
     if completed.returncode != 0:
         raise TrainingError(
-            f"训练容器退出码 {completed.returncode}\n"
+            f"The training container exited with code {completed.returncode}\n"
             f"  stderr: {completed.stderr[:500]}\n"
-            f"  → 先跑 `openroboto doctor` 确认 GPU / Docker / 镜像都就位"
+            f"  \u2192 run `openroboto doctor` first to confirm GPU, Docker and "
+            f"the image are all in place"
         )
     return metrics, proof
 

@@ -1,6 +1,7 @@
-"""打包不变量。
+"""Packaging invariants.
 
-两条都在 AGENTS.md 的红线里，坏了不会有人立刻发现 —— 只会看到矿工装完用不了。
+Both are red lines in AGENTS.md. If they break, nobody notices right away -- the only
+symptom is miners installing the package and finding it unusable.
 """
 
 from __future__ import annotations
@@ -14,10 +15,12 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 def test_package_does_not_vendor_the_protocol() -> None:
-    """协议实现一律从 `openroboto-protocol` 装，本包不许有自己的一份。
+    """The protocol implementation must always come from `openroboto-protocol`; this
+    package must not carry its own copy.
 
-    历史上这份代码在四个仓库里各存一份，已经漂了（`protocol/types.py` 差 105 行，
-    `payment.py` 差 313 行）—— 于是矿工按 A 编码、后端按 B 解码。
+    Historically this code lived as a separate copy in four repositories and had
+    drifted (`protocol/types.py` off by 105 lines, `payment.py` off by 313 lines) --
+    so miners encoded per copy A while the backend decoded per copy B.
     """
     assert not (PACKAGE_ROOT / "protocol").exists()
 
@@ -32,14 +35,17 @@ def test_package_does_not_vendor_the_protocol() -> None:
         text=True,
         check=False,
     )
-    assert vendored.stdout.strip() == "", f"疑似复制了协议实现：{vendored.stdout}"
+    assert vendored.stdout.strip() == "", (
+        f"looks like a copied protocol implementation: {vendored.stdout}"
+    )
 
 
 def test_templates_are_installed_with_the_package() -> None:
-    """模板必须能从**安装好的包**里读出来，否则 `openroboto init` 是空的。
+    """Templates must be readable from the **installed package**, otherwise
+    `openroboto init` produces nothing.
 
-    `.gitignore` 里的 `*.yaml` 曾经把这两份模板一起吞掉；从干净 clone 构建出的
-    wheel 里没有它们，而本地开发时看不出来。
+    The `*.yaml` entry in `.gitignore` once swallowed both templates: a wheel built
+    from a clean clone did not contain them, and local development did not show it.
     """
     templates = files("openroboto") / "templates"
     miner_template = (templates / "miner.yaml").read_text(encoding="utf-8")
@@ -58,5 +64,6 @@ def test_templates_are_not_ignored_by_git() -> None:
         check=False,
     )
     assert ignored.returncode != 0, (
-        "模板被 .gitignore 吞了，clone 出来的仓建不出可用的包"
+        "the templates are swallowed by .gitignore; a fresh clone cannot build a "
+        "usable package"
     )

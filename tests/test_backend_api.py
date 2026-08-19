@@ -1,11 +1,14 @@
-"""后端只读客户端：信封解析与错误翻译。不打真实网络。
+"""Read-only backend client: envelope parsing and error translation. No real network.
 
-这个文件守的三件事，每一件都直接影响矿工要不要再烧一笔 TAO：
+The three things this file guards each decide directly whether a miner has to burn
+another TAO:
 
-1. **成功走 `data`，失败走 `error`**，两者不会被混起来；
-2. 报错时 `error.code` / `error.retryable` / `meta.request_id` 一个都不能丢
-   —— 丢了矿工就只剩「失败了」三个字，只能来问我们；
-3. `/api/weights` 解不出来 = 全网排放停摆，所以两种形状都得认。
+1. **success goes through `data`, failure through `error`**, and the two are never
+   mixed up;
+2. on an error, `error.code` / `error.retryable` / `meta.request_id` must not be lost
+   -- lose them and all the miner has left is "it failed", so they have to come ask us;
+3. failing to parse `/api/weights` means emissions stall network-wide, so both shapes
+   have to be accepted.
 """
 
 from __future__ import annotations
@@ -31,7 +34,7 @@ class _FakeResponse(io.BytesIO):
 
 
 def _capture(monkeypatch: pytest.MonkeyPatch, payload: Any) -> list[Any]:
-    """替换掉 urlopen，记下发出去的请求，回一份固定响应。"""
+    """Replace urlopen, record the outgoing request, return a fixed response."""
     seen: list[Any] = []
 
     def _urlopen(request: Any, timeout: float) -> _FakeResponse:
@@ -50,7 +53,7 @@ def _fail_with(monkeypatch: pytest.MonkeyPatch, exc: Exception) -> None:
 
 
 def _http_error(code: int, body: Any = None) -> urllib.error.HTTPError:
-    """一个带响应体的 HTTPError —— 错误信封就在这个 body 里。"""
+    """An HTTPError with a body -- the error envelope lives in that body."""
     fp = io.BytesIO(json.dumps(body).encode()) if body is not None else None
     return urllib.error.HTTPError("https://api.example/x", code, "boom", {}, fp)  # type: ignore[arg-type]
 
@@ -102,7 +105,7 @@ def _rejection(**overrides: Any) -> dict[str, Any]:
     return {**row, **overrides}
 
 
-# ─── 请求拼装 ────────────────────────────────────────────────
+# ─── request assembly ────────────────────────────────────────
 
 
 def test_empty_parameters_are_not_sent(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -115,25 +118,32 @@ def test_empty_parameters_are_not_sent(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_every_request_asks_for_the_envelope(monkeypatch: pytest.MonkeyPatch) -> None:
-    """🔴 每个请求都必须点名要信封，否则后端给的是裸 JSON。
+    """🔴 Every request must explicitly ask for the envelope, or the backend returns
+    bare JSON.
 
-    后端的默认形状是裸 JSON（迁移期为了不打断评测 worker）。漏掉这个头的表现
-    **不是报错**：`_error_envelope()` 永远返回 None、`data` 永远取不到，
-    本文件里所有解信封的用例照样绿（它们喂的是构造好的信封字节，
-    根本不经过真实的 HTTP 头）—— 只有这一条盯着请求本身。
+    The backend's default shape is bare JSON (during migration, so the evaluation
+    workers are not disrupted). Missing this header does **not** surface as an error:
+    `_error_envelope()` would always return None and `data` would never be reachable,
+    while every envelope-parsing test in this file stays green (they are fed
+    pre-built envelope bytes and never go through a real HTTP header) -- only this test
+    watches the request itself.
 
-    带不带 key 的两条路径分开走（`_get` 里是两个分支），所以两条都验。
+    With and without a key are separate paths (two branches inside `_get`), so both
+    are verified.
     """
     for kwargs in ({"hotkey": "5X", "limit": 3}, {"hotkey": "", "limit": 5}):
         seen = _capture(monkeypatch, _list_envelope([]))
         backend_api.fetch_submissions("https://api.example", **kwargs)
         accept = seen[0].get_header("Accept")
-        assert accept is not None, "请求没带 Accept —— 拿到的会是裸 JSON"
+        assert accept is not None, (
+            "the request carries no Accept -- what comes back will be bare JSON"
+        )
         assert "application/vnd.openroboto.envelope+json" in accept
 
 
 def test_rejections_need_no_key(monkeypatch: pytest.MonkeyPatch) -> None:
-    """对矿工白纸黑字承诺过 No API key required，挂上 key 就是毁约。"""
+    """We promised miners in writing that no API key is required; attaching a key
+    breaks that promise."""
     seen = _capture(monkeypatch, _list_envelope([_rejection()]))
     page = backend_api.fetch_rejections("https://api.example", hotkey="5X", limit=3)
     assert "/api/v1/scan-rejections?" in seen[0].full_url
@@ -141,20 +151,22 @@ def test_rejections_need_no_key(monkeypatch: pytest.MonkeyPatch) -> None:
     assert page.data[0].reject_reason == "burn_tx_too_old"
 
 
-# ─── 成功：data / meta.page ──────────────────────────────────
+# ─── success: data / meta.page ───────────────────────────────
 
 
 def test_rows_come_from_data_not_from_a_custom_wrapper(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """旧形状是 `{success, submissions, total, …}`，现在业务字段只在 `data` 里。"""
+    """The old shape was `{success, submissions, total, ...}`; the business fields now
+    live only under `data`."""
     _capture(monkeypatch, _list_envelope([_submission(round_num=9)]))
     page = backend_api.fetch_submissions("https://api.example", hotkey="5X")
     assert [row.round_num for row in page.data] == [9]
 
 
 def test_paging_comes_from_meta_not_from_data(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`has_more` 由后端算好；调用方不再自己拿 offset+len<total 推一遍。"""
+    """`has_more` is computed by the backend; callers no longer derive it themselves
+    from offset+len<total."""
     _capture(monkeypatch, _list_envelope([_submission()], total=42, has_more=True))
     page = backend_api.fetch_submissions("https://api.example", hotkey="5X")
     assert page.meta.page.has_more is True
@@ -162,7 +174,8 @@ def test_paging_comes_from_meta_not_from_data(monkeypatch: pytest.MonkeyPatch) -
 
 
 def test_legacy_status_column_is_not_reachable(monkeypatch: pytest.MonkeyPatch) -> None:
-    """旧 `status` 列和 `eval_status` 有 52 行不一致，模型里根本没有它。"""
+    """The old `status` column disagreed with `eval_status` on 52 rows; the model does
+    not carry it at all."""
     _capture(
         monkeypatch,
         _list_envelope([_submission(eval_status="rejected", status="done")]),
@@ -172,7 +185,7 @@ def test_legacy_status_column_is_not_reachable(monkeypatch: pytest.MonkeyPatch) 
     assert not hasattr(page.data[0], "status")
 
 
-# ─── 失败：error.code / retryable / request_id ────────────────
+# ─── failure: error.code / retryable / request_id ────────────
 
 
 def test_error_envelope_keeps_code_retryable_and_request_id(
@@ -191,7 +204,8 @@ def test_error_envelope_keeps_code_retryable_and_request_id(
 def test_non_retryable_error_tells_the_miner_to_stop(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """这一行就是「别再烧 TAO 了」的全部依据，必须打出来。"""
+    """This one line is the entire basis for "stop burning TAO", so it must be
+    printed."""
     _fail_with(monkeypatch, _http_error(400, _error_envelope("BURN_TX_TOO_OLD", False)))
     with pytest.raises(backend_api.BackendError) as excinfo:
         backend_api.fetch_submissions("https://api.example")
@@ -215,7 +229,8 @@ def test_retryable_error_says_it_is_worth_retrying(
 
 
 def test_error_inside_a_200_is_still_an_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    """信封规则：data / error 二选一。200 里带 error 是后端的 bug，也要当错误报。"""
+    """Envelope rule: data or error, never both. An error inside a 200 is a backend bug
+    and must still be reported as an error."""
     _capture(monkeypatch, _error_envelope("INFRA_ERROR", True))
     with pytest.raises(backend_api.BackendError) as excinfo:
         backend_api.fetch_submissions("https://api.example")
@@ -223,7 +238,8 @@ def test_error_inside_a_200_is_still_an_error(monkeypatch: pytest.MonkeyPatch) -
 
 
 def test_401_explains_which_key_is_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    """没有信封的 401（旧后端 / 网关）也要说清是哪个 key。"""
+    """A 401 without an envelope (old backend / gateway) must still say which key is
+    meant."""
     _fail_with(monkeypatch, _http_error(401))
     with pytest.raises(backend_api.BackendError) as excinfo:
         backend_api.fetch_weights("https://api.example")
@@ -249,14 +265,15 @@ def test_connection_failure_is_retryable(monkeypatch: pytest.MonkeyPatch) -> Non
 def test_shape_mismatch_asks_the_miner_to_upgrade(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """后端形状对不上时给一句能照做的话，而不是一页 pydantic 堆栈。"""
+    """When the backend shape does not match, give one actionable sentence instead of a
+    page of pydantic stack trace."""
     _capture(monkeypatch, {"submissions": [], "total": 0})
     with pytest.raises(backend_api.BackendError) as excinfo:
         backend_api.fetch_submissions("https://api.example")
     assert "pip install -U openroboto" in str(excinfo.value)
 
 
-# ─── /api/weights —— 钱的出口 ────────────────────────────────
+# ─── /api/weights -- where the money goes out ────────────────
 
 
 def test_weights_require_the_public_key(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -267,6 +284,7 @@ def test_weights_require_the_public_key(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 def test_weights_accept_the_envelope_too(monkeypatch: pytest.MonkeyPatch) -> None:
-    """ADR 02 §8.5 还没裁这个端点要不要套信封 —— 解不出权重就是全网排放停摆。"""
+    """ADR 02 section 8.5 has not yet ruled whether this endpoint gets an envelope --
+    and failing to parse the weights means emissions stall network-wide."""
     _capture(monkeypatch, {"data": {"5A": 0.9}, "meta": {"request_id": REQUEST_ID}})
     assert backend_api.fetch_weights("https://api.example", "pk") == {"5A": 0.9}

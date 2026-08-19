@@ -6,16 +6,19 @@
 venv/
 
 # Secrets and local configuration
-# 矿工的 miner.yaml 里有 HF token 和钱包密码，所以整类 *.yaml 默认不进版本库。
+# A miner's miner.yaml holds an HF token and a wallet password, so *.yaml is
+# excluded wholesale by default.
 *.yaml
 !*.example.yaml
 !**/*.example.yaml
-# 例外：打进 pip 包的配置模板。它们**必须**进版本库 —— 被 *.yaml 规则吞掉的话，
-# 从干净 clone 构建出来的 wheel 里没有模板，`openroboto init` 当场失败。
+# Exception: the config templates that ship inside the pip package. They **must**
+# be tracked -- if the *.yaml rule swallows them, a wheel built from a clean
+# clone contains no templates and `openroboto init` fails outright.
 !src/openroboto/templates/*.yaml
-# 例外：本地钩子配置。它必须进版本库，否则每个人的钩子各不相同 ——
-# 实测 `git check-ignore -v .pre-commit-config.yaml` 命中上面的 `*.yaml`，
-# 加它进来时会静默失败（`git add` 不报错，文件就是没进去）。
+# Exception: the pre-commit config. It must be tracked, otherwise everyone runs
+# a different set of hooks. Measured: `git check-ignore -v
+# .pre-commit-config.yaml` matches the `*.yaml` rule above, so adding it fails
+# silently -- `git add` reports no error and the file simply is not there.
 !.pre-commit-config.yaml
 .env
 .env.*
@@ -37,11 +40,11 @@ build/
 .mypy_cache/
 .ruff_cache/
 .pytest_cache/
-# coverage 的中间数据、逐行报告，以及 CI 那条 --junitxml 的产物
+# coverage intermediate data, the per-line report, and the CI --junitxml artifact
 .coverage
 htmlcov/
 pytest-report.xml
-# 基座 checkpoint 的本地缓存（几个 GB）
+# local cache of the base checkpoint (several GB)
 cache/
 
 # Model artifacts
@@ -57,10 +60,12 @@ Thumbs.db
 # JetBrains IDE
 .idea/
 
-# 内部工程规范（中文，面向团队与 agent），**不进公开仓**。
-# 2026-08-19 从全部历史里移除后加入忽略清单 —— 这个仓是公开的，
-# 而这几份写的是内部推理、未修缺陷清单和跨仓约定，不是给外部矿工看的。
-# 本地仍然有这几个文件，它们是项目规范的唯一来源；别把它们加回版本库。
+# Internal engineering conventions (written in Chinese, for the team and its
+# agents). **These do not belong in a public repo.** Removed from the entire
+# history on 2026-08-19 and ignored since: this repo is public, and these files
+# carry internal reasoning, a list of unfixed defects, and cross-repo agreements
+# that are not meant for external miners. The files still exist locally and
+# remain the single source of the project's conventions; do not add them back.
 AGENTS.md
 CLAUDE.md
 SCOPE.md

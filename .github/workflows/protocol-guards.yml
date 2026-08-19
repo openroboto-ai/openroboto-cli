@@ -1,12 +1,15 @@
 name: protocol guards
 
-# 这个仓目前**只有**这一条 workflow —— lint / 类型检查 / 测试的 CI 还没接
-# （`uv run ruff format --check .` 当前在 6 个从 openroboto-subnet 继承来的文件上是红的，
-#   接它之前要先决定那些文件怎么处理）。这里先把两条与协议包相关的防线立起来，
-# 因为它们防的是**静默**故障：漂移不会让任何东西报错，只会让评测某天复现不出来。
+# This is currently the **only** workflow in this repo — CI for lint / type checking /
+# tests is not wired up yet (`uv run ruff format --check .` is currently red on 6 files
+# inherited from openroboto-subnet, and how to handle those files has to be decided
+# first). These two protocol-package-related defenses are put up ahead of that, because
+# what they guard against is **silent** failure: drift makes nothing report an error, it
+# just makes an evaluation impossible to reproduce one day.
 #
-# 两条检查的原文与理由见 `../openroboto-protocol/README.md` 的
-# "What consumers must add to their own CI"。
+# The original wording and rationale of both checks are in
+# `../openroboto-protocol/README.md`, under
+# "What consumers must add to their own CI".
 
 on:
   pull_request:
@@ -32,19 +35,24 @@ jobs:
           persist-credentials: false
 
       # ───────────────────────────────────────────────────────────────────────
-      # 仓库内不得出现 vendored 的 protocol/ 副本。装了这个包还留着旧副本，
-      # import 会静默走到副本上 —— 这正是当年 protocol/types.py 漂 105 行、
-      # payment.py 漂 313 行的那条路径（矿工按 A 编码、后端按 B 解码）。
+      # A vendored copy of protocol/ must not appear anywhere in the repository. With
+      # this package installed and an old copy still around, imports silently resolve to
+      # the copy — which is exactly the path along which protocol/types.py once drifted
+      # by 105 lines and payment.py by 313 lines (miners encoding by A, the backend
+      # decoding by B).
       #
-      # 此前这一步带一份豁免清单（`protocol/{__init__,seed,types}.py`），因为
-      # SCOPE.md 规定继承来的旧文件一律不删。清单里写着退出条件是"它们消失的
-      # 那一天" —— **2026-08-19 就是那一天**：旧结构整体删除，豁免随之删掉，
-      # 这一步回到上游原版的语义：**列表必须为空**。
+      # This step used to carry an exemption list (`protocol/{__init__,seed,types}.py`),
+      # because SCOPE.md required that no inherited old file be deleted. The list stated
+      # its exit condition as "the day they disappear" — **2026-08-19 was that day**:
+      # the old structure was deleted wholesale, the exemption went with it, and this
+      # step is back to the upstream original semantics: **the list must be empty**.
       #
-      # 不用 continue-on-error（黄色没人看），也不只扫 src/
-      # （副本恰恰不会出现在 src/ 里，一条永远不可能变红的检查就是装饰）。
-      # 本地对应的用例在 tests/test_vendored_protocol.py，两层都留着：
-      # pytest 让人立刻发现，CI 拦住绕过本地钩子的提交。
+      # continue-on-error is not used (nobody looks at yellow), and the scan is not
+      # limited to src/ (a copy is precisely what does not show up in src/, and a check
+      # that can never go red is decoration).
+      # The corresponding local test is tests/test_vendored_protocol.py; both layers are
+      # kept: pytest makes it visible immediately, CI blocks commits that bypassed the
+      # local hooks.
       # ───────────────────────────────────────────────────────────────────────
       - name: No vendored protocol copy
         run: |
@@ -52,18 +60,21 @@ jobs:
           if [ -n "$copies" ]; then
             echo "::error::vendored protocol copy found; import openroboto_protocol instead."
             echo "$copies"
-            echo "协议字段与链上格式只能来自 openroboto-protocol 包（AGENTS.md 红线 #1）。"
-            echo "当年这类副本漂过 105 行：矿工按 A 编码、后端按 B 解码。"
+            echo "Protocol fields and on-chain formats may only come from the openroboto-protocol package (AGENTS.md red line #1)."
+            echo "A copy like this once drifted by 105 lines: miners encoding by A, the backend decoding by B."
             exit 1
           fi
           echo "no vendored protocol copy"
 
       # ───────────────────────────────────────────────────────────────────────
-      # 版本必须钉死。`>=` / `~=` 意味着矿工侧和后端侧可能解析到不同的代码，
-      # 而"两边能被证明装的是同一份"是 openroboto-protocol 唯一的存在理由。
+      # The version must be pinned. `>=` / `~=` means the miner side and the backend
+      # side may resolve to different code, and "both sides can be proven to have
+      # installed the same thing" is the only reason openroboto-protocol exists.
       #
-      # 解析依赖表，不做行级 grep：本仓 pyproject.toml 里有 3 行注释和 1 行
-      # [tool.uv.sources] 提到这个包名却不是依赖声明，行级 grep 全部误判成浮动版本。
+      # The dependency tables are parsed rather than grepped line by line: this repo's
+      # pyproject.toml has 3 comment lines and 1 [tool.uv.sources] line mentioning this
+      # package name without being a dependency declaration, and a line-level grep
+      # misjudges all of them as floating versions.
       # ───────────────────────────────────────────────────────────────────────
       - name: Protocol version is pinned
         run: |
@@ -80,7 +91,7 @@ jobs:
               reqs += project.get("dependencies", [])
               for group in project.get("optional-dependencies", {}).values():
                   reqs += group
-              # dependency-groups 的条目可能是 {include-group = "..."} 这样的表。
+              # Entries in dependency-groups may be tables such as {include-group = "..."}.
               for group in data.get("dependency-groups", {}).values():
                   reqs += [item for item in group if isinstance(item, str)]
           for req_file in sorted(pathlib.Path().glob("requirements*.txt")):

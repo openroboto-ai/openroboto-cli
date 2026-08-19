@@ -1,44 +1,55 @@
-"""后端只读 API 客户端。
+"""Read-only client for the backend API.
 
-只用 stdlib `urllib` —— 为了一个 GET 让矿工装 `requests` 不值得。
+Uses only the stdlib `urllib` -- making miners install `requests` for the sake
+of one GET is not worth it.
 
-## 响应形状：一个信封，成功和失败结构上就不一样
+## Response shape: one envelope, success and failure differ structurally
 
 ```jsonc
-// 成功（列表端点的 data 是数组，分页信息在 meta.page，不混进 data）
+// Success (data is an array on list endpoints; pagination lives in meta.page,
+// it is not mixed into data)
 {"data": [ … ],
  "meta": {"request_id": "01H…", "generated_at": "2026-08-18T06:37:34Z",
           "page": {"total": 7, "limit": 50, "offset": 0, "has_more": false}}}
 
-// 失败：**没有 data**
+// Failure: **no data**
 {"error": {"code": "BURN_TX_TOO_OLD", "message": "…", "retryable": false},
  "meta": {"request_id": "01H…", "generated_at": "…"}}
 ```
 
-对矿工来说，这三件事因此有了答案：
+For miners, this answers three things:
 
-- `data` / `error` 二选一 —— 不用记「`code: 0` 表示成功」这类只有文档里才有的约定；
-- `error.retryable` 直接回答唯一真正要紧的问题：**要不要再烧一笔 TAO 重试。**
-  基建抖动是 `true`；「你的模型格式不对」是 `false` —— 后者重试一百次也是同样的结果；
-- `error.code` 是稳定机器码。措辞会改、会翻译，码不会；写脚本只许按它分支。
+- it is `data` or `error`, one of the two -- no need to memorize conventions
+  like "`code: 0` means success" that exist only in the documentation;
+- `error.retryable` directly answers the only question that really matters:
+  **whether to burn another TAO and retry.** Infrastructure flapping is
+  `true`; "your model format is wrong" is `false` -- retrying the latter a
+  hundred times gives the same result every time;
+- `error.code` is a stable machine code. Wording changes and gets translated,
+  the code does not; scripts must branch on it and nothing else.
 
-出错时 `meta.request_id` 会一起打出来。报障时把那一行贴给我们，我们直接就能捞到这次
-请求的全部日志，不用再互相问「你什么时候敲的、敲的是什么」。
+On failure `meta.request_id` is printed along with the error. Paste that line
+when reporting a problem and we can pull up every log of that request
+directly, without having to ask each other "when did you run it, and what
+exactly did you type".
 
-字段模型全部从 `openroboto-protocol` 装（信封、提交记录、拒绝记录），**本仓不复制
-一份**：两边钉死同一个版本号之后，「后端发的形状」和「CLI 解的形状」是**同一份
-声明**，而不是各抄一遍的口头约定。
+The field models are all installed from `openroboto-protocol` (envelope,
+submission records, rejection records); **this repo does not keep a copy**:
+once both sides pin the same version, "the shape the backend sends" and "the
+shape the CLI parses" are **one and the same declaration**, not a verbal
+agreement transcribed twice.
 
-## 哪些端点要 key（2026-08-17 实测，api.openroboto.ai）
+## Which endpoints need a key (measured 2026-08-17, api.openroboto.ai)
 
-| 端点 | 无 key |
+| Endpoint | Without a key |
 |---|---|
-| `GET /api/v1/scan-rejections` | 200 —— 矿工自助查被拒原因就靠它 |
+| `GET /api/v1/scan-rejections` | 200 -- miners look up rejection reasons here |
 | `GET /api/v1/submissions/history` | 200 |
-| `GET /api/weights` | 401，验证者要带 `X-API-Key: <public_key>` |
+| `GET /api/weights` | 401, validators send `X-API-Key: <public_key>` |
 | `GET /api/miner/{hotkey}` | 401 |
 
-所以 `openroboto status` 走前两个：**矿工不需要任何 key 就能查自己的提交**。
+So `openroboto status` goes through the first two: **a miner needs no key at
+all to query their own submissions**.
 """
 
 from __future__ import annotations
@@ -59,16 +70,21 @@ from openroboto_protocol.schemas import (
 
 from openroboto.http_client import build_request, urlopen
 
-#: 🔴 **不发这个头就什么信封都拿不到。**
+#: 🔴 **Without sending this header you get no envelope at all.**
 #:
-#: 后端的默认形状是裸 JSON（迁移期为了不打断评测 worker，见后端 ADR 02 §6），
-#: 只有点名要才给 `{data, meta}` / `{error: {...}, meta}`。漏掉这一行的表现是：
-#: 本文件里所有解信封的代码**一次都不触发** —— `_error_envelope()` 永远返回 None、
-#: `data` 永远取不到，而且**不报错**，只是拿到一份形状不对的数据。
+#: The backend's default shape is bare JSON (during the migration, so as not
+#: to break the evaluation workers; see backend ADR 02 §6); it only returns
+#: `{data, meta}` / `{error: {...}, meta}` when explicitly asked. Dropping
+#: this line looks like this: none of the envelope-parsing code in this file
+#: **is ever triggered even once** -- `_error_envelope()` always returns None,
+#: `data` is never obtainable, and **nothing raises an error**; you just get
+#: data in the wrong shape.
 #:
-#: 尾巴上带 `application/json` 是给中间的网关和还没升级的后端留的：
-#: 只写厂商类型时，个别代理会判 406。后端的协商是子串匹配、且信封优先，
-#: 两个都写不影响它给信封。
+#: The trailing `application/json` is there for gateways in the middle and for
+#: backends that have not been upgraded yet: with only the vendor type, some
+#: proxies answer 406. The backend's negotiation is a substring match and
+#: prefers the envelope, so listing both does not stop it from returning the
+#: envelope.
 ACCEPT = "application/vnd.openroboto.envelope+json, application/json"
 
 REQUEST_TIMEOUT_SEC = 30
@@ -79,33 +95,38 @@ REJECTIONS_PATH = "/api/v1/scan-rejections"
 WEIGHTS_PATH = "/api/weights"
 
 KEY_HINT = (
-    "\n  这个端点需要 API key —— 验证者把 control.json 里的 public_key "
-    "填进 validator.yaml 的 backend.public_key"
+    "\n  This endpoint needs an API key -- validators copy public_key from "
+    "control.json into backend.public_key in validator.yaml"
 )
 
-#: 形状对不上时最多贴几行原始报错：pydantic 会为**每一行**列出问题，
-#: 一页 20 条能刷出上百行，而前几行就足够看出是哪个字段对不上。
+#: How many lines of the raw error to quote at most when the shape does not
+#: match: pydantic lists a problem for **every single row**, so a page of 20
+#: can scroll hundreds of lines, while the first few are already enough to see
+#: which field does not match.
 MAX_MISMATCH_LINES = 6
 
 _Model = TypeVar("_Model", bound=Contract)
 
 
 def retry_advice(retryable: bool) -> str:
-    """「要不要重试」的措辞**只有这一份**。
+    """The wording for "should I retry" exists **only here**.
 
-    错误信封的 `error.retryable` 和被拒记录的 `reason.retryable` 都用它。
-    两处说法不一致，矿工就要自己猜「到底还要不要再烧一笔」。
+    Both `error.retryable` from the error envelope and `reason.retryable` from
+    a rejection record use it. If the two places said different things, miners
+    would have to guess "do I really have to burn another one or not".
     """
     if retryable:
-        return "这是临时故障，原样再试一次通常就好了。"
-    return "重试不会有不同的结果 —— 先把上面这条原因解决掉。"
+        return "This is a temporary failure; retrying it as-is usually works."
+    return "Retrying will not give a different result -- fix the reason above first."
 
 
 class BackendError(Exception):
-    """后端请求失败。
+    """A backend request failed.
 
-    带着矿工自助排查要用的三样东西：稳定错误码、能不能重试、request_id。
-    `__str__` 把它们展开成几行人话 —— `cli.py` 直接打这一串，不必为它另写渲染。
+    Carries the three things a miner needs to diagnose it themselves: the
+    stable error code, whether it can be retried, and the request_id.
+    `__str__` expands them into a few lines of plain language -- `cli.py`
+    prints that string directly and does not need a renderer of its own.
     """
 
     def __init__(
@@ -117,31 +138,40 @@ class BackendError(Exception):
         request_id: str = "",
     ) -> None:
         super().__init__(message)
-        #: 稳定机器码。写脚本的人只允许按它分支。
+        #: Stable machine code. Script authors are only allowed to branch on
+        #: this.
         self.code = code
-        #: 重试有没有意义。措辞见 `retry_advice()`。
+        #: Whether retrying is meaningful. For the wording see
+        #: `retry_advice()`.
         self.retryable = retryable
-        #: 报障时贴给我们，一行就能捞到整次请求的日志。
+        #: Paste this to us when reporting a problem; one line is enough for
+        #: us to pull the logs of the whole request.
         self.request_id = request_id
 
     def __str__(self) -> str:
         lines = [str(self.args[0]) if self.args else ""]
         if self.code:
-            lines.append(f"  错误码: {self.code}")
+            lines.append(f"  error code: {self.code}")
         lines.append(f"  {retry_advice(self.retryable)}")
         if self.request_id:
-            lines.append(f"  request_id: {self.request_id} —— 报障时把这一行发给我们")
+            lines.append(
+                f"  request_id: {self.request_id} -- send us this line when "
+                f"reporting a problem"
+            )
         return "\n".join(lines)
 
 
 def fetch_submissions(
     base_url: str, hotkey: str = "", limit: int = DEFAULT_LIMIT, offset: int = 0
 ) -> ListEnvelope[SubmissionHistoryItem]:
-    """查提交历史。
+    """Query the submission history.
 
-    返回整个信封而不是只返回行：`meta.page.has_more` 是「你还有提交没显示出来」的
-    唯一可靠答案。让调用方自己拿 `offset + len(rows) < total` 去算，这个表达式就要在
-    每个列表端点上各写一遍，写错一次的表现是**静默少显示几行**，没有任何一方会报错。
+    Returns the whole envelope instead of just the rows: `meta.page.has_more`
+    is the only reliable answer to "you have submissions that were not
+    displayed". If callers computed `offset + len(rows) < total` themselves,
+    that expression would have to be written once per list endpoint, and
+    getting it wrong once shows up as **silently displaying a few rows too
+    few** -- neither the backend nor the CLI raises any error.
     """
     raw = _get(
         base_url, HISTORY_PATH, {"hotkey": hotkey, "limit": limit, "offset": offset}
@@ -152,7 +182,8 @@ def fetch_submissions(
 def fetch_rejections(
     base_url: str, hotkey: str = "", limit: int = DEFAULT_LIMIT, offset: int = 0
 ) -> ListEnvelope[ScanRejection]:
-    """查扫链阶段被拒的记录 —— 「上链了但队列里没有」的答案在这里。"""
+    """Query records rejected during the chain-scan stage -- the answer to
+    "it is on chain but not in the queue" is here."""
     raw = _get(
         base_url, REJECTIONS_PATH, {"hotkey": hotkey, "limit": limit, "offset": offset}
     )
@@ -160,17 +191,24 @@ def fetch_rejections(
 
 
 def fetch_weights(base_url: str, public_key: str = "") -> Weights:
-    """取当前权重 `{hotkey: 份额}`。验证者用，需要 public_key。
+    """Fetch the current weights `{hotkey: share}`. Used by validators,
+    requires public_key.
 
-    **这个端点两种形状都收**（信封的 `data`，以及裸的 `{hotkey: 份额}`）：
-    ADR 02 §8.5 明写 `/api/weights` 要不要套信封「建议单独裁」，至今没裁。
-    猜错的代价是不对称的 —— 解不出权重 → 发不出 `set_weights` →
-    **全网排放静默停摆**，而日志上只有一行 warning。多认一种形状是两行代码。
+    **This endpoint accepts both shapes** (the envelope's `data`, and a bare
+    `{hotkey: share}`): ADR 02 §8.5 explicitly says whether `/api/weights`
+    should be wrapped in an envelope "is recommended to be decided
+    separately", and it has not been decided to this day. The cost of
+    guessing wrong is asymmetric -- failing to parse the weights → no
+    `set_weights` can be sent → **emissions across the whole network stop
+    silently**, with nothing but a single warning line in the log. Accepting
+    one extra shape is two lines of code.
     """
     body = _decode(_get(base_url, WEIGHTS_PATH, api_key=public_key), WEIGHTS_PATH)
     data = body.get("data", body) if isinstance(body, dict) else body
     if not isinstance(data, dict):
-        raise BackendError(f"{WEIGHTS_PATH} 返回了 {type(data).__name__}，期望对象")
+        raise BackendError(
+            f"{WEIGHTS_PATH} returned {type(data).__name__}, expected an object"
+        )
     return {str(k): float(v) for k, v in data.items() if isinstance(v, (int, float))}
 
 
@@ -180,10 +218,12 @@ def _get(
     params: dict[str, Any] | None = None,
     api_key: str = "",
 ) -> bytes:
-    """GET 一个端点，拿回原始响应体。空值参数不会被发出去。
+    """GET an endpoint and return the raw response body. Empty-valued
+    parameters are not sent.
 
-    返回 bytes 而不是解析好的对象：信封由 pydantic 直接从 JSON 解
-    （`model_validate_json`），省掉「先 json.loads 再喂进模型」这一趟往返。
+    Returns bytes instead of a parsed object: the envelope is parsed by
+    pydantic straight from JSON (`model_validate_json`), which saves the
+    "json.loads first, then feed it into the model" round trip.
     """
     query = {k: str(v) for k, v in (params or {}).items() if v not in ("", None)}
     url = f"{base_url.rstrip('/')}{path}"
@@ -199,14 +239,19 @@ def _get(
         with urlopen(request, REQUEST_TIMEOUT_SEC) as response:
             raw: bytes = response.read()
     except urllib.error.HTTPError as exc:
-        # HTTPError 本身就是响应对象，**信封在它的 body 里**。不读它就等于把
-        # code / retryable / request_id 全丢掉，只剩一个光秃秃的状态码。
+        # HTTPError is itself the response object, and **the envelope is in
+        # its body**. Not reading it means throwing away code / retryable /
+        # request_id entirely, leaving nothing but a bare status code.
         raise _http_failure(url, exc) from exc
     except (OSError, urllib.error.URLError) as exc:
-        raise BackendError(f"连不上后端 {url}：{exc}", retryable=True) from exc
+        raise BackendError(
+            f"Cannot reach the backend {url}: {exc}", retryable=True
+        ) from exc
 
-    # 信封规则：成功一定有 data、一定没有 error。200 里带 error 是后端的 bug，
-    # 但真出现时也必须当错误报 —— 把一个错误当业务数据往下传是静默错。
+    # Envelope rule: a success always has data and never has error. An error
+    # inside a 200 is a backend bug, but when it does happen it must still be
+    # reported as an error -- passing an error downstream as business data is
+    # a silent failure.
     failure = _error_envelope(raw)
     if failure is not None:
         raise _from_envelope(failure)
@@ -214,27 +259,32 @@ def _get(
 
 
 def _http_failure(url: str, exc: urllib.error.HTTPError) -> BackendError:
-    """把 4xx / 5xx 翻成矿工能照着做下一步的错误。"""
+    """Turn a 4xx / 5xx into an error a miner can act on."""
     hint = KEY_HINT if exc.code == 401 else ""
 
-    # fp 为 None 的 HTTPError 读不出 body（连接已断，或是构造出来的）。
+    # An HTTPError whose fp is None has no readable body (the connection is
+    # already closed, or the error was constructed by hand).
     failure = _error_envelope(exc.read() if exc.fp is not None else b"")
     if failure is not None:
         return _from_envelope(failure, hint)
 
-    # 没有信封：要么后端还没升上去，要么挡在中间的网关自己吐了一页 HTML。
-    # 两种都不是矿工能修的，按状态码给一个保守的 retryable。
+    # No envelope: either the backend has not been upgraded yet, or a gateway
+    # sitting in the middle spat out a page of HTML of its own. Neither is
+    # something a miner can fix, so give a conservative retryable derived from
+    # the status code.
     return BackendError(
-        f"{url} 返回 HTTP {exc.code}，响应体里没有错误信封{hint}",
+        f"{url} returned HTTP {exc.code} with no error envelope in the body{hint}",
         retryable=exc.code >= 500 or exc.code == 429,
     )
 
 
 def _error_envelope(raw: bytes) -> ErrorEnvelope | None:
-    """认出错误信封；不是错误信封（含空 body、非 JSON）就返回 None。
+    """Recognize an error envelope; return None if it is not one (including an
+    empty body or non-JSON).
 
-    `ValidationError` 是 `ValueError` 的子类，所以这里不需要 import pydantic ——
-    本仓对 pydantic 的依赖全部经由 `openroboto-protocol` 这一条路。
+    `ValidationError` is a subclass of `ValueError`, so there is no need to
+    import pydantic here -- this repo's dependency on pydantic goes entirely
+    through the single path of `openroboto-protocol`.
     """
     try:
         return ErrorEnvelope.model_validate_json(raw)
@@ -243,7 +293,8 @@ def _error_envelope(raw: bytes) -> ErrorEnvelope | None:
 
 
 def _from_envelope(envelope: ErrorEnvelope, hint: str = "") -> BackendError:
-    """信封里的字段照搬，一个都不重新发明。"""
+    """Copy the fields out of the envelope as they are; reinvent none of
+    them."""
     return BackendError(
         envelope.error.message + hint,
         code=envelope.error.code,
@@ -253,29 +304,38 @@ def _from_envelope(envelope: ErrorEnvelope, hint: str = "") -> BackendError:
 
 
 def _parse(model: type[_Model], raw: bytes, path: str) -> _Model:
-    """按协议包声明的形状解一个成功响应。
+    """Parse a success response using the shape declared by the protocol
+    package.
 
-    解不出来**不是矿工的错，也不该甩他一页堆栈**：这是两边装的
-    `openroboto-protocol` 不是同一版，哪一边旧了都可能。
+    Failing to parse **is not the miner's fault, and they should not be thrown
+    a page of stack trace either**: it means the two sides have installed
+    different versions of `openroboto-protocol`, and either side could be the
+    outdated one.
     """
     try:
         return model.model_validate_json(raw)
     except ValueError as exc:
-        # pydantic 的文档链接对矿工是纯噪音，这里不往外抛。
+        # pydantic's documentation links are pure noise to a miner, so they
+        # are not passed on here.
         complaints = [
             line for line in str(exc).splitlines() if "errors.pydantic.dev" not in line
         ]
         detail = "\n  ".join(complaints[:MAX_MISMATCH_LINES])
         raise BackendError(
-            f"{path} 的响应和这一版 CLI 认识的形状对不上：\n  {detail}\n"
-            "  → 先 `pip install -U openroboto` 升到最新；已经是最新还这样，"
-            "就是后端还没跟上，把上面这几行发给我们"
+            f"The response from {path} does not match the shape this version of"
+            f" the CLI knows:\n  {detail}\n"
+            "  → Run `pip install -U openroboto` first to get the latest; if you"
+            " are already on the latest and still see this, the backend has not"
+            " caught up yet -- send us the lines above"
         ) from exc
 
 
 def _decode(raw: bytes, path: str) -> Any:
-    """成功响应必须是 JSON。不是 —— 多半是网关或代理挡在了中间，可以重试。"""
+    """A success response must be JSON. If it is not, a gateway or proxy most
+    likely got in the way, so it is retryable."""
     try:
         return json.loads(raw)
     except ValueError as exc:
-        raise BackendError(f"{path} 返回的不是 JSON：{exc}", retryable=True) from exc
+        raise BackendError(
+            f"{path} did not return JSON: {exc}", retryable=True
+        ) from exc

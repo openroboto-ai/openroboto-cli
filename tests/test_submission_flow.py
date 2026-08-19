@@ -1,8 +1,9 @@
-"""提交流水线：upload → burn → announce。
+"""Submission pipeline: upload -> burn -> announce.
 
-这条路上每一步都花钱或不可撤销，所以测的是**顺序与前置条件**：
-自检没过一分钱都不烧；已经烧过就不再烧；公告里带的 commit 不能是空的。
-链与 HF 全部用假对象，跑这些测试不需要网络、钱包、GPU。
+Every step on this path either costs money or is irreversible, so what is tested is
+**ordering and preconditions**: not one cent is burned if preflight fails; nothing is
+burned twice; the commit carried in the announcement must not be empty.
+Chain and HF are entirely faked, so these tests need no network, wallet or GPU.
 """
 
 from __future__ import annotations
@@ -70,7 +71,10 @@ def test_burn_spends_nothing_when_preflight_fails(
     monkeypatch.chdir(tmp_path)
 
     def _explode(*args: Any, **kwargs: Any) -> None:
-        raise AssertionError("自检没过还连了链 —— 这就是白烧 TAO 的那条路径")
+        raise AssertionError(
+            "connected to the chain even though preflight failed -- this is exactly "
+            "the path that burns TAO for nothing"
+        )
 
     monkeypatch.setattr(burn_command, "get_subtensor", _explode)
     monkeypatch.setattr(burn_command, "refresh_burn_rate", lambda *a: None)
@@ -99,7 +103,8 @@ def test_burn_records_tx_and_block_in_state(
 
     state = _uploaded_state()
     assert burn_command.perform_burn(_settings(), 1, state) is True
-    assert seen["amount_tao"] == 0.1  # 费率来自配置/control.json，不是代码里的字面量
+    # the rate comes from the config / control.json, not from a literal in the code
+    assert seen["amount_tao"] == 0.1
     assert seen["netuid"] == 80
     assert state["burn_tx_hash"].startswith("0x")
     assert state["burn_block"] == 8_888_880
@@ -136,8 +141,9 @@ def _capture_announcement(
 def test_announce_fills_commit_from_state_when_url_has_none(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """旧代码只从 hf_url 里抠 commit；URL 不带 `/commit/` 时链上 `c` 就是空串，
-    后端拿不到 commit 等于这次提交作废（TAO 已经烧了）。"""
+    """The old code only scraped the commit out of hf_url; when the URL carries no
+    `/commit/`, the on-chain `c` is an empty string, and a backend with no commit means
+    this submission is void (with the TAO already burned)."""
     monkeypatch.chdir(tmp_path)
     captured = _capture_announcement(monkeypatch)
 
@@ -155,7 +161,8 @@ def test_announce_fills_commit_from_state_when_url_has_none(
 def test_announce_payload_round_trips_through_the_protocol_codec(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """字节由 protocol 包产生，后端用同一个模块解 —— 这里证明两端对得上。"""
+    """The bytes are produced by the protocol package and the backend decodes them with
+    the same module -- this proves both ends line up."""
     monkeypatch.chdir(tmp_path)
     captured = _capture_announcement(monkeypatch)
 
@@ -167,8 +174,8 @@ def test_announce_payload_round_trips_through_the_protocol_codec(
     decoded = decode(encode(captured[0])).payload
     assert decoded.hotkey_ss58 == HOTKEY
     assert decoded.hf_repo_id == "kyleab/pi05-abcdefghijkl"
-    assert decoded.burn_tx_hash == "0x" + "d" * 64  # 解码时补回 0x
-    assert decoded.block_hash == "c" * 64  # 编码时去掉 0x
+    assert decoded.burn_tx_hash == "0x" + "d" * 64  # 0x is put back when decoding
+    assert decoded.block_hash == "c" * 64  # 0x is stripped when encoding
 
 
 def test_announce_failure_tells_the_miner_not_to_burn_again(
@@ -183,36 +190,40 @@ def test_announce_failure_tells_the_miner_not_to_burn_again(
     assert "do not burn again" in capsys.readouterr().err
 
 
-# ─── 费率必须是已知的，不许猜（旧默认值 0.01 vs 线上 0.1）──────
+# ─── the rate must be known, never guessed (old default 0.01 vs 0.1 in production) ──
 
 
 def test_burn_refuses_when_the_rate_is_unknown(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """control.json 拉不到 → 一分钱都不烧。
+    """control.json cannot be fetched -> not one cent is burned.
 
-    旧代码此时用默认值 0.01 继续烧，而线上费率是 0.1：矿工少烧十倍，
-    后端按金额核对判拒，**TAO 不退**。所以这里不能有兜底金额。
+    The old code kept burning with the default 0.01 while the production rate is 0.1:
+    the miner burns ten times too little, the backend rejects on the amount check, and
+    **the TAO is not refunded**. So there must be no fallback amount here.
     """
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(burn_command, "refresh_burn_rate", lambda *a: None)
 
     def _explode(*args: Any, **kwargs: Any) -> None:
-        raise AssertionError("费率未知还连了链 —— 这正是白烧 TAO 的那条路径")
+        raise AssertionError(
+            "connected to the chain with an unknown rate -- this is exactly the path "
+            "that burns TAO for nothing"
+        )
 
     monkeypatch.setattr(burn_command, "get_subtensor", _explode)
 
     settings = Settings.from_mapping({"subnet": {"netuid": 80, "network": "finney"}})
-    assert settings.burn_rate_tao is None  # 默认值不许是任何具体金额
+    assert settings.burn_rate_tao is None  # the default must not be any concrete amount
 
     assert burn_command.perform_burn(settings, 1, _uploaded_state()) is False
     assert "Could not get" in capsys.readouterr().err
 
 
-# ─── burn 生效窗口（后端 50 个区块，超了拒且不退）─────────────
+# ─── burn validity window (backend: 50 blocks; over it means rejected, no refund) ────
 #
-# 判定必须和 `prototype/backend/scanner/burn_verify.py:68-75` 一致，
-# 严一点就会拦住本来能过的提交。
+# The decision must match `prototype/backend/scanner/burn_verify.py:68-75` exactly;
+# being any stricter blocks submissions that would have passed.
 
 
 def _announce_with_burn_block(
@@ -227,28 +238,30 @@ def _announce_with_burn_block(
 
 
 CURRENT_BLOCK = 8_888_888  # _FakeSubtensor.get_current_block()
-WINDOW = 50  # Settings.burn_block_window，线上 backend.yaml 实测值
+WINDOW = 50  # Settings.burn_block_window; measured from the production backend.yaml
 
 
 def test_announce_refuses_once_the_burn_window_has_passed(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """超窗口就别再发公告了 —— 后端一定判 rejected，发出去只是白付一笔手续费。"""
+    """Past the window, do not announce at all -- the backend will certainly reject, so
+    sending it only pays a fee for nothing."""
     monkeypatch.chdir(tmp_path)
     ok, captured = _announce_with_burn_block(monkeypatch, CURRENT_BLOCK - WINDOW - 1)
 
     assert ok is False
-    assert captured == []  # 一个 commitment 都没发出去
+    assert captured == []  # not a single commitment was sent
     err = capsys.readouterr().err
-    assert "51" in err and "50" in err  # 距离与窗口，两个数字都要说
+    assert "51" in err and "50" in err  # distance and window; both numbers must be said
 
 
 def test_announce_allows_exactly_at_the_window_edge(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """后端是 `block_diff > window` 才拒 —— 正好等于 50 是**放行**的。
+    """The backend only rejects on `block_diff > window` -- exactly 50 is **allowed**.
 
-    这条边界钉死：写成 `>=` 就会拦掉后端本来会接受的提交。
+    This boundary is pinned: writing `>=` would block submissions the backend would
+    have accepted.
     """
     monkeypatch.chdir(tmp_path)
     ok, captured = _announce_with_burn_block(monkeypatch, CURRENT_BLOCK - WINDOW)
@@ -260,7 +273,8 @@ def test_announce_allows_exactly_at_the_window_edge(
 def test_announce_window_check_is_symmetric(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """后端用 `abs(burn_block - commit_block)`，burn 在 commit 之后也算距离。"""
+    """The backend uses `abs(burn_block - commit_block)`, so a burn after the commit
+    counts as distance too."""
     monkeypatch.chdir(tmp_path)
     ok, captured = _announce_with_burn_block(monkeypatch, CURRENT_BLOCK + WINDOW + 1)
 
@@ -271,7 +285,8 @@ def test_announce_window_check_is_symmetric(
 def test_announce_skips_the_window_check_when_the_burn_block_is_unknown(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """`burn_block=0` 时后端整段跳过这项检查，我们也跳过 —— 不能比后端更严。"""
+    """With `burn_block=0` the backend skips this check entirely, so we skip it too --
+    we must not be stricter than the backend."""
     monkeypatch.chdir(tmp_path)
     ok, captured = _announce_with_burn_block(monkeypatch, 0)
 
@@ -279,25 +294,28 @@ def test_announce_skips_the_window_check_when_the_burn_block_is_unknown(
     assert len(captured) == 1
 
 
-# ─── 「以为上链了、其实没上」──────────────────────────────────
+# ─── "thought it was on chain, but it was not" ───────────────────────────────
 
 
 def test_unconfirmed_submission_does_not_invent_a_block_reference() -> None:
-    """没拿到 receipt 就不给区块号。
+    """No receipt means no block number.
 
-    旧实现拿不到 receipt 时用 `get_current_block()` 填 `block_height`，
-    于是 `extrinsic_ref` 会打印出一个看起来完全正常的 `6123456-0` ——
-    矿工据此认为公告已上链，而它可能根本没进块。
+    When there was no receipt, the old implementation filled `block_height` with
+    `get_current_block()`, so `extrinsic_ref` printed a perfectly normal-looking
+    `6123456-0` -- from which the miner concluded the announcement was on chain, while
+    it may never have been included at all.
     """
     unconfirmed = SubmitResult(
         ok=True,
         extrinsic_hash="ff",
-        block_height=CURRENT_BLOCK,  # 就算有值，未确认也不许当成引用
+        block_height=CURRENT_BLOCK,  # even with a value, unconfirmed must not be used
+        # as a reference
         extrinsic_index=0,
         fee_tao=0.0,
         confirmed=False,
     )
-    # 只断言"不是一个像真的区块引用" —— 具体措辞会被翻译。
+    # only assert "this is not something that looks like a real block reference" --
+    # the exact wording gets translated.
     assert "-" not in unconfirmed.extrinsic_ref
     assert str(CURRENT_BLOCK) not in unconfirmed.extrinsic_ref
 
@@ -315,7 +333,8 @@ def test_unconfirmed_submission_does_not_invent_a_block_reference() -> None:
 def test_announce_does_not_claim_on_chain_without_a_block_number(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """SDK 报成功但没给区块号：不当失败（交易确实发了），但也不能说"已上链"。"""
+    """The SDK reports success but gives no block number: do not treat it as a failure
+    (the transaction really was sent), but do not claim "on chain" either."""
     monkeypatch.chdir(tmp_path)
     ok, _ = _announce_with_burn_block(monkeypatch, CURRENT_BLOCK - 8, confirmed=False)
 
@@ -325,7 +344,8 @@ def test_announce_does_not_claim_on_chain_without_a_block_number(
 
 
 def test_parse_extrinsic_result_confirms_only_with_a_real_block() -> None:
-    """`confirmed` 的唯一来源是 receipt 里的区块号，不是 SDK 的成功布尔。"""
+    """The only source of `confirmed` is the block number in the receipt, not the
+    SDK's success boolean."""
     from openroboto.chain.commitment import parse_extrinsic_result
 
     class _Receipt:
@@ -347,9 +367,9 @@ def test_parse_extrinsic_result_confirms_only_with_a_real_block() -> None:
     assert parse_extrinsic_result(_Success()).extrinsic_ref == "8888800-4"
 
     no_receipt = parse_extrinsic_result(_SuccessNoReceipt())
-    assert no_receipt.ok is True  # 交易发出去了
-    assert no_receipt.confirmed is False  # 但不知道在哪个块
-    assert no_receipt.block_height == 0  # 不编一个区块号出来
+    assert no_receipt.ok is True  # the transaction went out
+    assert no_receipt.confirmed is False  # but we do not know which block it is in
+    assert no_receipt.block_height == 0  # do not invent a block number
 
 
 def _payload() -> CommitmentPayload:
@@ -376,9 +396,11 @@ def _patch_publish(monkeypatch: pytest.MonkeyPatch, fn: Any) -> None:
 def test_submit_announcement_reports_unknown_on_rpc_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """等待进块时 RPC 断了：结论是"未知"，不是"失败"。
+    """The RPC drops while waiting for inclusion: the conclusion is "unknown", not
+    "failed".
 
-    交易可能仍会进块，谎报失败会让矿工以为要重来。
+    The transaction may still be included, and falsely reporting failure makes the
+    miner think they have to start over.
     """
     from openroboto.chain import commitment as commitment_module
 
@@ -395,10 +417,11 @@ def test_submit_announcement_reports_unknown_on_rpc_failure(
 def test_submit_announcement_does_not_swallow_our_own_bugs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """调用签名写错时必须炸出来，不能报成"结论未知"。
+    """A wrong call signature must blow up, and must not be reported as "unknown".
 
-    这时**什么都没发出去**。报"未知"会让矿工去查 status、等着，而 burn 的
-    50 个区块窗口同时在流走 —— 我们的一个 bug 变成矿工的一笔 TAO。
+    In that case **nothing at all was sent**. Reporting "unknown" sends the miner off
+    to check status and wait while the 50-block burn window drains away -- one bug of
+    ours turns into a miner's TAO.
     """
     from openroboto.chain import commitment as commitment_module
 
@@ -424,7 +447,7 @@ def test_submit_skips_a_finished_round(
     )
 
     def _explode(*args: Any, **kwargs: Any) -> None:
-        raise AssertionError("已完成的轮次不该再走一遍流水线")
+        raise AssertionError("a finished round must not run through the pipeline again")
 
     monkeypatch.setattr(submit_command, "perform_upload", _explode)
     args = argparse.Namespace(config="miner.yaml", round=1, output_dir="", force=False)
@@ -434,7 +457,7 @@ def test_submit_skips_a_finished_round(
 def test_submit_reuses_an_existing_burn(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """upload 断在网络上再重跑，不能因此多烧一笔。"""
+    """Rerunning after an upload died on the network must not burn a second time."""
     monkeypatch.chdir(tmp_path)
     state = _uploaded_state()
     state.update({"burn_tx_hash": "0x" + "d" * 64, "burn_block": 8_888_880})
@@ -446,7 +469,9 @@ def test_submit_reuses_an_existing_burn(
     monkeypatch.setattr(submit_command, "perform_upload", lambda *a, **k: None)
 
     def _explode(*args: Any, **kwargs: Any) -> None:
-        raise AssertionError("断点里已经有 burn_tx，不该再烧")
+        raise AssertionError(
+            "the checkpoint already holds a burn_tx; it must not burn again"
+        )
 
     monkeypatch.setattr(submit_command, "perform_burn", _explode)
     monkeypatch.setattr(submit_command, "perform_announce", lambda *a, **k: True)
