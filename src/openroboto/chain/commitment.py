@@ -28,12 +28,23 @@ class SubmitResult:
     block_height: int
     extrinsic_index: int
     fee_tao: float
+    #: 链上**确实**给回了包含这笔 extrinsic 的区块。
+    #:
+    #: 和 `ok` 不是一回事：`ok` 只说 SDK 认为提交成功，
+    #: `confirmed` 说我们拿到了 receipt、知道它落在哪个区块。
+    #: 两者分开是因为「以为公告上链了、其实没上」是矿工白烧 TAO 的一条主路径。
+    confirmed: bool = False
 
     @property
     def extrinsic_ref(self) -> str:
-        """`区块-序号` 形式的引用，报障时贴这个最省事。"""
-        if not self.block_height:
-            return "N/A"
+        """`区块-序号` 形式的引用，报障时贴这个最省事。
+
+        **没确认就不给区块号。** 以前这里会退回 `get_current_block()`，
+        于是未确认的提交也会打印出一个像真的一样的 `6123456-0` ——
+        矿工据此认为公告已上链，而它可能根本没进块。
+        """
+        if not self.confirmed or not self.block_height:
+            return "未确认"
         return f"{self.block_height}-{self.extrinsic_index}"
 
 
@@ -62,7 +73,23 @@ def build_payload(
 def submit_announcement(
     subtensor: Any, wallet: Any, netuid: int, payload: CommitmentPayload
 ) -> SubmitResult:
-    """把 payload 作为 commitment 发到链上。"""
+    """把 payload 作为 commitment 发到链上。**等到进块才返回。**
+
+    旧 `utils/chain.py:108-109` 这两个参数都是 `False`，且没有注释说明为什么 ——
+    于是「TAO 已经烧掉、公告其实没上链」时命令照样打印成功
+    （backend `AGENTS.md` §7 已知缺陷表里的最后一条）。矿工的钱不退，
+    所以这里宁可多等一个区块（~12 秒）也要给出真实结论。
+
+    - `wait_for_inclusion=True`：拿到 receipt 才知道落在哪个区块，
+      也才让 `SubmitResult.confirmed` 有意义。后端扫链看的就是进块，
+      **不需要 finality**。
+    - `wait_for_finalization=False`：finality 还要再等 ~30 秒以上，
+      对这条业务没有额外价值，纯粹拖长矿工等待。
+
+    超时/RPC 抖动**不报成失败**：extrinsic 可能仍会进块，
+    谎报失败会让矿工以为要重来。返回 `ok=False, confirmed=False`，
+    由命令层提示先查 `openroboto status`。
+    """
     from bittensor.core.extrinsics.serving import publish_metadata_extrinsic
 
     data = encode(payload)  # 超 512 字节直接抛 CommitmentTooLargeError
@@ -73,24 +100,42 @@ def submit_announcement(
         len(data),
     )
 
-    result = publish_metadata_extrinsic(
-        subtensor=subtensor,
-        wallet=wallet,
-        netuid=netuid,
-        data_type="BigRaw",
-        data=data,
-        wait_for_inclusion=False,
-        wait_for_finalization=False,
-    )
-    return parse_extrinsic_result(result, subtensor)
+    try:
+        result = publish_metadata_extrinsic(
+            subtensor=subtensor,
+            wallet=wallet,
+            netuid=netuid,
+            data_type="BigRaw",
+            data=data,
+            wait_for_inclusion=True,
+            wait_for_finalization=False,
+        )
+    except Exception as exc:
+        # 基建故障（RPC 断、等待超时），不是矿工的错，也不代表没上链。
+        logger.warning("等待 commitment 进块时出错，结论未知：%s", exc)
+        return SubmitResult(
+            ok=False,
+            extrinsic_hash="",
+            block_height=0,
+            extrinsic_index=0,
+            fee_tao=0.0,
+            confirmed=False,
+        )
+    return parse_extrinsic_result(result)
 
 
-def parse_extrinsic_result(result: Any, subtensor: Any) -> SubmitResult:
+def parse_extrinsic_result(result: Any) -> SubmitResult:
     """把 SDK 返回的 ExtrinsicResponse 解成 `SubmitResult`。
 
     SDK 在不同版本里返回的形状不一样（有 `extrinsic_receipt` 的、只有布尔的、
-    费用字段两个名字的），所以逐个 `getattr` 兜底。这段是原样搬旧
-    `utils/chain.py::_parse_result` 的判定顺序，没有改。
+    费用字段两个名字的），所以逐个 `getattr` 兜底 —— 这部分的判定顺序沿用旧
+    `utils/chain.py::_parse_result`。
+
+    **改掉的一处**：旧实现在拿不到 receipt 时用 `subtensor.get_current_block()`
+    填 `block_height`，注释说"只是为了让日志里有个区块号"。但它同时喂给了
+    `extrinsic_ref`，于是未确认的提交也会打印出一个看起来完全正常的区块引用。
+    现在拿不到 receipt 就是 `confirmed=False`，不编区块号
+    （`subtensor` 参数因此不再需要）。
     """
     extrinsic_hash = ""
     block_height = 0
@@ -122,12 +167,6 @@ def parse_extrinsic_result(result: Any, subtensor: Any) -> SubmitResult:
         if fee is not None:
             fee_tao = float(getattr(fee, "tao", 0.0))
 
-    if block_height == 0:
-        try:
-            block_height = int(subtensor.get_current_block())
-        except Exception as exc:  # 只是为了让日志里有个区块号，失败不影响结论
-            logger.debug("取当前区块失败：%s", exc)
-
     ok = bool(
         getattr(result, "is_success", False)
         or getattr(result, "success", False)
@@ -139,4 +178,6 @@ def parse_extrinsic_result(result: Any, subtensor: Any) -> SubmitResult:
         block_height=block_height,
         extrinsic_index=extrinsic_index,
         fee_tao=fee_tao,
+        # 有区块号 = receipt 真的回来了。`wait_for_inclusion=True` 下这就是进块。
+        confirmed=ok and block_height > 0,
     )

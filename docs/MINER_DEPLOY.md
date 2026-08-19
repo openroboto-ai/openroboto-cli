@@ -196,7 +196,7 @@ python rt.py burn --config miner.yaml
 python rt.py announce --config miner.yaml --round 1 --repo <hf_repo> --url <hf_url>
 ```
 
-> **⚠️ Do not split burn and announce.** The backend enforces a burn→commitment window of **10 blocks (~2 minutes)**; exceeding it rejects the submission and the burned TAO is not refunded. This prevents burn replay (paying once, submitting later or repeatedly). Use one-shot `rt.py submit` — the individual-step commands are for recovery and debugging only.
+> **⚠️ Do not split burn and announce.** The backend enforces a burn→commitment window of **50 blocks (~10 minutes)**; exceeding it rejects the submission and the burned TAO is not refunded. This prevents burn replay (paying once, submitting later or repeatedly). Use one-shot `rt.py submit` — the individual-step commands are for recovery and debugging only.
 
 ### Expected Log Output (miner.py)
 

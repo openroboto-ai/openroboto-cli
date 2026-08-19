@@ -59,7 +59,7 @@ python miner.py --config miner.yaml
 python rt.py submit --config miner.yaml
 ```
 
-> **⚠️ Burn→announce window.** The backend rejects any submission whose burn tx is more than **10 blocks (~2 minutes)** older than the chain commitment. This is an anti-replay rule: a fee cannot be paid once and attached to a later submission. `rt.py submit` runs upload → burn → announce back-to-back precisely so you stay inside this window. If you run `rt.py burn` and `rt.py announce` manually and the gap exceeds 10 blocks, the submission is rejected and the burned TAO is **not refunded**.
+> **⚠️ Burn→announce window.** The backend rejects any submission whose burn tx is more than **50 blocks (~10 minutes)** away from the chain commitment. This is an anti-replay rule: a fee cannot be paid once and attached to a later submission. `openroboto submit` runs upload → burn → announce back-to-back precisely so you stay inside this window. If you run `openroboto burn` and `openroboto announce` separately and the gap exceeds 50 blocks, the submission is rejected and the burned TAO is **not refunded** — `announce` will refuse to submit rather than let you pay a commitment fee for a submission that is already doomed.
 
 Miner pulls `control.json` via **HTTP direct link** (ETag cached), no R2 SDK dependency.
 `rt.py` handles the post-training pipeline with wallet password from miner.yaml.
@@ -80,7 +80,7 @@ JSON payload committed on chain (BigRaw):
 | `r` | Round number |
 | `i` | HF repo id (`user/repo`) |
 | `b` | Burn tx hash (payment proof, bound to this submission) |
-| `bb` | Burn block number (must be within 10 blocks of the commitment) |
+| `bb` | Burn block number (must be within 50 blocks of the commitment) |
 
 ## Chain Submission Confirmation
 

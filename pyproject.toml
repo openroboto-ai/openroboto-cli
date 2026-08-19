@@ -62,6 +62,7 @@ openroboto-protocol = { path = "../openroboto-protocol", editable = true }
 [dependency-groups]
 dev = [
     "pytest>=7.4.3,<10.0.0",
+    "coverage>=7.4.3,<8.0.0",
     "mypy>=1.8.0,<3.0.0",
     "ruff>=0.2.2,<1.0.0",
     "types-PyYAML>=6.0",
@@ -135,3 +136,17 @@ follow_imports = "skip"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.coverage.report]
+# 门槛就是**实测值本身**，不是一个好看的整数，也不留余量 ——
+# 留 5 个点等于允许覆盖率静默回退 5 个点，掉下去的正好是没人替它写测试的那部分。
+# 数字看着怪是故意的：它是 `coverage run --source=src -m pytest` 今天跑出来的值。
+#
+# precision 必须写：默认 precision=0 时 coverage 拿**四舍五入后**的值和门槛比，
+# 59.5% 会被舍成 60% 通过 —— 半个点的静默回退，正是这条门槛要拦的东西。
+#
+# 60% 不高，因为大量代码路径要真 GPU / 真链 / 真 Docker 才走得到（AGENTS.md §4：
+# 那些只测参数拼装，不测真跑）。它的作用不是"证明测够了"，是"不许往下掉"。
+fail_under = 62.93
+precision = 2
+show_missing = true

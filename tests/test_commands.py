@@ -353,3 +353,60 @@ def test_doctor_renders_required_and_optional_differently() -> None:
 def test_doctor_python_check_matches_the_supported_floor() -> None:
     assert doctor_command.MIN_PYTHON == (3, 11)  # 矿工侧就是 3.11，不是 3.12
     assert doctor_command.check_python().ok
+
+
+def test_doctor_control_check_applies_the_rate_it_fetched(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`check_control` 必须把抓到的费率**写进 settings**，不只是显示出来。
+
+    `check_wallet` 在它之后跑，靠 `settings.burn_rate_tao` 判断余额够不够。
+    只显示不应用的话，余额那项永远报「费率未知」—— 而且不会有人发现。
+    """
+    from openroboto.config.control import ControlFetch
+
+    monkeypatch.setattr(
+        doctor_command,
+        "fetch_control",
+        lambda url: ControlFetch(
+            control={"payment": {"burn_rate_tao": 0.1}}, etag="etag-1"
+        ),
+    )
+    settings = Settings.from_mapping(
+        {"urls": {"control_json": "https://example.invalid/control.json"}}
+    )
+    assert settings.burn_rate_tao is None
+
+    result = doctor_command.check_control(settings)
+    assert result.ok
+    assert settings.burn_rate_tao == 0.1  # 应用了，不是只印出来
+    assert "0.1" in result.detail
+
+
+def test_doctor_balance_check_does_not_crash_on_an_unknown_rate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """费率未知时不能拿 `None` 去比余额，也不能假装够。
+
+    doctor 是花钱前的自检入口，「查不出来」要如实报成查不出来。
+    """
+
+    class _Subtensor:
+        def get_balance(self, address: str) -> float:
+            return 5.0
+
+        def close(self) -> None:
+            pass
+
+    # `check_wallet` 里是惰性 import，所以要打在源模块上。
+    import openroboto.chain as chain_module
+
+    monkeypatch.setattr(chain_module, "get_subtensor", lambda network: _Subtensor())
+    monkeypatch.setattr(doctor_command, "_coldkey_address", lambda settings: "5abc")
+
+    settings = Settings.from_mapping({"subnet": {"netuid": 80}})
+    assert settings.burn_rate_tao is None
+
+    result = doctor_command.check_wallet(settings)
+    assert result.ok is False
+    assert "未知" in result.detail

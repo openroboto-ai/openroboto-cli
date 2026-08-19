@@ -71,8 +71,26 @@ class Settings:
     backend_public_key: str = ""
 
     # ─── 支付（正常由 control.json 覆盖） ──────────────
-    burn_rate_tao: float = 0.01
+    #: 本轮要烧多少 TAO。**没有默认值，这是有意的。**
+    #:
+    #: 原先默认 `0.01`，而线上一直是 `0.1` —— 差十倍。control.json 抓不到时
+    #: `refresh_burn_rate` 会退回这个值继续烧，于是网络抖一下矿工就少烧十倍，
+    #: 后端按金额核对直接拒，**TAO 不退**。AGENTS.md §6 已知缺陷表里就有这条
+    #: （`docs/control_json_example.json` 写着 0.01）。
+    #:
+    #: 现在：control.json 和 miner.yaml 都没给 → **拒绝烧**，不猜。
+    #: 烧钱是不可撤销操作，fail-closed 是唯一可接受的默认（AGENTS.md §4）。
+    burn_rate_tao: float | None = None
     limit_price_rao: int = 0
+
+    #: burn 到 announce 之间允许隔多少个区块。超了后端判 `rejected`，TAO 不退。
+    #:
+    #: ⚠️ 按红线 #1「burn 金额与区块窗口一律从 `openroboto-protocol` 装」，
+    #: 这个常量**应该在协议包里**。暂时留在这里，因为它的值现在有歧义：
+    #: 部署文档写 10 个区块、`backend.example.yaml` 写 50。
+    #: **生产 `backend.yaml` 实测是 50**，所以先用 50。
+    #: 歧义定案后连同 `burn_rate` 一起挪进协议包。
+    burn_block_window: int = 50
 
     def require_for_chain(self) -> None:
         """上链前的最低配置检查。缺一项就直接拒绝 —— 链上操作要花钱，不能带着错配跑。"""

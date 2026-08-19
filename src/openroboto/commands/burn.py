@@ -48,6 +48,20 @@ def perform_burn(settings: Settings, round_num: int, state: dict[str, Any]) -> b
     settings.require_for_chain()
     refresh_burn_rate(settings, logger)
 
+    # 费率没解析出来就**停在这里**，不猜。旧代码默认 0.01 而线上是 0.1：
+    # control.json 抓失败时矿工少烧十倍，后端按金额核对直接拒，TAO 不退。
+    # 这是烧钱前的最后一道 fail-closed 闸，别给它加兜底值。
+    if settings.burn_rate_tao is None:
+        fail(
+            f"拿不到 round {round_num} 的评测费率，**不会** burn。\n"
+            f"   费率的正常来源是子网公布的 control.json；金额烧错后端会拒，"
+            f"且 TAO 不退，所以这里不替你猜一个值。\n"
+            f"   → 检查 miner.yaml 的 `urls.control_json` 能不能访问"
+            f"（`openroboto doctor` 会顺带查），或临时在 miner.yaml 里写死："
+            f"\n     payment:\n       burn_rate_tao: 0.1"
+        )
+        return False
+
     reasons = check_announce_ready(state, round_num)
     if reasons:
         fail(f"上链前自检没过（round {round_num}），**不会** burn：")

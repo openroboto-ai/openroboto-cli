@@ -3,8 +3,11 @@
 搬家之前这段逻辑在 `validator.py` / `miner.py` / `rt.py` 里各写了一遍：
 三份 User-Agent、三套 ETag 处理、三种失败时的兜底。`rt.py` 那份还把
 `burn_rate_tao` 的兜底值写成 0.01，而线上是 0.1 —— 抓取失败时矿工会**少烧十倍**，
-后端按金额核对直接拒，TAO 照样没了。收敛成一处之后，兜底值只有一个来源：
-`Settings.burn_rate_tao`（miner.yaml 里的值），不再有第二个字面量。
+后端按金额核对直接拒，TAO 照样没了。
+
+收敛成一处之后，**兜底值一个都不剩**：抓不到费率就是抓不到，由 `commands/burn.py`
+拒绝烧（`Settings.burn_rate_tao` 默认 `None`）。这里只负责刷新和说清楚状态，
+**不负责替矿工猜一个金额** —— 猜错的代价是不可退的 TAO。
 
 control.json **只承载 payment / dataset / training / process**，
 它不是后端配置源（见 openroboto-backend/docs/adr/01）。
@@ -104,15 +107,16 @@ def apply_control(settings: Settings, control: dict[str, Any]) -> None:
 
 
 def refresh_burn_rate(settings: Settings, logger: Any) -> None:
-    """burn 之前刷一次费率。抓不到就用 miner.yaml 里的值继续，并明确说出来。
+    """burn 之前刷一次费率。抓不到就保持原值，并明确说出来。
 
     烧多了不退、烧少了后端按金额拒（也不退）—— 所以这行日志必须让矿工看见
-    自己实际会烧多少。
+    自己实际会烧多少。**这里不填兜底值**：`burn_rate_tao` 仍是 `None` 时由
+    `commands/burn.py` 拒绝上链，见本模块 docstring。
     """
     if not settings.control_json_url:
         logger.warning(
-            "未配置 urls.control_json，本次按 miner.yaml 的 burn_rate_tao=%s TAO 烧。"
-            "费率对不上会被后端拒且不退款",
+            "未配置 urls.control_json，无法确认本轮费率（miner.yaml 的 "
+            "payment.burn_rate_tao=%s）。费率对不上会被后端拒且不退款",
             settings.burn_rate_tao,
         )
         return
@@ -120,7 +124,7 @@ def refresh_burn_rate(settings: Settings, logger: Any) -> None:
         fetched = fetch_control(settings.control_json_url)
     except ControlFetchError as exc:
         logger.warning(
-            "control.json 拉取失败（%s），退回 miner.yaml 的 burn_rate_tao=%s TAO",
+            "control.json 拉取失败（%s），保持 miner.yaml 的 burn_rate_tao=%s",
             exc,
             settings.burn_rate_tao,
         )

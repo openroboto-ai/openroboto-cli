@@ -17,7 +17,13 @@ import subprocess
 import sys
 from dataclasses import dataclass
 
-from openroboto.config import ConfigError, ControlFetchError, Settings, fetch_control
+from openroboto.config import (
+    ConfigError,
+    ControlFetchError,
+    Settings,
+    apply_control,
+    fetch_control,
+)
 from openroboto.console import say
 from openroboto.training.container import runner_image
 
@@ -140,13 +146,15 @@ def check_control(settings: Settings) -> CheckResult:
             "control.json", False, str(exc), "这是基建问题，不是配置错；确认网络与地址"
         )
 
-    raw_payment = control.get("payment")
-    payment = raw_payment if isinstance(raw_payment, dict) else {}
+    # 抓到就**应用**，不只是显示。`check_wallet` 在这之后跑，要靠 settings 里的
+    # 真实费率去比余额；只显示不应用的话它只能报「费率未知」。
+    # 解析走 `apply_control` 这一份实现，不在这里second-guess payment 段的形状。
+    apply_control(settings, control)
     return CheckResult(
         "control.json",
         True,
         f"round={control.get('round')} status={control.get('status')} "
-        f"burn_rate={payment.get('burn_rate_tao')} TAO",
+        f"burn_rate={settings.burn_rate_tao} TAO",
     )
 
 
@@ -265,6 +273,16 @@ def check_wallet(settings: Settings) -> CheckResult:
             subtensor.close()
     except Exception as exc:
         return CheckResult("钱包", True, f"已加载（余额查不到：{exc}）", required=False)
+
+    # 费率未知时不能拿它比余额（`None` 比不了），也不能假装够 —— doctor 是花钱前
+    # 的自检入口，"查不出来"要如实报成查不出来。
+    if settings.burn_rate_tao is None:
+        return CheckResult(
+            "钱包余额",
+            False,
+            f"{balance:.4f} TAO（本轮费率未知，无法判断够不够）",
+            "先让 control.json 能访问，或在 miner.yaml 写死 payment.burn_rate_tao",
+        )
 
     enough = balance >= settings.burn_rate_tao
     return CheckResult(

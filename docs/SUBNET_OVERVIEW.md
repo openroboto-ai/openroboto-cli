@@ -111,7 +111,7 @@ The backend verifies each payment **against the chain, fail-closed**:
 2. The signer is the submitting hotkey (or its owning coldkey).
 3. The amount matches the published rate.
 4. The tx has not been used by any prior submission (anti-replay, DB + in-memory check).
-5. The burn block is within a bounded window of the commitment block — currently **10 blocks (~2 minutes)**. This is the second half of the anti-replay design: a burn cannot be stockpiled and attached to a later submission, and a stale burn cannot be reused after a failed attempt.
+5. The burn block is within a bounded window of the commitment block — currently **50 blocks (~10 minutes)**. This is the second half of the anti-replay design: a burn cannot be stockpiled and attached to a later submission, and a stale burn cannot be reused after a failed attempt.
 
 If any check fails, the submission is marked `burn_rejected` and never enters the queue — and the burned TAO is **not refunded**. Payment records are auditable via `/api/v1/payments/*` (admin) and summarized publicly.
 

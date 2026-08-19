@@ -60,6 +60,10 @@ def perform_announce(settings: Settings, round_num: int, state: dict[str, Any]) 
         block_hash = subtensor.get_block_hash(current_block)
         say(f"📡 上链 | round={round_num} repo={hf_repo_id} block={current_block}")
 
+        burn_block = int(state.get("burn_block", 0) or 0)
+        if not _burn_window_ok(settings, burn_block, current_block):
+            return False
+
         payload = build_payload(
             hotkey_ss58=str(state.get("hotkey_ss58", "")) or wallet.hotkey.ss58_address,
             block_hash=str(block_hash),
@@ -67,7 +71,7 @@ def perform_announce(settings: Settings, round_num: int, state: dict[str, Any]) 
             round_num=round_num,
             hf_repo_id=hf_repo_id,
             burn_tx_hash=str(state.get("burn_tx_hash", "")),
-            burn_block=int(state.get("burn_block", 0) or 0),
+            burn_block=burn_block,
         )
         result = submit_announcement(subtensor, wallet, settings.netuid, payload)
     finally:
@@ -75,16 +79,64 @@ def perform_announce(settings: Settings, round_num: int, state: dict[str, Any]) 
 
     if not result.ok:
         fail(
-            "commitment 上链失败。burn 已经发生，**不要重复 burn** —— "
-            "重跑 `openroboto announce` 即可（断点里的 burn_tx 会复用）"
+            "commitment 没有确认上链。burn 已经发生，**不要重复 burn**。\n"
+            "   这有可能只是等待超时而交易其实进了块，所以先查一次："
+            "`openroboto status`。\n"
+            "   确认后端没收到，再重跑 `openroboto announce`"
+            "（断点里的 burn_tx 会复用）"
         )
         return False
 
-    say(
-        f"✅ commitment 已上链 | ref={result.extrinsic_ref} "
-        f"fee={result.fee_tao:.6f} TAO"
-    )
+    if result.confirmed:
+        say(
+            f"✅ commitment 已上链 | ref={result.extrinsic_ref} "
+            f"fee={result.fee_tao:.6f} TAO"
+        )
+    else:
+        # SDK 报成功但没给区块号（`payment/burn.py:98` 记着这个 SDK 行为）。
+        # 不当失败处理 —— 交易确实发出去了；但也不能声称"已上链"。
+        say(
+            f"✅ commitment 已提交 | fee={result.fee_tao:.6f} TAO\n"
+            f"   ⚠️  SDK 没给回区块号，落块情况请用 `openroboto status` 核实"
+        )
     state["step"] = "announce"
     state["status"] = "completed"
     save_state(round_num, state)
+    return True
+
+
+def _burn_window_ok(settings: Settings, burn_block: int, current_block: int) -> bool:
+    """burn 与 commit 的区块距离还在后端窗口内吗？
+
+    照抄后端的判定（`prototype/backend/scanner/burn_verify.py:68-75`），三处细节
+    必须一致，否则这个检查会拦住本来能过的提交：
+
+    1. `abs(burn_block - commit_block)`：**对称**，burn 在前在后都算距离；
+    2. `> window` 才拒 —— 正好等于窗口是**放行**的；
+    3. 任一区块为 0（未知）时后端**整个跳过**这项检查，这里也跳过。
+
+    为什么放在 announce 而不是 `preflight.check_announce_ready()`：那个函数是纯的、
+    拿不到链，而这项检查必须知道当前区块。
+    """
+    if burn_block <= 0 or current_block <= 0:
+        return True  # 后端此时也不查，不要比后端更严
+
+    window = settings.burn_block_window
+    diff = abs(current_block - burn_block)
+    if diff > window:
+        fail(
+            f"burn 距今已经 {diff} 个区块，超出后端窗口 {window} —— "
+            f"现在公告上去会被判 `rejected`，而且**已经烧掉的 TAO 不退**。\n"
+            f"   burn 在区块 {burn_block}，当前区块 {current_block}。\n"
+            f"   → 这一轮的这笔 burn 作废了。下次 `openroboto submit` 一次跑完，"
+            f"或者 burn 完立刻 announce，别隔太久"
+        )
+        return False
+
+    # commitment 真正进块会比现在再晚几个区块，贴着边界时先提醒一句。
+    if diff > window - 5:
+        say(
+            f"⚠️  burn 距今 {diff} 个区块，窗口是 {window} —— 贴着边界了，"
+            f"commitment 进块时可能刚好超出。别再等了"
+        )
     return True
