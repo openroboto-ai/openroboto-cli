@@ -343,7 +343,7 @@ curl "https://api.openroboto.ai/api/v1/scan-rejections?hotkey=<your_hotkey_ss58>
 }
 ```
 
-Note: a rejected burn is **not refunded**. Fix the cause and re-submit with a fresh burn via one-shot `rt.py submit`.
+Note: a rejected burn is **not refunded**. Fix the cause and re-submit with a fresh burn via one-shot `openroboto submit`.
 
 ---
 

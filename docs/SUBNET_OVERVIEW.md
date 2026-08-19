@@ -16,7 +16,7 @@ The output of the subnet is public: every submitted model is an open artifact an
 
 | Role | Runs | Responsibility |
 |---|---|---|
-| **Miner** | `miner.py` (train) + `rt.py` (submit) | Fine-tune π0.5 (any recipe), export a full merged checkpoint, upload to own HF repo, pay the evaluation fee (burn), announce on chain |
+| **Miner** | `openroboto train` + `openroboto submit` | Fine-tune π0.5 (any recipe), export a full merged checkpoint, upload to own HF repo, pay the evaluation fee (burn), announce on chain |
 | **Backend** | `backend/` service | Scan the chain for announcements, verify payment, derive seeds, manage the evaluation queue, compute rankings, serve the public API |
 | **Benchmark worker** | separate GPU machine(s) | Poll the queue, load the pinned HF revision, run LIBERO suites in MuJoCo, push scores back (authenticated) |
 | **Validator** | `validator.py` | Read the settled ranking from the API, normalize, call `set_weights` on chain |
@@ -117,7 +117,7 @@ If any check fails, the submission is marked `burn_rejected` and never enters th
 
 **Burn hash verification uses strict exact match** — no `startswith` prefix matching. This prevents false positives from truncated `extrinsic_hash`.
 
-> **Practical implication for miners:** the burn tx and the commitment must land on chain within ~2 minutes of each other. Do not run `burn` and `announce` as separate manual steps — any delay between them (wallet prompt, network retry, debugging) will exceed the window, the submission is rejected, and the fee is lost. Always use **`rt.py submit`**, which runs upload → burn → announce back-to-back in a single command.
+> **Practical implication for miners:** the burn tx and the commitment must land on chain within ~2 minutes of each other. Do not run `burn` and `announce` as separate manual steps — any delay between them (wallet prompt, network retry, debugging) will exceed the window, the submission is rejected, and the fee is lost. Always use **`openroboto submit`**, which runs upload → burn → announce back-to-back in a single command. If the gap does exceed the window, `openroboto announce` refuses to publish rather than charging you a commitment fee for a submission the backend will reject.
 
 ## 5. Deterministic, unpredictable seeds
 

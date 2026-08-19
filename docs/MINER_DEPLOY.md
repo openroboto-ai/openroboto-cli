@@ -30,31 +30,33 @@ sudo systemctl restart docker
 docker run --rm --gpus all nvidia/cuda:12.1.0-runtime-ubuntu22.04 nvidia-smi
 ```
 
-## 2. Clone & Setup
+## 2. Install
+
+**No repository clone.** The CLI ships as a package on PyPI; `openroboto init`
+writes out the config and training-strategy files you need.
 
 ```bash
 # Create deploy user
 sudo useradd -m -s /bin/bash robot-train
 sudo -i -u robot-train
 
-# Clone repo
-git clone https://github.com/<your-org>/robot-train-subnet.git
-cd robot-train-subnet
-
-# Python venv
+# Python 3.11 venv + install
 python3.11 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+pip install openroboto
 
-# Download π0.5 checkpoint
-bash download_checkpoint.sh
-# Or: bash download_checkpoint.sh --force  (re-download)
+openroboto --version    # CLI version + protocol package version
 ```
+
+The π0.5 base checkpoint needs no manual download step. Leave
+`model.vla_checkpoint_path` unset and the training container fetches it into
+`cache/pi05_base` on the first run; later rounds hit that cache.
 
 ## 3. Configuration
 
 ```bash
-cp miner.example.yaml miner.yaml
+openroboto init my-miner    # writes miner.yaml + a training strategy script
+cd my-miner
 nano miner.yaml
 ```
 
@@ -75,62 +77,62 @@ huggingface:
   token: hf_xxx
   username: <your-hf-username>
 
-model:
-  vla_checkpoint_path: /path/to/cache/pi05_base  # From download_checkpoint.sh
-
 log_level: INFO
 ```
 
-### `miner.yaml` (alternative, flat format)
+> **The nested layout above is the only one that parses.** Every key lives under
+> a section (`subnet:`, `urls:`, `huggingface:`, …). Older guides showed a flat
+> `[DEFAULT]` / `key = value` form — that no longer loads, and it fails *quietly*:
+> the file parses, every field falls back to its default, and you find out when a
+> command complains about a missing `netuid`. Run `openroboto doctor` after
+> editing; it names every field that is missing or unusable.
 
-```ini
-[DEFAULT]
-hotkey_ss58 = 5MinerCexampleexampleexampleexampleeCCCCCCCCCCCC
-hf_token = hf_xxx
-hf_username = <your-username>
-control_json_url = https://<host>/metadata/control.json
-wallet_password = <your-wallet-password>
-```
+Payment fields are deliberately absent: `burn_rate_tao` and `limit_price_rao`
+come from the subnet's `control.json`, never from `miner.yaml`. See §"Notes".
 
 ## 4. Build OpenPi Runner Docker Image
 
 ```bash
-cd openpi-runner
-docker build -t robot-train-openpi:latest .
-cd ..
+openroboto build
 ```
 
-> **One universal image** - no need to rebuild for custom training strategies.
-> Mount your strategy script via volume + set `CUSTOM_TRAIN` env var (see below).
+Training runs in Docker because openpi needs `numpy<2.0` while bittensor needs
+`numpy>=2.0` — one interpreter cannot hold both.
+
+`build` uses `./openpi-runner` as the build context when it exists and otherwise
+pulls the public one, so there is nothing to clone. Override the image name with
+`--image` or `$OPENPI_RUNNER_IMAGE`.
+
+> **One universal image** — no need to rebuild for custom training strategies.
+> Your strategy script is mounted in as a volume (see below).
 
 ## 5. Custom Training Strategy (Optional)
 
-Miners can use their own training logic by configuring `custom_train_script` in `miner.yaml`.
+`openroboto init` already dropped a working `train_strategy.py` next to your
+`miner.yaml`. Edit that file, or point at a different one.
 
-### Default: use the built-in strategy
-
-A minimal training script (`custom_train_script/simple_strategy-*.py`) is included.
-Place your strategy file in `custom_train_script/` and configure the path:
+### Default: use the generated strategy
 
 ```bash
-# Use the simple strategy (generates valid LoRA adapter)
-python miner.py --config miner.yaml
+openroboto train                     # uses ./train_strategy.py
+openroboto init -s example           # swap in the teaching version instead
 ```
 
-### Custom: configure your own training script
+### Custom: your own training script
 
-Edit `miner.yaml` and set `custom_train_script` to the absolute path of your strategy:
+Either pass it per-run or record it in `miner.yaml`:
+
+```bash
+openroboto train -s /path/to/my_strategy.py
+```
 
 ```yaml
-# miner.yaml
-custom_train_script: "/path/to/custom_train_script/my_strategy.py"
+# miner.yaml — used when -s is not given
+custom_train_script: "/path/to/my_strategy.py"
 ```
 
-Place your script in `custom_train_script/` and reference its absolute path.
-The miner will:
-1. Verify the script exists
-2. Use it as the training entrypoint
-3. Container runs your script instead of the default
+The script is verified to exist, mounted into the container, and used as the
+training entrypoint instead of the default.
 
 ### Strategy script interface
 
@@ -175,54 +177,65 @@ generate valid adapter files.
 
 The workflow is split into two stages:
 
-### Step 1-2: Train (miner.py)
+### Check the environment first
 
 ```bash
-# Prep + training, then exits
-python miner.py --config miner.yaml
+openroboto doctor
+```
+
+`doctor` exists to make "burned TAO, then discovered the environment was wrong"
+impossible. It checks GPU, Docker, the NVIDIA toolkit, HF permissions, wallet
+balance, `control.json` reachability and every required config field — **before**
+anything costs money.
+
+### Train
+
+```bash
+openroboto train        # one round, then exits
 ```
 
 After training completes, state is saved to `state/round_N.json`.
 
-### Step 3-5: Upload → Burn → Announce (rt.py)
+### Validate the model locally — before paying
 
 ```bash
-# Full pipeline: upload → burn → announce
-python rt.py submit --config miner.yaml
-
-# Or run individual steps (recovery/debugging only — see warning below):
-python rt.py upload --config miner.yaml --round 1
-python rt.py burn --config miner.yaml
-python rt.py announce --config miner.yaml --round 1 --repo <hf_repo> --url <hf_url>
+openroboto check
 ```
 
-> **⚠️ Do not split burn and announce.** The backend enforces a burn→commitment window of **50 blocks (~10 minutes)**; exceeding it rejects the submission and the burned TAO is not refunded. This prevents burn replay (paying once, submitting later or repeatedly). Use one-shot `rt.py submit` — the individual-step commands are for recovery and debugging only.
+Same format rules the evaluator applies. This used to require cloning a second
+repository; it is now built in.
 
-### Expected Log Output (miner.py)
+> **⚠️ Training produces a LoRA adapter, and a bare adapter is rejected.** A
+> merged full checkpoint is what gets evaluated. There is **no `openroboto merge`
+> command yet** — until there is, merging is a manual step, so run
+> `openroboto check` before you burn anything.
 
+### Submit: Upload → Burn → Announce
+
+```bash
+openroboto submit       # full pipeline, resumable
+
+# Individual steps (recovery/debugging only — see warning below):
+openroboto upload --round 1
+openroboto burn
+openroboto announce --round 1
 ```
-🦞 π0.5 Miner started | hotkey=<hotkey> | HF=<username>
-[main] Starting training Round 1
-[round 1] 📦 Step 1/2: Preparation
-[round 1] ✅ Preparation complete
-[round 1] 🚀 Step 2/2: Model Training
-[train_vla] Downloading dataset...
-[train_vla] Starting training...
-[round 1] 📊 Training complete | final_loss=0.xxx
-[round 1] ✅ Training complete — model saved at ./tmp/robot_train_vla_miner/round_1
-[round 1] 📝 Run 'python rt.py submit --round 1' for steps 3-5
-```
 
-### Expected Log Output (rt.py submit)
+> **⚠️ Do not split burn and announce.** The backend enforces a burn→commitment
+> window of **50 blocks (~10 minutes)**; exceeding it rejects the submission and
+> the burned TAO is not refunded. This prevents burn replay (paying once,
+> submitting later or repeatedly). Use one-shot `openroboto submit` — the
+> individual-step commands are for recovery and debugging only. `announce`
+> refuses to submit once the window has passed, rather than charging you a
+> commitment fee for a submission that is already doomed.
 
-```
-🦞 rt.py submit | round=1
-[rt] Step 3/3: Upload to HuggingFace
-✅ Uploaded: https://huggingface.co/<user>/pi05-<hotkey_short>
-[rt] Step 4/3: Stake Burn Payment
-✅ Burn submitted: tx=0x...
-[rt] Step 5/3: Chain Commitment
-✅ Commitment submitted | block=7500900 ext=0x...
+`submit` is resumable: re-running it skips steps already recorded in
+`state/round_N.json` and **reuses an existing burn instead of paying twice**.
+
+### Check what the backend made of it
+
+```bash
+openroboto status       # submission state + rejection reason, if any
 ```
 
 ## 7. Verify On-Chain Submission
@@ -248,9 +261,9 @@ After=network.target docker.service
 [Service]
 Type=oneshot
 User=robot-train
-WorkingDirectory=/home/robot-train/robot-train-subnet
-ExecStart=/home/robot-train/robot-train-subnet/.venv/bin/python miner.py --config miner.yaml
-Environment=PATH=/home/robot-train/robot-train-subnet/.venv/bin:/usr/bin:/bin
+WorkingDirectory=/home/robot-train/my-miner
+ExecStart=/home/robot-train/.venv/bin/openroboto train --config miner.yaml
+Environment=PATH=/home/robot-train/.venv/bin:/usr/bin:/bin
 Environment=HF_TOKEN=<your-token>
 
 [Install]
@@ -262,8 +275,13 @@ sudo systemctl enable robot-train-miner.service
 sudo systemctl start robot-train-miner.service
 
 # Monitor
-tail -f /home/robot-train/robot-train-subnet/logs/miner.log
+tail -f /home/robot-train/my-miner/logs/*.log
 ```
+
+> This unit only **trains**. It deliberately does not run `submit`: that step
+> burns TAO, and an unattended service that pays money on a timer is how a
+> misconfigured round turns into a string of wasted burns. Run `openroboto submit`
+> yourself after checking `openroboto check`.
 
 ## Troubleshooting
 
@@ -297,11 +315,11 @@ docker run --rm --gpus all -v /data:/data robot-train-openpi:latest nvidia-smi
 
 ## Important Notes
 
-- `miner.py` runs **once per round** then exits. No polling loop.
-- `rt.py submit` runs the post-training pipeline (upload → burn → announce).
-- State is saved to `state/round_N.json` — re-running `rt.py submit` resumes from the last completed step.
+- `openroboto train` runs **once per round** then exits. No polling loop.
+- `openroboto submit` runs the post-training pipeline (upload → burn → announce).
+- State is saved to `state/round_N.json` — re-running `openroboto submit` resumes from the last completed step and reuses an existing burn instead of paying twice.
 - Backend scanner picks up submissions within ~60 seconds.
-- Payment config (`burn_rate_tao`, `limit_price_rao`) comes from owner's `control.json`, not miner.yaml.
+- Payment config (`burn_rate_tao`, `limit_price_rao`) comes from the owner's `control.json`, not `miner.yaml`. If `control.json` cannot be fetched, `burn` **refuses to run** rather than guessing an amount — a wrong amount is rejected by the backend and the TAO is not refunded.
 - Backend verifies burn tx using **strict exact match** (no `startswith` prefix matching).
 - Anti-plagiarism: backend computes LFS fingerprint (`repo_hash`) for each submission; same hash from different hotkey → rejected.
 - Seed computation failure is auto-retried (`seed_failed` status), no manual intervention needed.

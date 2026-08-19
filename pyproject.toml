@@ -23,8 +23,14 @@ requires-python = ">=3.11"
 dependencies = [
     # 精确钉死，不是 `>=`。版本号**就是**契约版本：浮动范围意味着矿工侧和后端侧
     # 可能解析到不同的代码，而"两边能被证明装的是同一份"正是这个包唯一的存在理由。
-    # `.github/workflows/protocol-guards.yml` 会检查这一条。
-    "openroboto-protocol==1.0.0",
+    # `.github/workflows/protocol-guards.yml` 会检查这一条（只查有没有 `==`，
+    # 具体版本对不对它管不了 —— 那要靠这里和协议包保持同步）。
+    #
+    # ⚠️ 这个号必须等于 `../openroboto-protocol/pyproject.toml` 的 version。
+    # 曾经写成 `==1.0.0` 而协议包是 `0.2.0`：`[tool.uv.sources]` 的 path 覆盖
+    # 会**绕过版本约束**，所以本地和 CI 全都是绿的，装进环境的其实是 0.2.0。
+    # 等到发布前撤掉那段 path 覆盖、真从 PyPI 装，才会炸 —— 而那时正在发版。
+    "openroboto-protocol==0.2.0",
     "pyyaml>=6.0",
     # 生产矿工机上跑的是 10.5.0（旧 requirements.txt 钉死这个版本）。
     # 用到的两个 API 是 SDK 私有面：`publish_metadata_extrinsic`（commitment）

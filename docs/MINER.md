@@ -21,8 +21,7 @@
 └──────────┬───────────────────────────────────────────────────┘
            │
     ┌──────▼────────────┐
-    │    MINER          │
-    │  miner.py Steps 1-2│
+    │  openroboto train │
     │  ① Fetch control  │
     │  ② Download data  │
     │  ③ LoRA train     │
@@ -30,39 +29,61 @@
     └────────┬──────────┘
              │
     ┌────────▼──────────┐
-    │    rt.py          │
-    │  Steps 3-5        │
+    │ openroboto submit │
     │  ④ Upload → HF    │
     │  ⑤ Burn (payment) │
     │  ⑥ Announce chain │
     └───────────────────┘
 ```
 
-**Two-stage workflow**: `miner.py` handles Steps 1-2 (prep + training). After training completes, run `rt.py submit` for Steps 3-5 (upload → burn → announce).
+**Two-stage workflow**: `openroboto train` does prep + training. After it
+completes, `openroboto submit` does upload → burn → announce.
+
+Run `openroboto doctor` before the first round and `openroboto check` before
+paying — both exist so that "burned TAO, then found out the model was wrong"
+stops happening.
 
 **Backend auto-scans chain**: Backend runs `ChainScanner` + `ScannerLoop` (polls every 60s), discovers miner submissions, verifies burns, computes seeds, and queues for evaluation.
 
 ## Quick Start
 
 ```bash
-# 1. Install
-uv venv .venv && source .venv/bin/activate
-uv pip install -r requirements.txt
+# 1. Install — no repo clone needed
+python3.11 -m venv .venv && source .venv/bin/activate
+pip install openroboto
 
-# 2. Configure (copy miner.example.yaml → miner.yaml)
-#    Required: hotkey_ss58, hf_token, hf_username, control_json_url, wallet_password
+# 2. Configure: writes miner.yaml + train_strategy.py
+openroboto init my-miner && cd my-miner
+#    Required in miner.yaml: subnet.hotkey_ss58, huggingface.token,
+#    huggingface.username, urls.control_json, subnet.wallet_password
 
-# 3. Train (Steps 1-2: prep + training, then exits)
-python miner.py --config miner.yaml
+# 3. Check the environment before anything costs money
+openroboto doctor
 
-# 4. Upload → Burn → Announce (Steps 3-5)
-python rt.py submit --config miner.yaml
+# 4. Build the training image, then train one round
+openroboto build
+openroboto train
+
+# 5. Validate the model locally — still free at this point
+openroboto check
+
+# 6. Upload → Burn → Announce
+openroboto submit
+
+# 7. See what the backend made of it
+openroboto status
 ```
 
 > **⚠️ Burn→announce window.** The backend rejects any submission whose burn tx is more than **50 blocks (~10 minutes)** away from the chain commitment. This is an anti-replay rule: a fee cannot be paid once and attached to a later submission. `openroboto submit` runs upload → burn → announce back-to-back precisely so you stay inside this window. If you run `openroboto burn` and `openroboto announce` separately and the gap exceeds 50 blocks, the submission is rejected and the burned TAO is **not refunded** — `announce` will refuse to submit rather than let you pay a commitment fee for a submission that is already doomed.
 
-Miner pulls `control.json` via **HTTP direct link** (ETag cached), no R2 SDK dependency.
-`rt.py` handles the post-training pipeline with wallet password from miner.yaml.
+The CLI pulls `control.json` via **HTTP direct link** (ETag cached), no R2 SDK
+dependency. `openroboto submit` handles the post-training pipeline, reading the
+wallet password from `miner.yaml`.
+
+The evaluation fee comes from `control.json` and from nowhere else. If it cannot
+be fetched, `burn` **refuses to run** instead of falling back to a guess — an
+amount that does not match is rejected by the backend, and the TAO is not
+refunded.
 
 ## Chain Submission Format
 
@@ -84,14 +105,27 @@ JSON payload committed on chain (BigRaw):
 
 ## Chain Submission Confirmation
 
-`rt.py` handles chain submission and logs confirmation immediately:
+`openroboto submit` runs upload → burn → announce in sequence and reports the
+outcome of each step:
 
-1. `rt.py submit` runs upload → burn → announce in sequence
-2. Step 5 (announce) calls `submit_hf_model_announcement` with block_hash for reveal
-3. On success → logs `✅ Commitment submitted | block=N ext=0x...`
-4. State is saved to `state/round_N.json` — re-running skips completed steps
+1. `announce` builds the payload (including `block_hash` for the seed reveal) and
+   publishes it as a chain commitment, **waiting for inclusion in a block**
+2. Confirmed → `✅ commitment 已上链 | ref=<block>-<index> fee=… TAO`
+3. State is saved to `state/round_N.json` — re-running skips completed steps
 
-**Resume support**: If a step fails, re-run `rt.py submit` and it resumes from where it left off.
+**The CLI distinguishes three outcomes, and they are not the same thing:**
+
+| What you see | What it means | What to do |
+|---|---|---|
+| `✅ commitment 已上链 \| ref=<block>-<index>` | In a block. The block reference is real. | Nothing. Check `openroboto status`. |
+| `✅ commitment 已提交` + `⚠️ SDK 没给回区块号` | Submitted, but the SDK returned no block number. Probably fine. | Confirm with `openroboto status`. |
+| `❌ commitment 没有确认上链` | We do not know. It may still land. | **Do not burn again.** Run `openroboto status` first; only re-run `announce` if the backend never received it. |
+
+A block reference is only ever printed when the chain actually returned one. If
+you see `未确认`, no block number is being invented to reassure you.
+
+**Resume support**: if a step fails, re-run `openroboto submit` — it resumes from
+the last completed step and **reuses the existing burn rather than paying twice**.
 
 ## bittensor 10.x Data Decoding
 

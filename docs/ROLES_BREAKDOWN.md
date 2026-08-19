@@ -8,7 +8,7 @@
 - pays the evaluation fee and announces the submission on chain;
 - reproduces the seed and runs the public evaluation toolkit locally.
 
-Public implementation: `miner.py`, `rt.py`, `payment.py`, `miner/`, and `openpi-runner/`.
+Public implementation: the `openroboto` CLI (`openroboto train` / `check` / `submit`) plus `openpi-runner/` for the training container.
 
 ## Evaluation worker
 

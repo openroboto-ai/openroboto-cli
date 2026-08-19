@@ -8,15 +8,24 @@ Held-out evaluation inputs, the scoring-service deployment, databases, and subne
 
 ## Components
 
-| Component | Files | Responsibility |
+| Component | Where | Responsibility |
 |---|---|---|
-| Miner entry point | `miner.py` | Read public round data, download training resources, and run training |
-| Submission CLI | `rt.py`, `payment.py` | Upload a model, pay the evaluation burn, and announce the model on chain |
-| Miner modules | `miner/` | Training orchestration and Hugging Face publishing |
+| CLI entry point | `src/openroboto/cli.py` | Command assembly; one module per command under `commands/` |
+| Training | `commands/train.py`, `training/` | Read public round data, download training resources, run training in Docker |
+| Submission | `commands/{upload,burn,announce,submit}.py` | Upload a model, pay the evaluation burn, announce on chain |
+| Pre-flight | `commands/doctor.py`, `commands/check.py`, `preflight.py` | Everything checkable **before** money is spent |
+| Chain access | `chain/`, `payment/` | Commitments and burn extrinsics |
+| Hugging Face | `huggingface/` | Model upload and commit resolution |
+| Config | `config/` | `miner.yaml` parsing plus the single `control.json` fetcher |
 | Training runtime | `openpi-runner/` | Isolated OpenPI execution environment |
-| Protocol | `protocol/` | Public data types and seed derivation |
-| Weight validator | `validator.py` | Read public weights and call Bittensor `set_weights` |
-| Shared utilities | `utils/` | Configuration, chain access, HTTP downloads, and logging |
+| Protocol | `openroboto-protocol` (installed package) | Commitment encoding, seed derivation, shared constants |
+| External validator | `commands/validator.py` | Read public weights and call Bittensor `set_weights` |
+
+The `protocol/` directory still present in this repository is a deprecated
+leftover re-exporting the installed package; nothing imports it, and CI blocks
+new copies. Shared types come from `openroboto-protocol`, never from a local copy
+— the reason is a real incident where the two drifted and miners encoded what the
+backend could not decode.
 
 ## Submission flow
 
@@ -24,10 +33,13 @@ Held-out evaluation inputs, the scoring-service deployment, databases, and subne
 public control.json
         |
         v
-miner.py -> OpenPI training -> local model artifact
+openroboto train  -> OpenPI training (Docker) -> local model artifact
         |
         v
-rt.py -> Hugging Face commit -> evaluation burn -> chain commitment
+openroboto check  -> local format validation (still free)
+        |
+        v
+openroboto submit -> Hugging Face commit -> evaluation burn -> chain commitment
 ```
 
 The chain commitment binds the miner hotkey, model repository and commit, round number, payment reference, and commitment block information.
