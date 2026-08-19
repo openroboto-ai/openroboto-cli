@@ -1,17 +1,29 @@
+# 容器化跑 CLI。**可选** —— 直接 `pip install openroboto` 是主路径，
+# 这个文件是给"不想污染宿主 Python 环境"的人的。
+#
+# 构建上下文是上一级目录：`openroboto-protocol` 还没发到 PyPI，pyproject 里
+# 是同级 path 依赖，context 设成 `.` 就 COPY 不到它。协议包发布后可以改回 `.`。
+#
+# 训练容器由这个容器**调宿主 Docker** 起（红线 #2：openpi 要 numpy<2.0、
+# bittensor 要 numpy>=2.0，一个解释器装不下），所以挂了 docker.sock。
+# ⚠️ 挂 docker.sock 等于把宿主 root 权限给这个容器。只在自己的矿机上这么跑。
 services:
-  miner:
+  # 默认服务：训练。**不烧钱**，可以放心重跑。
+  train:
     build:
-      context: .
-      dockerfile: Dockerfile
-    image: openroboto-miner:latest
+      context: ..
+      dockerfile: openroboto-cli/Dockerfile
+    image: openroboto-cli:latest
     runtime: nvidia
     environment:
       NVIDIA_VISIBLE_DEVICES: all
     volumes:
       - ./miner.yaml:/app/miner.yaml:ro
-      - miner-data:/tmp/robot_train_vla_miner
+      - ./state:/app/state            # 断点：submit 靠它续跑、复用已有的 burn
+      - ./cache:/app/cache            # π0.5 基座缓存，避免每轮重下几个 GB
+      - openroboto-logs:/logs
       - /var/run/docker.sock:/var/run/docker.sock
-    command: ["miner.py", "--config", "miner.yaml"]
+    command: ["train", "--config", "miner.yaml"]
     deploy:
       resources:
         reservations:
@@ -20,6 +32,29 @@ services:
               count: all
               capabilities: [gpu]
 
-volumes:
-  miner-data:
+  # 花钱之前的自检。没有 GPU 需求，随便跑。
+  doctor:
+    image: openroboto-cli:latest
+    volumes:
+      - ./miner.yaml:/app/miner.yaml:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: ["doctor", "--config", "miner.yaml"]
+    profiles: ["tools"]
 
+  # 本地校验 checkpoint 格式 —— 还是免费的，烧钱前最后一道。
+  check:
+    image: openroboto-cli:latest
+    volumes:
+      - ./miner.yaml:/app/miner.yaml:ro
+      - ./state:/app/state
+    command: ["check"]
+    profiles: ["tools"]
+
+# ⚠️ 故意**没有** submit / burn / announce 服务。
+# 那三个会烧不可退的 TAO，而 compose 服务很容易被 `up` 连带拉起、或被
+# restart 策略重跑一次。要提交就显式敲一次性命令，自己看着它跑完：
+#
+#   docker compose run --rm train submit --config miner.yaml
+#
+volumes:
+  openroboto-logs:

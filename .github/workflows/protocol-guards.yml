@@ -36,38 +36,27 @@ jobs:
       # import 会静默走到副本上 —— 这正是当年 protocol/types.py 漂 105 行、
       # payment.py 漂 313 行的那条路径（矿工按 A 编码、后端按 B 解码）。
       #
-      # 上游给的原版是"列表必须为空"。本仓现在过不了：SCOPE.md 规定从
-      # openroboto-subnet 继承来的旧文件一律不删，那三个文件还在磁盘上。
+      # 此前这一步带一份豁免清单（`protocol/{__init__,seed,types}.py`），因为
+      # SCOPE.md 规定继承来的旧文件一律不删。清单里写着退出条件是"它们消失的
+      # 那一天" —— **2026-08-19 就是那一天**：旧结构整体删除，豁免随之删掉，
+      # 这一步回到上游原版的语义：**列表必须为空**。
       #
-      # 于是改成**与豁免清单精确比对**，而不是 continue-on-error，也不是
-      # 只扫 src/：
-      #   - continue-on-error 是黄色的，黄色没人看；
-      #   - 只扫 src/ 更糟 —— 副本恰恰不在 src/ 里，一条永远不可能对着它变红的
-      #     检查就是装饰。
-      # 精确比对同时守住两个方向：
-      #   - 多出**第四份**副本（任何路径下）→ 红；
-      #   - 这三个文件终于被归档 → 清单对不上、也红，于是豁免只能跟着一起删。
-      #     这就是"何时收紧"的答案：不是某个日期，是它们消失的那一天。
-      # 三个文件里已经没有独立实现了（seed.py / __init__.py 是对
-      # openroboto_protocol 的再导出，types.py 整体作废），
-      # 见 tests/test_vendored_protocol.py。
+      # 不用 continue-on-error（黄色没人看），也不只扫 src/
+      # （副本恰恰不会出现在 src/ 里，一条永远不可能变红的检查就是装饰）。
+      # 本地对应的用例在 tests/test_vendored_protocol.py，两层都留着：
+      # pytest 让人立刻发现，CI 拦住绕过本地钩子的提交。
       # ───────────────────────────────────────────────────────────────────────
       - name: No vendored protocol copy
         run: |
-          grandfathered="protocol/__init__.py
-          protocol/seed.py
-          protocol/types.py"
           copies="$(git ls-files '*protocol/*.py')"
-          if [ "$copies" != "$(echo "$grandfathered" | sed 's/^ *//')" ]; then
-            echo "::error::vendored protocol copies changed."
-            echo "found:"; echo "$copies"
-            echo "grandfathered (SCOPE.md: 旧文件不删，只停止使用):"
-            echo "$grandfathered" | sed 's/^ *//'
-            echo "新增副本 → 删掉它，改 import openroboto_protocol"
-            echo "归档了旧副本 → 把这一步的豁免清单一起删掉"
+          if [ -n "$copies" ]; then
+            echo "::error::vendored protocol copy found; import openroboto_protocol instead."
+            echo "$copies"
+            echo "协议字段与链上格式只能来自 openroboto-protocol 包（AGENTS.md 红线 #1）。"
+            echo "当年这类副本漂过 105 行：矿工按 A 编码、后端按 B 解码。"
             exit 1
           fi
-          echo "no new vendored copy (3 files grandfathered, pending archival)"
+          echo "no vendored protocol copy"
 
       # ───────────────────────────────────────────────────────────────────────
       # 版本必须钉死。`>=` / `~=` 意味着矿工侧和后端侧可能解析到不同的代码，

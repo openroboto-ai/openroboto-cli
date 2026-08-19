@@ -8,11 +8,15 @@ Real configuration files are local-only. Copy an example, fill its placeholders,
 
 ## Miner
 
-Start with `miner.example.yaml`:
+`openroboto init` writes a filled-in template with every field commented:
 
 ```bash
-cp miner.example.yaml miner.yaml
+openroboto init my-miner    # writes miner.yaml + train_strategy.py
 ```
+
+> The template ships **inside the package**, so it cannot drift from the parser that
+> reads it. There is no `miner.example.yaml` in the repository any more — there used
+> to be one, and it had already diverged from the packaged template.
 
 | Section | Field | Purpose |
 |---|---|---|
@@ -26,14 +30,18 @@ cp miner.example.yaml miner.yaml
 | root | `custom_train_script` | Optional miner-owned training strategy path |
 | root | `log_level`, `log_dir` | Local logging |
 
-`payment` and selected training values are read from the public `control.json`. The local YAML must not override the announced evaluation fee.
+`payment` and selected training values are read from the public `control.json`.
+
+> **Do not set `payment.burn_rate_tao` locally.** The announced fee is the only
+> correct value; a stale local override burns the wrong amount, and a wrong amount is
+> rejected with no refund. If `control.json` cannot be fetched, `openroboto burn`
+> **refuses to run** rather than falling back to a guess — there is deliberately no
+> built-in default fee.
 
 ## Weight-setting validator
 
-Start with `validator.example.yaml`:
-
 ```bash
-cp validator.example.yaml validator.yaml
+openroboto init --validator    # writes validator.yaml, no strategy script
 ```
 
 | Section | Field | Purpose |

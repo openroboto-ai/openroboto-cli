@@ -13,6 +13,10 @@ venv/
 # 例外：打进 pip 包的配置模板。它们**必须**进版本库 —— 被 *.yaml 规则吞掉的话，
 # 从干净 clone 构建出来的 wheel 里没有模板，`openroboto init` 当场失败。
 !src/openroboto/templates/*.yaml
+# 例外：本地钩子配置。它必须进版本库，否则每个人的钩子各不相同 ——
+# 实测 `git check-ignore -v .pre-commit-config.yaml` 命中上面的 `*.yaml`，
+# 加它进来时会静默失败（`git add` 不报错，文件就是没进去）。
+!.pre-commit-config.yaml
 .env
 .env.*
 
@@ -33,6 +37,10 @@ build/
 .mypy_cache/
 .ruff_cache/
 .pytest_cache/
+# coverage 的中间数据、逐行报告，以及 CI 那条 --junitxml 的产物
+.coverage
+htmlcov/
+pytest-report.xml
 # 基座 checkpoint 的本地缓存（几个 GB）
 cache/
 
@@ -45,3 +53,6 @@ cache/
 .DS_Store
 Thumbs.db
 
+
+# JetBrains IDE
+.idea/

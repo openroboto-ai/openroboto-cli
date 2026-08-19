@@ -78,21 +78,15 @@ dev = [
 target-version = "py311"
 line-length = 88
 src = ["src"]
-# 旧结构（`rt.py` / `miner.py` / `validator.py` / `utils/` / `protocol/` …）**一个都不删**，
-# 但它们是搬家前的原样代码，不参加新仓的风格与类型约束 —— 否则 lint 永远是红的，
-# 红久了就没人看了。搬完之后这些文件的去留单独决定（SCOPE.md）。
+# 2026-08-19：旧结构（`rt.py` / `miner.py` / `validator.py` / `payment.py` /
+# `utils/` / `protocol/` / `miner/` / `requirements.txt`）已整体删除，所以这里
+# 不再需要为它们开豁免。**新增豁免要有理由** —— 一条 lint 豁免就是一块
+# 永远不会被检查的代码。
 extend-exclude = [
-    "rt.py",
-    "miner.py",
-    "validator.py",
-    "payment.py",
-    "download_checkpoint.py",
-    "utils",
-    "protocol",
-    "miner",
+    # 训练镜像定义，不是 Python 包的一部分。
     "openpi-runner",
     "scripts",
-    # 模板是原样搬过来的、在训练容器里跑的独立脚本（依赖 openpi / torch），
+    # 模板是在训练容器里跑的独立脚本（依赖 openpi / torch，本包不装它们），
     # 不参加本包的风格约束 —— 改它们的排版会让与容器侧的对照变难。
     "src/openroboto/templates",
 ]

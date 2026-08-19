@@ -1,41 +1,26 @@
-"""`protocol/` 三个 vendored 副本已经作废，这里钉住"作废"这件事本身。
+"""`protocol/` 那份 vendored 副本已经删除，这里钉住"它不许回来"。
 
 背景：这套协议代码曾在四个仓库里各存一份，没有版本号也没有一致性检查，
 `protocol/types.py` 漂了 105 行、`payment.py` 漂了 313 行 —— 矿工按 A 编码、
 后端按 B 解码。`openroboto-protocol` 就是为了消灭这种副本而抽出来的。
 
-按 `SCOPE.md`，继承自 `openroboto-subnet` 的旧文件一律不删，所以三个文件还在磁盘上。
-"装了包又留着旧副本"正是漂移路径本身，靠自觉躲不掉，于是有了这几条：
+**2026-08-19：三个文件已随旧结构一起删除**（此前按 `SCOPE.md`「旧文件一律不删」
+留在磁盘上，作为再导出的空壳）。这个文件因此从"看守一份已作废的副本"改成
+"确认副本没有以任何形式回来"，外加一条与副本无关、但必须一直成立的断言：
+公开文档里那组种子示例值仍然可复现。
 
-1. `protocol.seed` 已经没有自己的实现，只是对协议包的再导出；
-2. 仓库里除两处已知的历史遗留外，没有任何地方还 import 它们；
-3. 三个文件顶部都写着 DEPRECATED；
-4. 而这一切**没有**弄坏现有矿工的旧训练流程（`protocol.types` 仍能独立 import）。
-
-`protocol/types.py` 不能改成再导出：它的值**已经**漂了（`TOP_K_EMISSION_WEIGHTS`
-在这里是 `[0.70, 0.20, 0.10]`，协议包里是生效的 `(0.07, 0.02, 0.01)`，差十倍），
-再导出等于悄悄改行为。它只能整体作废，理由写在文件顶部。
+为什么删了还要留这些用例：漂移不是靠自觉躲得掉的。新增一份副本不会让任何东西
+报错，只会让某天的评测复现不出来 —— 那正是当年 105 行的走法。
 """
 
 from __future__ import annotations
 
 import subprocess
-import sys
 from pathlib import Path
 
 import openroboto_protocol.seed as pkg_seed
-import protocol.seed
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-VENDORED = ("protocol/__init__.py", "protocol/seed.py", "protocol/types.py")
-
-# 仍在 import vendored 副本的地方。**只允许缩短，不允许变长。**
-# 两处都卡在同一件事上：`PI05_BASE_CHECKPOINT` 与 `VLAEpisode` 在
-# `openroboto-protocol` 里没有对应物（该不该进协议包要人裁，见 types.py 顶部）。
-KNOWN_LEGACY_IMPORTERS = {
-    "miner.py": "from protocol.types import PI05_BASE_CHECKPOINT",
-    "miner/trainer_vla.py": "from protocol.types import VLAEpisode",
-}
 
 
 def _git_grep(pattern: str, *pathspec: str) -> list[str]:
@@ -56,100 +41,53 @@ def _git_grep(pattern: str, *pathspec: str) -> list[str]:
     return [line for line in result.stdout.splitlines() if line]
 
 
-def test_vendored_seed_is_a_re_export_not_a_copy() -> None:
-    """`protocol.seed` 的每个符号必须**就是**协议包里的那一个（同一对象）。
-
-    相等不够，要同一性：副本里写一个值相同的实现，明天就能被单独改掉。
-    """
-    assert protocol.seed.derive_seed is pkg_seed.derive_seed
-    assert protocol.seed.verify_seed is pkg_seed.verify_seed
-    assert protocol.seed.drand_round_url is pkg_seed.drand_round_url
-    assert protocol.seed.DRAND_CHAIN_HASH == pkg_seed.DRAND_CHAIN_HASH
-    assert protocol.seed.DRAND_API == pkg_seed.DRAND_API
-
-
 def test_documented_seed_example_still_reproduces() -> None:
-    """`docs/SEED_GENERATION.md` 里那组公开示例值，两条 import 路径必须同解。
+    """`docs/SEED_GENERATION.md` 里那组公开示例值必须一直算得出来。
 
-    这一条是"改成再导出没有动行为"的证据。种子公式变一个字符，
-    历史评测就全部不可复现 —— 所以它不能只靠 code review 保证。
+    这条与 vendored 副本无关，删掉副本之后**更**需要它：种子公式变一个字符，
+    历史评测就全部不可复现，而矿工是拿这组值验证我们没有针对谁挑 seed 的。
+    协议包自己也有黄金向量测试；这一条钉的是"**文档里印的那个数**"。
     """
     block_hash = "0x" + "11" * 32
-    expected = 3898936287
-    assert pkg_seed.derive_seed(block_hash, 1, "22" * 32) == expected
-    assert protocol.seed.derive_seed(block_hash, 1, "22" * 32) == expected
+    assert pkg_seed.derive_seed(block_hash, 1, "22" * 32) == 3898936287
 
 
-def test_legacy_training_path_survives_without_the_protocol_package() -> None:
-    """`protocol/types.py` 必须在**没装协议包**的环境里也能 import。
+def test_no_vendored_protocol_copy_exists() -> None:
+    """仓库里不许有 `protocol/` 下的 Python 文件。
 
-    这条是给现有矿工兜底的：`miner.py` / `miner/trainer_vla.py` 是旧训练流程，
-    矿工装依赖用的是 `requirements.txt`，那份清单里没有 `openroboto-protocol`。
-    如果 `protocol/__init__.py` 里留一行 `from openroboto_protocol...`，
-    Python 在 `from protocol.types import PI05_BASE_CHECKPOINT` 时会先跑父包的
-    `__init__.py`，训练当场崩在第一步 —— 而装这个仓的人不在团队里，
-    我们不会立刻知道，只会看到提交量下降。
-
-    做法：把 `sys.modules["openroboto_protocol"]` 置成 None，之后任何
-    `import openroboto_protocol[.x]` 都会抛 ImportError，等价于"没装"。
+    `.github/workflows/protocol-guards.yml` 也查这一条（CI 层，跨语言都拦）。
+    两处都留着是故意的：本地 `pytest` 能立刻发现，CI 拦住绕过本地钩子的提交。
     """
-    probe = (
-        "import sys; sys.modules['openroboto_protocol'] = None;"
-        "from protocol.types import PI05_BASE_CHECKPOINT;"
-        "print(PI05_BASE_CHECKPOINT)"
-    )
-    result = subprocess.run(
-        [sys.executable, "-c", probe],
+    copies = _git_grep(".", "*protocol/*.py")
+    tracked = subprocess.run(
+        ["git", "ls-files", "*protocol/*.py"],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
         check=False,
+    ).stdout.split()
+    assert tracked == [], (
+        f"vendored protocol 副本又出现了：{tracked}\n"
+        f"协议相关的东西只能来自 `openroboto-protocol` 包（AGENTS.md 红线 #1）"
     )
-    assert result.returncode == 0, (
-        f"没装 openroboto-protocol 时 protocol.types 就 import 不了了，"
-        f"现有矿工的训练会崩：\n{result.stderr}"
-    )
-    assert result.stdout.strip() == "gs://openpi-assets/checkpoints/pi05_base"
+    assert copies == []
 
 
-def test_no_new_imports_of_the_vendored_copy() -> None:
-    """全仓 import `protocol` 的地方只剩两处历史遗留，多一处就红。
+def test_nothing_imports_a_local_protocol_module() -> None:
+    """全仓不许有 `import protocol` / `from protocol import ...`。
 
-    新增一处 = 又开出一条静默走到副本上的路径，也就是当年漂 105 行的那条路。
+    副本删了，但 import 语句还能被写出来（比如从旧分支 cherry-pick 回来）。
+    那会变成 ImportError，而不是静默走到副本上 —— 但仍然要拦，
+    因为下一步就是有人"把缺的文件补回来"。
     """
-    # 排除本文件：第 27 行的 `import protocol.seed` 是**这条测试自己的取证手段**
-    # （它要拿到副本里的函数才能和协议包逐值比对），不是违规的调用点。
-    # 不排除的表现是这条测试永远红，而且是**提交之后才红** —— `git grep` 只看被
-    # 跟踪的文件，`tests/` 还没进版本库时它扫不到自己，本地全绿一提交就炸。
-    hits = _git_grep(
-        r"^[[:space:]]*(from|import) protocol([. ]|$)",
-        "*.py",
-        ":!tests/test_vendored_protocol.py",
-    )
-    found = {line.split(":", 2)[0]: line.split(":", 2)[2].strip() for line in hits}
-    # 三个 vendored 文件自己的 re-export 语句写的是 `from openroboto_protocol...`，
-    # 所以不会出现在这里；真出现了说明有人把它改回了副本内部 import。
-    assert found == KNOWN_LEGACY_IMPORTERS, (
-        f"vendored protocol/ 的 import 清单变了：{found}\n"
-        f"期望只剩：{KNOWN_LEGACY_IMPORTERS}"
-    )
-
-
-def test_every_vendored_file_is_marked_deprecated() -> None:
-    """三个文件顶部都必须写着 DEPRECATED 和替代品的名字。
-
-    留着一份没有标注的副本，下一个人读到的就是"这是本仓的协议实现"。
-    """
-    for relpath in VENDORED:
-        head = (REPO_ROOT / relpath).read_text(encoding="utf-8")[:600]
-        assert "DEPRECATED" in head, f"{relpath} 顶部没有 DEPRECATED 标注"
-        assert "openroboto-protocol" in head, f"{relpath} 没说被谁取代"
+    hits = _git_grep(r"^[[:space:]]*(from|import) protocol([. ]|$)", "*.py")
+    assert hits == [], f"还有地方 import 本地 protocol 模块：{hits}"
 
 
 def test_docs_do_not_teach_miners_to_import_the_copy() -> None:
     """面向矿工的文档一律指向 `openroboto_protocol`。
 
-    README 与 docs/ 里那行 `from protocol.seed import derive_seed` 比代码更危险：
+    文档里那行 `from protocol.seed import derive_seed` 比代码更危险：
     照抄的人不在团队里，他们复现不出 seed 时不会来问，只会认为后端算错了。
     """
     assert _git_grep(r"^[[:space:]]*(from|import) protocol([. ]|$)", "*.md") == []

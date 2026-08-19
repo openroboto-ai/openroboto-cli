@@ -15,7 +15,12 @@ import logging
 import time
 
 from openroboto.backend_api import BackendError, fetch_weights
-from openroboto.chain import get_metagraph, get_subtensor, open_wallet, set_weights_on_chain
+from openroboto.chain import (
+    get_metagraph,
+    get_subtensor,
+    open_wallet,
+    set_weights_on_chain,
+)
 from openroboto.config import ControlFetchError, Settings, apply_control, fetch_control
 from openroboto.console import say
 

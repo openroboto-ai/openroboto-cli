@@ -20,7 +20,7 @@ The process:
 ## Configuration
 
 ```bash
-cp validator.example.yaml validator.yaml
+openroboto init --validator    # writes validator.yaml
 ```
 
 Set the Bittensor network, netuid, local wallet selection, public `control.json` URL, and read-only result-service URL. Leave the public read credential empty if the deployed read endpoint does not require it.
@@ -28,7 +28,8 @@ Set the Bittensor network, netuid, local wallet selection, public `control.json`
 ## Run
 
 ```bash
-python validator.py --config validator.yaml
+openroboto validator run                 # resident
+openroboto validator run --once          # one pass, for cron or debugging
 ```
 
 The process polls every 60 seconds and applies `weight_interval_min` before each weight submission.

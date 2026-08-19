@@ -1,0 +1,78 @@
+# 本地钩子。装法：`uv run pre-commit install`（pre-commit 自己不在 dev 组里，
+# 用 `uvx pre-commit` 也行 —— 它是开发者的个人工具，不该成为装这个包的成本）。
+#
+# 钩子不是 CI 的替代品，是**把 CI 的红提前到 commit 之前**。真正的门禁是
+# `.github/workflows/ci.yml`；这里跑不到的（pytest、coverage 门槛）由它兜底。
+#
+# ⚠️ 这份是从 backend 的同名文件裁下来的。backend 那份里清掉过一批模板残留
+# （biome / generate-frontend-sdk / add-release-date / zizmor —— 全是前端或
+# 前后端同仓才有意义的东西），**不要再抄回来**：这个仓没有前端。
+# `ty` 也没抄：它查的是 SQLModel / SQLAlchemy 那层，本仓一行 ORM 都没有。
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: 3e8a8703264a2f4a69428a0aa4dcb512790b2c8c # v6.0.0
+    hooks:
+      - id: check-added-large-files
+      - id: check-toml
+      - id: check-yaml
+        # --unsafe：只做语法检查，不构造对象。GitHub workflow 里的 `on:` 会被
+        # YAML 1.1 解析成布尔真，严格加载反而报错。
+        args:
+          - --unsafe
+      # 实测提醒：第一次 `pre-commit run --all-files` 会给约 20 个从
+      # openroboto-subnet 继承来的旧文件补末行换行 / 删行尾空格。那是一次性的
+      # 空白噪音，不改行为；钩子日常只看**暂存的**文件，所以没有为旧文件加
+      # 排除规则 —— 加了的话，等这些文件真被搬进 src/ 时又得记得删掉。
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: check-merge-conflict
+      # 密钥永不进版本库（AGENTS.md §4）。矿工的 miner.yaml 里有 HF token 和
+      # 钱包密码，这条挡的是私钥被误 add。
+      - id: detect-private-key
+
+  - repo: https://github.com/crate-ci/typos
+    rev: bee27e3a4fd1ea2111cf90ab89cd076c870fce14 # frozen: v1.48.0
+    hooks:
+      - id: typos
+        # --force-exclude：不带它的话 pre-commit 传进来的文件名会绕过下面的
+        # --exclude。
+        #
+        # docs/api_reference_en.md 排除掉是因为**误报**，不是因为那份文档不重要：
+        # 里面贴了 drand 随机数的原始十六进制串，typos 从中截出两个字母当成拼错的
+        # 英文单词报出来。为一条误报再养一个 _typos.toml 不划算；哪天那份文档
+        # 不再贴原始随机数了，把这行删掉。
+        # （同理，这段注释里不要复述被误报的那两个字母 —— 会把本文件也带红。）
+        args: [--force-exclude, --exclude, "docs/api_reference_en.md"]
+
+  - repo: local
+    hooks:
+      # 三条和 scripts/lint.sh 是同一批工具，用 local + `uv run` 而不是
+      # ruff 的官方 mirror repo：mirror 会另装一个版本的 ruff，于是钩子和 CI
+      # 用不同版本的 ruff 互相打架。版本只由 uv.lock 决定一处。
+      #
+      # language: system —— 模板里写的 `unsupported` 不是合法值，hook 根本不会跑。
+      - id: local-ruff-check
+        name: ruff check
+        # --force-exclude：pyproject 的 extend-exclude（从 openroboto-subnet
+        # 继承来的旧文件）必须生效，否则钩子在那批文件上永远红。
+        entry: uv run ruff check --force-exclude --fix --exit-non-zero-on-fix
+        require_serial: true
+        language: system
+        types: [python]
+
+      - id: local-ruff-format
+        name: ruff format
+        entry: uv run ruff format --force-exclude
+        require_serial: true
+        language: system
+        types: [python]
+
+      # mypy 只查 src（理由见 pyproject.toml 的 [tool.mypy]），所以不接
+      # 文件名参数 —— 传进来的可能是 tests/ 或旧文件，那不是它的范围。
+      - id: local-mypy
+        name: mypy check
+        entry: uv run mypy src
+        require_serial: true
+        language: system
+        pass_filenames: false

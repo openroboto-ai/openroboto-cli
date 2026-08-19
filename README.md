@@ -1,132 +1,126 @@
-# OpenRoboto Miner and Protocol
+# openroboto
 
-OpenRoboto is a Bittensor mainnet subnet for improving vision-language-action models. This repository contains the public miner, on-chain protocol helpers, weight-setting validator, training runner, configuration examples, and reproducibility documentation for netuid 80.
+The command-line tool for mining on **OpenRoboto**, a Bittensor mainnet subnet
+(netuid 80) that rewards improvements to vision-language-action models.
 
-[Protocol overview](docs/SUBNET_OVERVIEW.md) · [Seed derivation](docs/SEED_GENERATION.md) · [Evaluation toolkit](https://github.com/openroboto-ai/openroboto-evaluation)
+You fine-tune π₀.₅ on LIBERO, publish the checkpoint to Hugging Face, pay a small
+on-chain evaluation fee, and announce it. The subnet evaluates every submission in
+simulation with a seed nobody can predict, ranks the results, and pays emissions by
+rank.
 
-## Public trust boundary
-
-The following components are public:
-
-- miner participation, local training, Hugging Face upload, burn, and chain announcement;
-- chain commitment formats and weight-setting logic;
-- evaluation rules, baseline methodology, LIBERO tooling, and seed derivation;
-- the miner-visible `control.json` schema and read-only API contract.
-
-Held-out task data, the scoring service deployment, and subnet-owner operational tools are outside this repository. Seed derivation remains public because the future block hash and drand value do not exist when a miner submits a model.
-
-## Miner flow
-
-1. Read the current public `control.json`.
-2. Download the public training resources and base checkpoint.
-3. Train through the isolated `openpi-runner` container.
-4. Merge any LoRA adapter into the π0.5 base and export a complete checkpoint.
-5. Upload the complete checkpoint to Hugging Face.
-6. Pay the current evaluation burn and announce the exact model commit on chain.
-7. Reproduce the published evaluation seed and run the public validator toolkit locally.
-
-> **Submission format.** The evaluation service only accepts complete model checkpoints —
-> an openpi JAX `params/` directory or a PyTorch `model.safetensors`, together with
-> `assets/physical-intelligence/libero/norm_stats.json`. A bare LoRA adapter is rejected
-> by a CPU pre-check before any GPU evaluation. Exact requirements and a local pre-check
-> command are documented in [docs/SUBNET_OVERVIEW.md](docs/SUBNET_OVERVIEW.md).
-
-## The `openroboto` CLI
-
-Everything a miner types is now one pip package — no repository clone required.
+Everything you type is this one package. **There is nothing to clone.**
 
 ```bash
-pip install openroboto            # ships the config template and strategy scripts
-openroboto init my-miner          # writes miner.yaml + train_strategy.py
-cd my-miner && $EDITOR miner.yaml
-openroboto doctor                 # GPU / Docker / config / balance, before spending anything
-openroboto build                  # build the openpi-runner training image
-openroboto train                  # one round, inside the container
-openroboto check                  # local checkpoint-format verdict — free, run it before paying
-openroboto submit                 # upload -> burn -> announce
-openroboto status                 # what the subnet did with your submission, and why
+pip install openroboto
 ```
+
+[Docs index](docs/README.md) · [How the subnet works](docs/SUBNET_OVERVIEW.md) ·
+[Migrating from `rt.py`](docs/MIGRATION.md) ·
+[Evaluation toolkit](https://github.com/openroboto-ai/openroboto-evaluation)
+
+> **Upgrading from a clone of this repository?** `python miner.py` and
+> `python rt.py submit` were removed on 2026-08-19. See
+> [docs/MIGRATION.md](docs/MIGRATION.md) for the command map — your existing
+> `miner.yaml` and `state/round_N.json` still work.
+
+---
+
+## Requirements
+
+- Linux, an NVIDIA GPU (24 GB VRAM minimum) and a recent driver
+- Python **3.11**
+- Docker with the NVIDIA Container Toolkit — training runs in a container because
+  openpi needs `numpy<2.0` and bittensor needs `numpy>=2.0`; one interpreter cannot
+  hold both
+- A registered Bittensor mainnet hotkey with enough TAO for the evaluation fee
+- A Hugging Face account and a write token
+
+## Your first submission
+
+```bash
+# 1. Install and scaffold
+pip install openroboto
+openroboto init my-miner          # writes miner.yaml + train_strategy.py
+cd my-miner
+$EDITOR miner.yaml                # hotkey_ss58, HF token + username, control.json URL
+
+# 2. Check everything BEFORE anything costs money
+openroboto doctor                 # GPU, Docker, HF permissions, balance, config
+
+# 3. Build the training image, then train one round
+openroboto build
+openroboto train
+
+# 4. Verify the checkpoint format — still free
+openroboto check
+
+# 5. Upload, pay the fee, announce on chain
+openroboto submit
+
+# 6. See what the subnet made of it
+openroboto status
+```
+
+Steps 2 and 4 exist for one reason: **burns are not refundable.** The most expensive
+mistake on this subnet is discovering after paying that the upload was a bare LoRA
+adapter. `doctor` and `check` are free and catch that.
+
+Full walkthrough: [docs/MINER.md](docs/MINER.md).
+Real-machine setup, systemd, custom strategies: [docs/MINER_DEPLOY.md](docs/MINER_DEPLOY.md).
+
+## Commands
 
 | Command | What it does |
 |---|---|
-| `openroboto init [DIR] [-s simple\|example]` | Release `miner.yaml` and a training strategy script |
-| `openroboto doctor` | Environment check: Python, config, control.json, Docker, GPU, image, HF token, wallet balance |
-| `openroboto build` | Build the `openpi-runner` image (local `openpi-runner/` or the public git context) |
-| `openroboto train [-s script.py]` | Run one round; the strategy script is mounted into the container |
-| `openroboto check [PATH]` | Verify checkpoint layout with the same rules the evaluator uses — **no GPU, no network, no second repository** |
-| `openroboto upload / burn / announce` | The three submission steps, individually |
+| `openroboto init [DIR] [-s simple\|example] [--validator]` | Write `miner.yaml` and a training strategy script |
+| `openroboto doctor` | Environment check: Python, config, `control.json`, Docker, GPU, image, HF token, wallet balance |
+| `openroboto build` | Build the `openpi-runner` training image (local `openpi-runner/`, or the public context) |
+| `openroboto train [-s script.py]` | Run one round; your strategy script is mounted into the container |
+| `openroboto check [PATH]` | Verify checkpoint layout with the rules the evaluator uses — **no GPU, no network, no second repository** |
+| `openroboto upload / burn / announce` | The three submission steps, individually — for recovery, not routine use |
 | `openroboto submit [--force]` | All three, resumable from `state/round_N.json` |
 | `openroboto status [--hotkey]` | Submission history and scanner rejection reasons (no API key needed) |
-| `openroboto validator run` | External validator: read backend weights, set them on chain |
+| `openroboto validator run` | External validator: read published weights, set them on chain |
 | `openroboto --version` | CLI version and protocol package version |
 
-`openroboto check` exists because the most expensive mistake in this subnet is
-discovering after the burn that the upload was a bare LoRA adapter. Burns are not
-refunded.
+⚠️ **`openroboto merge` does not exist yet.** Training produces a LoRA adapter, and a
+bare adapter is rejected — merging it into the base model is currently a manual step.
+`openroboto check` catches an unmerged upload before you pay.
 
-The legacy entry points (`miner.py`, `rt.py`, `validator.py`) are still in the
-repository for reference; the commands above replace them.
+## Things that will cost you TAO if you skip them
 
-## Installation
+The fee is published live in `control.json`; on mainnet today it is 0.1 TAO. Never
+hard-code it — the CLI reads it, and **refuses to burn if it cannot** rather than
+guessing an amount the backend would reject.
 
-Requirements:
+**Do not run `burn` and `announce` as separate steps unless you are recovering.** The
+backend only accepts a submission whose burn is within **50 blocks (~10 minutes)** of
+the chain commitment; this stops a single fee being reused across submissions. Past
+that window the submission is rejected and the fee is gone. `openroboto submit` runs
+the three steps back-to-back so you stay inside it, and `announce` refuses to publish
+once the window has closed instead of charging you a second fee for a doomed
+submission.
 
-- Linux with an NVIDIA GPU and recent driver;
-- Python 3.11;
-- Docker with NVIDIA Container Toolkit;
-- a registered Bittensor mainnet hotkey;
-- a Hugging Face account with a write token.
+Details: [docs/PAYMENT.md](docs/PAYMENT.md).
 
-```bash
-python3.11 -m venv .venv
-source .venv/bin/activate
-pip install openroboto
-openroboto init .
-```
+## Submission format
 
-Fill the placeholders in `miner.yaml`. The file is ignored by Git.
+The evaluator accepts **complete model checkpoints** — an openpi JAX `params/`
+directory or a PyTorch `model.safetensors`, plus
+`assets/physical-intelligence/libero/norm_stats.json`. A bare LoRA adapter is rejected
+by a CPU pre-check before any GPU time is spent.
 
-## Run
+Exact requirements: [docs/SUBNET_OVERVIEW.md](docs/SUBNET_OVERVIEW.md).
 
-Train:
+## Verify your evaluation seed
 
-```bash
-python miner.py --config miner.yaml
-```
-
-Upload, burn, and announce:
-
-```bash
-python rt.py submit --config miner.yaml --round 1
-```
-
-The steps can also run separately:
+Your seed is derived from three public values that did not exist when you submitted —
+the block hash that carried your commitment, the round number, and a drand beacon
+value. Nobody, including the subnet operator, can pick a seed for a specific miner.
+You can recompute it:
 
 ```bash
-python rt.py upload --config miner.yaml --round 1
-python rt.py burn --config miner.yaml --round 1
-python rt.py announce --config miner.yaml --round 1
-```
-
-Docker Compose starts only the miner service:
-
-```bash
-docker compose up --build miner
-```
-
-## Weight-setting validator
-
-`validator.py` reads `control.json`, retrieves weights from a read-only API endpoint, normalizes them, and calls Bittensor `set_weights`. It does not contain the evaluation service or any owner controls.
-
-```bash
-cp validator.example.yaml validator.yaml
-python validator.py --config validator.yaml
-```
-
-## Reproduce a seed
-
-```bash
-pip install "openroboto-protocol==1.0.0"
+pip install openroboto-protocol
 ```
 
 ```python
@@ -135,15 +129,44 @@ from openroboto_protocol.seed import derive_seed
 seed = derive_seed(block_hash, round_num, drand_randomness)
 ```
 
-The exact formula, drand chain identifier, verification steps, and security assumptions are documented in [docs/SEED_GENERATION.md](docs/SEED_GENERATION.md).
+The backend and this CLI import that exact function — not a copy of it.
+Formula, drand chain identifier and security assumptions:
+[docs/SEED_GENERATION.md](docs/SEED_GENERATION.md).
+
+## Running in Docker (optional)
+
+If you would rather not install into the host Python:
+
+```bash
+docker compose up train          # trains one round
+docker compose run --rm train submit --config miner.yaml
+```
+
+There is deliberately no `submit` service — a compose service can be restarted, and
+restarting a command that burns TAO is not something to leave to a restart policy.
+
+⚠️ The compose file mounts the Docker socket so the CLI can start the training
+container. That grants host root to the container; run it only on your own machine.
+
+## Public trust boundary
+
+Public: miner participation, local training, Hugging Face upload, burn and chain
+announcement; chain commitment formats and weight-setting logic; evaluation rules,
+baseline methodology, LIBERO tooling and seed derivation; the miner-visible
+`control.json` schema and the read-only API contract.
+
+Not here: held-out task data, the scoring-service deployment, and subnet-owner
+operational tooling.
+
+Seed derivation is public precisely because publishing it gives nothing away — the
+future block hash and drand value do not exist at submission time.
 
 ## Development
 
-For contributors. Miners installing from PyPI can skip this section.
+For contributors. Skip this if you installed from PyPI.
 
-`openroboto-protocol` is not published to PyPI yet, so `pyproject.toml` resolves
-it from a sibling checkout. Clone both repositories next to each other, or
-`uv sync` fails before it installs anything:
+`openroboto-protocol` is not on PyPI yet, so `pyproject.toml` resolves it from a
+sibling checkout. Clone both, or `uv sync` fails before installing anything:
 
 ```bash
 git clone https://github.com/openroboto-ai/openroboto-protocol
@@ -152,10 +175,9 @@ cd openroboto-cli
 uv sync --locked
 ```
 
-`--locked` is deliberate: it fails when `uv.lock` no longer matches
-`pyproject.toml` instead of silently re-resolving a different dependency tree.
-The interpreter is Python 3.11, pinned by `.python-version` — the version
-miners run.
+`--locked` is deliberate: it fails when `uv.lock` no longer matches `pyproject.toml`
+instead of silently resolving a different dependency tree. The interpreter is pinned to
+Python 3.11 by `.python-version` — the version miners run.
 
 ```bash
 bash scripts/lint.sh                             # mypy + ruff check + ruff format
@@ -165,25 +187,34 @@ uv run coverage report                           # fails below the threshold in 
 uvx pre-commit install                           # optional: the same lint on every commit
 ```
 
-`.github/workflows/ci.yml` runs these same commands — `scripts/lint.sh` is the
-one definition of "lint", so local and CI cannot drift apart. CI additionally
-fails on any skipped test: nothing here needs hardware or credentials, so a
-skip means a test was quietly switched off.
+`.github/workflows/ci.yml` runs these same commands — `scripts/lint.sh` is the single
+definition of "lint", so local and CI cannot drift. CI also fails on any skipped test:
+nothing here needs hardware or credentials, so a skip means a test was switched off.
+
+Protocol constants (commitment encoding, seed derivation, shared vocabularies) come
+from `openroboto-protocol` and are never copied in here.
+`.github/workflows/protocol-guards.yml` enforces that and that the dependency is pinned
+to an exact version — a floating range would let the miner side and the backend side
+resolve different code, which is the one thing that package exists to prevent.
 
 ## Repository map
 
 | Path | Purpose |
 |---|---|
-| `src/openroboto/` | The `openroboto` CLI package (commands, chain, HuggingFace, payment, config, templates) |
-| `miner.py` | Miner training entry point (reference sample; its default LoRA output must be merged into the base model before submission) |
-| `rt.py` | Upload, burn, and chain announcement CLI |
-| `validator.py` | Read-only weight fetch and on-chain `set_weights` |
-| `payment.py` | Evaluation-burn transaction helper |
-| `miner/` | Training pipeline and Hugging Face publishing |
-| `openpi-runner/` | Isolated OpenPI training runtime |
-| `protocol/` | **Deprecated**, pending archival. Superseded by the `openroboto-protocol` package — do not import it |
-| `utils/` | Shared configuration, chain, download, and logging helpers |
-| `docs/` | Miner, validator, protocol, and reproducibility documentation — index at [docs/README.md](docs/README.md). Superseded documents live in `docs/archive/` with a header naming their replacement |
+| `src/openroboto/` | The package: `commands/`, `chain/`, `huggingface/`, `payment/`, `config/`, `training/`, `templates/` |
+| `openpi-runner/` | Training-container image definition, used by `openroboto build`. Not shipped in the wheel |
+| `docs/` | Miner, validator and reproducibility documentation — index at [docs/README.md](docs/README.md) |
+| `tests/` | Mirrors `src/`; needs no GPU, chain or network |
+| `Dockerfile`, `docker-compose.yml` | Optional containerised way to run the CLI |
 
-Local configuration, runtime state, logs, databases, environments, and model weights are excluded by `.gitignore`.
+The old flat layout (`rt.py`, `miner.py`, `payment.py`, `validator.py`, `miner/`,
+`utils/`, `protocol/`) was removed on 2026-08-19; the package replaces all of it. It
+remains in git history, and [docs/MIGRATION.md](docs/MIGRATION.md) maps every old
+command to its replacement.
 
+Local configuration, runtime state, logs, caches and model weights are excluded by
+`.gitignore`.
+
+## License
+
+See [LICENSE](LICENSE).
