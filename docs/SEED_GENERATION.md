@@ -1,5 +1,9 @@
 # Evaluation Seed Derivation
 
+> **Status**: current · **Updated**: 2026-08-19 · **Audience**: miners, auditors
+> **Scope**: How the evaluation seed is derived and how to recompute it yourself.
+> **Note**: The authoritative implementation is `openroboto_protocol.seed`, shared byte-for-byte with the backend. This document explains how to **verify** it.
+
 ## Public formula
 
 OpenRoboto derives each submission's base evaluation seed from three public inputs:

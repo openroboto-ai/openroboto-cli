@@ -1,5 +1,9 @@
 # Miner Deployment Guide
 
+> **Status**: current · **Updated**: 2026-08-19 · **Audience**: miners running on their own hardware
+> **Scope**: Machine preparation, install, training image, running a round, systemd.
+> **Note**: The conceptual guide is [MINER.md](./MINER.md). This document assumes you have read it.
+
 > For miners running on Ubuntu 22.04/24.04 with NVIDIA GPU.
 
 ## Hardware Requirements
@@ -170,8 +174,9 @@ Your strategy must produce:
 
 ### Example
 
-See `custom_train_script/simple_strategy-*.py` in the repo for complete examples that
-generate valid adapter files.
+`openroboto init` writes a complete working example to `train_strategy.py`, and
+`openroboto init -s example` writes a more heavily commented teaching version. Both
+produce valid adapter files. There is nothing to clone to read them.
 
 ## 6. Run Miner
 

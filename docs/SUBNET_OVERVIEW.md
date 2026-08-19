@@ -1,5 +1,9 @@
 # OpenRoboto Subnet — Protocol & Incentive Mechanism
 
+> **Status**: current · **Updated**: 2026-08-19 · **Audience**: miners, external validators, auditors
+> **Scope**: What the subnet rewards, and every rule that decides whether a submission counts.
+> **Note**: Numbers named here (fee, round, dataset URLs) are published live in `control.json` — the live file wins.
+
 **Bittensor subnet for open robot-learning models. Mainnet netuid 80.**
 
 This document explains how the subnet works, end to end: what miners submit, what it costs, how evaluation is randomized and executed, how ranking and on-chain weights are derived, and what keeps the loop honest. Nothing here needs to be taken on trust — each mechanism leaves a public trace you can check yourself: a chain transaction, an API response, a Hugging Face commit, a drand beacon round.
@@ -200,7 +204,7 @@ Live at **`https://api.openroboto.ai`** — the endpoints below are public, **no
 | `GET /api/v1/queue/status` | Evaluation queue: per-task status (pending / evaluating / evaluated / eval_failed) |
 | `GET /api/v1/submissions/{task_id}` | Single-submission audit record (`task_id` = `task_{hotkey}_{round}`) |
 
-The website renders the same data live: [openroboto.ai/#/benchmark](https://www.openroboto.ai/#/benchmark) (leaderboard) and [openroboto.ai/#/queue](https://www.openroboto.ai/#/queue) (queue). The full endpoint reference, including authenticated worker/admin routes, is in [api_reference_en.md](./api_reference_en.md).
+The website renders the same data live: [openroboto.ai/#/benchmark](https://www.openroboto.ai/#/benchmark) (leaderboard) and [openroboto.ai/#/queue](https://www.openroboto.ai/#/queue) (queue). The four endpoints this CLI consumes are listed in §10 below. The backend's full endpoint contracts live in the backend repository (`docs/specs/`); authenticated worker and admin routes are deliberately not documented here.
 
 ## 11. Chain commitment format
 
@@ -241,4 +245,6 @@ The owner publishes one JSON file over plain HTTPS that every miner polls (ETag-
 | Miner guide | [MINER.md](./MINER.md) · [MINER_DEPLOY.md](./MINER_DEPLOY.md) |
 | Validator guide | [VALIDATOR.md](./VALIDATOR.md) |
 | Seed derivation spec | [SEED_GENERATION.md](./SEED_GENERATION.md) |
-| API reference | [api_reference_en.md](./api_reference_en.md) |
+| Round contract | [control_json.md](./control_json.md) |
+| Evaluation fee rules | [PAYMENT.md](./PAYMENT.md) |
+| Doc index | [README.md](./README.md) |

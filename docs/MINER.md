@@ -1,5 +1,9 @@
 # Miner Guide — π₀.₅ LIBERO Training
 
+> **Status**: current · **Updated**: 2026-08-19 · **Audience**: miners
+> **Scope**: Nothing → first submission. Architecture, quick start, chain payload, confirmation outcomes.
+> **Note**: Deployment on a real machine is [MINER_DEPLOY.md](./MINER_DEPLOY.md); field-by-field config is [CONFIG.md](./CONFIG.md).
+
 > For miners participating in the RobotTrain subnet.
 
 ## Architecture
@@ -141,12 +145,17 @@ Or as hex string:
 {'info': {'fields': [{'Raw73': '0x7b2268223a...'}]}}
 ```
 
-`_decode_raw()` in `utils/chain.py` handles all formats:
-1. Iterate `fields` → find `RawXX` key
-2. Flatten nested tuple → `bytes(flat)` OR decode hex string
+Decoding handles all of these shapes:
+1. Iterate `fields` → find the `RawXX` key
+2. Flatten the nested tuple → `bytes(flat)`, or decode the hex string
 3. UTF-8 decode → JSON parse
 
-ChainScanner (`backend/chain_scanner.py`) uses the same `_decode_raw()`.
+**The miner and the backend run the same decoder**, from
+`openroboto_protocol.commitment` — not two copies. That is deliberate: when these
+drifted apart, miners encoded payloads the backend could not read.
+
+`RawN` versus `BigRaw` is only a **byte-length** distinction (`≤128` uses `RawN`),
+not a client version. A `Raw119` commitment is not an outdated miner.
 
 ## Security Notes
 

@@ -1,3 +1,14 @@
+> # ⚠️ 已归档 —— 内容已并入 `../SUBNET_OVERVIEW.md`
+>
+> **状态**：superseded · **归档日期**：2026-08-19
+> **替代者**：`docs/SUBNET_OVERVIEW.md` §2 Roles
+>
+> **为什么**：这 35 行是 `SUBNET_OVERVIEW.md` §2 的子集，两处各写一遍角色分工，
+> 改一处忘一处就会互相矛盾。归档时它仍写着「Public implementation: `validator.py`
+> 和 `utils/`」—— 那已经是 `openroboto validator run` 了，正是漂移的实例。
+
+---
+
 # OpenRoboto Public Roles
 
 ## Miner

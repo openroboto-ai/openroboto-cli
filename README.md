@@ -137,6 +137,39 @@ seed = derive_seed(block_hash, round_num, drand_randomness)
 
 The exact formula, drand chain identifier, verification steps, and security assumptions are documented in [docs/SEED_GENERATION.md](docs/SEED_GENERATION.md).
 
+## Development
+
+For contributors. Miners installing from PyPI can skip this section.
+
+`openroboto-protocol` is not published to PyPI yet, so `pyproject.toml` resolves
+it from a sibling checkout. Clone both repositories next to each other, or
+`uv sync` fails before it installs anything:
+
+```bash
+git clone https://github.com/openroboto-ai/openroboto-protocol
+git clone https://github.com/openroboto-ai/openroboto-cli
+cd openroboto-cli
+uv sync --locked
+```
+
+`--locked` is deliberate: it fails when `uv.lock` no longer matches
+`pyproject.toml` instead of silently re-resolving a different dependency tree.
+The interpreter is Python 3.11, pinned by `.python-version` — the version
+miners run.
+
+```bash
+bash scripts/lint.sh                             # mypy + ruff check + ruff format
+uv run pytest -q                                 # no GPU, no chain, no network
+uv run coverage run --source=src -m pytest -q
+uv run coverage report                           # fails below the threshold in pyproject.toml
+uvx pre-commit install                           # optional: the same lint on every commit
+```
+
+`.github/workflows/ci.yml` runs these same commands — `scripts/lint.sh` is the
+one definition of "lint", so local and CI cannot drift apart. CI additionally
+fails on any skipped test: nothing here needs hardware or credentials, so a
+skip means a test was quietly switched off.
+
 ## Repository map
 
 | Path | Purpose |
@@ -150,7 +183,7 @@ The exact formula, drand chain identifier, verification steps, and security assu
 | `openpi-runner/` | Isolated OpenPI training runtime |
 | `protocol/` | **Deprecated**, pending archival. Superseded by the `openroboto-protocol` package — do not import it |
 | `utils/` | Shared configuration, chain, download, and logging helpers |
-| `docs/` | Miner, validator, protocol, API, and reproducibility documentation |
+| `docs/` | Miner, validator, protocol, and reproducibility documentation — index at [docs/README.md](docs/README.md). Superseded documents live in `docs/archive/` with a header naming their replacement |
 
 Local configuration, runtime state, logs, databases, environments, and model weights are excluded by `.gitignore`.
 

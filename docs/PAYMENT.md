@@ -1,5 +1,9 @@
 # Evaluation Burn Payment
 
+> **Status**: current · **Updated**: 2026-08-19 · **Audience**: miners
+> **Scope**: The evaluation fee: how much, to whom, within what window, and every way it can be wasted.
+> **Note**: Burns are not refundable. This is the most expensive document in the set to skim.
+
 ## Purpose
 
 Each evaluated submission may require a public burn amount. The current value is published in `control.json` as `payment.burn_rate_tao`. Burning creates an economic cost for queue usage without transferring the fee to the subnet operator.

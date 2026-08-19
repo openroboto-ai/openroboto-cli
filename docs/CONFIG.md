@@ -1,5 +1,9 @@
 # Public Configuration Reference
 
+> **Status**: current · **Updated**: 2026-08-19 · **Audience**: miners, external validators
+> **Scope**: Every `miner.yaml` / `validator.yaml` field: meaning, unit, and what breaks if it is wrong.
+> **Note**: Round-scoped values (fee, dataset) are **not** here — they come from [control_json.md](./control_json.md).
+
 Real configuration files are local-only. Copy an example, fill its placeholders, and keep the resulting YAML outside Git.
 
 ## Miner

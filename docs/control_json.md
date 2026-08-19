@@ -1,5 +1,11 @@
 # Public control.json Contract
 
+> **Status**: current · **Updated**: 2026-08-19 · **Audience**: miners, external validators
+> **Scope**: how clients read `control.json`. Not how the owner publishes it.
+> **Authority note**: `control.json` carries **only** `payment` / `dataset` / `training` /
+> `process`. It is not a backend configuration source — see
+> `openroboto-backend/docs/adr/01-control-json不是后端配置源.md`.
+
 `control.json` is a public, read-only contract consumed by miners and the weight-setting validator. This repository documents how clients interpret the file. It does not include tools or procedures for changing subnet state.
 
 ## Miner-visible fields
@@ -28,5 +34,45 @@ Unknown fields should be ignored for forward compatibility. A client should stop
 
 ## Example
 
-See `control_json_example.json` and `CONTROL_JSON_SAMPLE.md`. All URLs and credentials in those examples are placeholders.
+The canonical placeholder sample is [`control_json_example.json`](./control_json_example.json),
+reproduced here so the fields above and the shape below cannot drift apart:
+
+```json
+{
+  "round": 1,
+  "status": "active",
+  "message": "Round 1 is active",
+  "payment": {
+    "enabled": true,
+    "burn_rate_tao": 0.1,
+    "limit_price_rao": 0
+  },
+  "dataset": {
+    "version": "v1",
+    "train_url": "https://example.com/public/train.json",
+    "val_url": "https://example.com/public/val.json"
+  },
+  "training": {
+    "vla_model_id": "pi05",
+    "vla_checkpoint_path": "<public-checkpoint-path>",
+    "epochs": 3,
+    "batch_size": 4,
+    "learning_rate": 0.0001,
+    "warmup_ratio": 0.05,
+    "gradient_accumulation_steps": 8,
+    "lora_r": 32,
+    "lora_alpha": 64,
+    "lora_dropout": 0.1
+  },
+  "public_key": "<public-read-key>"
+}
+```
+
+Every URL and credential above is a placeholder. The sample contains only
+miner-visible and validator-visible fields.
+
+> **The fee is 0.1 TAO on mainnet today, but never hard-code it.** Read
+> `payment.burn_rate_tao` from the live file. `openroboto burn` refuses to run when
+> it cannot fetch this file rather than falling back to a guess — a wrong amount is
+> rejected by the backend and the TAO is not refunded.
 

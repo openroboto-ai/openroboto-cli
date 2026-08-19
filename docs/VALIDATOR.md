@@ -1,5 +1,9 @@
 # Weight-Setting Validator Guide
 
+> **Status**: current · **Updated**: 2026-08-19 · **Audience**: external weight-setting validators
+> **Scope**: Reading published weights and setting them on chain via `openroboto validator run`.
+> **Note**: Miners do not need this document.
+
 ## Responsibility
 
 `validator.py` is a lightweight Bittensor weight setter. It does not run benchmarks. The public evaluation implementation is maintained in the separate `validator` repository.

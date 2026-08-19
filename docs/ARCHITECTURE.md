@@ -1,5 +1,9 @@
 # OpenRoboto Public Architecture
 
+> **Status**: current · **Updated**: 2026-08-19 · **Audience**: contributors to this CLI
+> **Scope**: How the `openroboto` package is organised and where each responsibility lives.
+> **Note**: Not a miner document. Miners want [MINER.md](./MINER.md).
+
 ## Scope
 
 This repository contains the miner, public protocol, training runner, and the lightweight validator that submits weights. The separate public `validator` repository contains the LIBERO evaluation harness and baseline tooling.
