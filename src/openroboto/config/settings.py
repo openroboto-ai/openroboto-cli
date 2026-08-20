@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import yaml
+from openroboto_protocol.constants import BURN_BLOCK_WINDOW
 
 from openroboto.config import environments
 
@@ -186,32 +187,18 @@ class Settings:
     #: How many blocks are allowed between burn and announce. Going over means the
     #: backend marks it `rejected`, and the TAO is not refunded.
     #:
-    #: Where the value comes from: `scanner.burn_block_window` in the production
-    #: `backend.yaml`, read at `backend/config.py:77` and enforced at
-    #: `scanner/burn_verify.py:71` — **50**. (The docs in this repo said 10 blocks
-    #: for a while; on 2026-08-19 they were unified to 50 following "production
-    #: behaviour wins".)
+    #: ✅ **Comes from the protocol package** (red line #1), no longer a local copy.
+    #: This field only exists so `miner.yaml` can still override it; leave it out
+    #: and you get the protocol value.
     #:
-    #: 🟡 **Still a red-line #1 copy, but only until the next protocol release.**
-    #: Red line #1 says the burn amount and the block window are always installed
-    #: from `openroboto-protocol`, never copied into this repo.
+    #: Provenance lives with the constant: `scanner.burn_block_window` in the
+    #: production `backend.yaml`, enforced at `scanner/burn_verify.py:71`.
     #:
-    #: The protocol side is **done**: `openroboto_protocol.constants.BURN_BLOCK_WINDOW`
-    #: exists and carries the same value, the same provenance, and tests pinning all
-    #: three properties of the comparison. It is not released yet, and `==0.3.0`
-    #: cannot be resolved from PyPI, so importing it here today would simply not
-    #: install.
-    #:
-    #: **When openroboto-protocol 0.3.0 is published, this is a three-line change:**
-    #: bump the pin in `pyproject.toml`, `from openroboto_protocol.constants import
-    #: BURN_BLOCK_WINDOW`, and make this field default to it. Delete this comment
-    #: with it.
-    #:
-    #: Until then: changing this number requires changing the production
-    #: `backend.yaml` and the protocol constant in the same breath. Being stricter
-    #: than the backend is not the safe direction — it rejects submissions the
-    #: backend would have accepted, and the miner has already burned by then.
-    burn_block_window: int = 50
+    #: Changing this number means changing the production `backend.yaml` and the
+    #: protocol constant in the same breath. Being stricter than the backend is not
+    #: the safe direction -- it rejects submissions the backend would have accepted,
+    #: and by then the miner has already burned.
+    burn_block_window: int = BURN_BLOCK_WINDOW
 
     def require_for_chain(self) -> None:
         """Minimum config check before going on chain.

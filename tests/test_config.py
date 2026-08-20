@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from openroboto_protocol.constants import BURN_BLOCK_WINDOW
 
 from openroboto.config import (
     ConfigError,
@@ -388,3 +389,18 @@ def test_require_for_chain_reports_the_interval_with_everything_else() -> None:
     with pytest.raises(ConfigError) as excinfo:
         cfg.require_for_chain()
     assert "activity_cutoff" in str(excinfo.value)
+
+
+def test_burn_block_window_comes_from_the_protocol_package() -> None:
+    """Red line #1: the burn window is installed, never copied into this repo.
+
+    It lived here as a local literal while protocol 0.3.0 was unreleased. The
+    release landed on 2026-08-19, so the copy is gone.
+
+    Asserting identity with the protocol constant, not the number 50: a test that
+    pins the literal passes just as happily when someone re-forks the value, which
+    is the whole thing red line #1 forbids. A window stricter than the backend's
+    rejects submissions the backend would have taken -- and the miner has already
+    burned by then.
+    """
+    assert Settings().burn_block_window is BURN_BLOCK_WINDOW
