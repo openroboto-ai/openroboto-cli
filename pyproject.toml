@@ -134,10 +134,22 @@ python_version = "3.11"
 # Only the new structure is checked; old files and templates (templates run inside the
 # container and depend on openpi/torch) are out.
 #
-# `tests/` is not checked: pytest's stubs drag numpy in, and numpy's stubs use the
-# `type` statement that only exists in 3.12 — we check against the miner side's 3.11,
-# so following them in would only produce numpy's own syntax errors.
-# The correctness of tests is guaranteed by pytest, not by the type checker.
+# `tests/` is not checked. ⚠️ The reason written here used to be "numpy's stubs use
+# the `type` statement that only exists in 3.12" — **that expired.** Measured
+# 2026-08-21: `mypy src tests` runs clean of numpy errors and reports 11 findings,
+# none of which is a bug:
+#
+#   - 7 × "does not explicitly export attribute" on `monkeypatch.setattr(mod, ...)`.
+#     Patching the *importing* module is the correct idiom (the module holds its own
+#     reference), so `no_implicit_reexport` is wrong about these, not the tests.
+#   - 4 × noise mypy cannot narrow: `**kwargs` from a heterogeneous dict literal,
+#     `parser._subparsers` (already carrying an ignore).
+#
+# So it stays out on cost/benefit, not on impossibility. And note what it would
+# **not** buy: `monkeypatch.setattr(mod, "name", v)` takes the attribute as a
+# *string*, so a patch aimed at an attribute that has moved away is invisible to
+# mypy — that class of bug (a test that silently stops taking effect and starts
+# hitting the real network) needs a real call, not a type checker.
 files = ["src/openroboto"]
 # `runner/train_runner.py` also runs inside the container (openpi / torch, which this
 # package does not install), same category as the templates: it ships with the package
@@ -186,6 +198,10 @@ testpaths = ["tests"]
 # GPU / real chain / real Docker (AGENTS.md §4: those only test argument assembly, not
 # a real run). Its purpose is not to "prove there are enough tests", it is "must not
 # go down".
-fail_under = 68.30
+# Sits on the measured value: 82.38 as of the burn-path tests (2026-08-21, when
+# payment/burn.py went 28.81% -> 100%). Slack between the gate and reality is not
+# safety margin, it is permission for exactly that many points of silent regression.
+# Raise it whenever a real run comes in higher.
+fail_under = 82.38
 precision = 2
 show_missing = true
