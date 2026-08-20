@@ -30,6 +30,55 @@ class ConfigError(Exception):
     """
 
 
+#: Chain limits that bracket `weight_interval_min`, read off netuid 80 on
+#: 2026-08-20: `weights_rate_limit = 100` blocks and `activity_cutoff = 5000`
+#: blocks, at roughly 12 s per block.
+WEIGHT_INTERVAL_FLOOR_MIN = 20
+ACTIVITY_CUTOFF_MIN = 16 * 60 + 40
+
+#: How much room to insist on under the cutoff. A validator has to survive a
+#: restart, a slow deploy, or one failed extrinsic without falling off the edge,
+#: and none of those announce themselves.
+CUTOFF_SAFETY_FACTOR = 3
+
+
+def check_weight_interval(minutes: int) -> list[str]:
+    """Check `weight_interval_min` against the two chain limits.
+
+    Returns problems in the shape `require_for_chain` collects them.
+
+    Both failure modes are silent, which is why this refuses rather than warns:
+
+    - **Too often** -- the extrinsic is rejected by `weights_rate_limit`, so no
+      weights land. The validator logs a submission; the chain ignores it.
+    - **Too rarely** -- past `activity_cutoff` the subnet treats the validator as
+      inactive. Its weights stop counting, so the miners it backs earn nothing,
+      and nothing reports an error: the process is running, the logs look normal,
+      the emission is simply gone.
+
+    The unit is minutes. Production's config carries the comment "(in blocks)",
+    which is wrong -- the code multiplies by 60 for seconds. Reading that comment
+    and "correcting" the value to a block count lands under the floor, which this
+    catches.
+    """
+    ceiling = ACTIVITY_CUTOFF_MIN // CUTOFF_SAFETY_FACTOR
+    if minutes < WEIGHT_INTERVAL_FLOOR_MIN:
+        return [
+            f"weight_interval_min = {minutes} is below the chain's rate limit "
+            f"({WEIGHT_INTERVAL_FLOOR_MIN} min = 100 blocks). Weights set sooner "
+            f"than that are rejected, so none land. The unit is minutes -- if you "
+            f"copied a value commented '(in blocks)', that comment is wrong."
+        ]
+    if minutes > ceiling:
+        return [
+            f"weight_interval_min = {minutes} leaves too little room under "
+            f"activity_cutoff ({ACTIVITY_CUTOFF_MIN} min = 5000 blocks). Past the "
+            f"cutoff your weights stop counting and the miners you back earn "
+            f"nothing, silently. Use {ceiling} or less."
+        ]
+    return []
+
+
 @dataclass
 class Settings:
     """The full content of one config file.
@@ -71,7 +120,24 @@ class Settings:
     hotkey: str = "default"
     hotkey_ss58: str = ""
     wallet_password: str = ""
-    weight_interval_min: int = 720
+    # How often the validator calls set_weights, in minutes.
+    #
+    # Bounded on both sides by the chain, and both bounds bite silently:
+    #
+    #   floor    weights_rate_limit = 100 blocks (~20 min). Set weights sooner and
+    #            the extrinsic is rejected, so none land that cycle.
+    #   ceiling  activity_cutoff = 5000 blocks (~16.7 h). Go quiet longer than that
+    #            and the subnet stops counting you: your weights are treated as
+    #            absent and the miners you back earn nothing.
+    #
+    # The default used to be 720 (12 h), leaving 4.7 h of headroom -- one missed
+    # cycle, or one restart during a deploy, puts you past the cutoff with nothing
+    # to tell you. 60 is 3x the floor (never rejected for being early) and leaves
+    # 16 cycles of margin under the ceiling. `check_weight_interval` enforces both.
+    #
+    # The unit is minutes. Production's config carries the comment "(in blocks)",
+    # which is wrong -- the code multiplies by 60 to get seconds.
+    weight_interval_min: int = 60
 
     # ─── Public HTTP resources ─────────────────────────
     control_json_url: str = ""
@@ -162,6 +228,7 @@ class Settings:
         # rounds. Reported separately, someone who mistyped the environment name
         # first gets "netuid missing", fills in netuid, and only then sees the
         # real problem -- one command re-run per problem just to learn the next.
+        missing += check_weight_interval(self.weight_interval_min)
         missing += environments.check_coherent(
             environment=self.environment,
             network=self.network,

@@ -168,6 +168,44 @@ def test_check_exit_code_follows_the_report(tmp_path: Path) -> None:
     assert check_command.report_result(tmp_path, ok_report) == 0
 
 
+def test_check_exit_code_is_nonzero_when_the_report_fails(tmp_path: Path) -> None:
+    """The half that costs money. Miners chain these as `check && submit`, so a
+    rejected checkpoint that still exits 0 sends them straight to `burn` -- and
+    the burn behind a rejected submission is not refunded."""
+    _make_file(tmp_path / "adapter_model.safetensors", BIG_ENOUGH)
+    (tmp_path / "adapter_config.json").write_text("{}", encoding="utf-8")
+
+    bad_report = check_command.check_directory(tmp_path)
+    assert not bad_report.ok
+    assert check_command.report_result(tmp_path, bad_report) == 1
+
+
+def test_check_accepts_a_repository_carrying_gitattributes(tmp_path: Path) -> None:
+    """Regression: a `.gitattributes` is what `git lfs track` leaves behind, so
+    essentially every real HF model repo has one. An earlier revision counted it
+    as an unexpected file and rejected 51 of 51 valid submissions."""
+    _make_file(tmp_path / "model.safetensors", BIG_ENOUGH)
+    _make_file(tmp_path / "assets/physical-intelligence/libero/norm_stats.json", 1024)
+    (tmp_path / ".gitattributes").write_text(
+        "*.safetensors filter=lfs diff=lfs merge=lfs -text\n", encoding="utf-8"
+    )
+    (tmp_path / "README.md").write_text("# model card\n", encoding="utf-8")
+
+    report = check_command.check_directory(tmp_path)
+    assert report.ok, [issue.code for issue in report.errors]
+
+
+def test_check_flags_a_repository_of_lfs_pointers(tmp_path: Path) -> None:
+    """Cloning without `git lfs pull` leaves ~130-byte pointer files with the
+    right names. Every per-file rule passes; only the total size gives it away."""
+    _make_file(tmp_path / "model.safetensors", 133)
+    _make_file(tmp_path / "assets/physical-intelligence/libero/norm_stats.json", 1024)
+
+    report = check_command.check_directory(tmp_path)
+    assert not report.ok
+    assert any(issue.code == "total_size_too_small" for issue in report.errors)
+
+
 def test_check_on_missing_directory_returns_error(tmp_path: Path) -> None:
     args = argparse.Namespace(path=str(tmp_path / "nope"), round=0)
     assert check_command.run(args) == 1

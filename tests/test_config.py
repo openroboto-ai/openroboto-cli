@@ -18,6 +18,12 @@ from openroboto.config import (
     fetch_control,
 )
 from openroboto.config import control as control_module
+from openroboto.config.settings import (
+    ACTIVITY_CUTOFF_MIN,
+    CUTOFF_SAFETY_FACTOR,
+    WEIGHT_INTERVAL_FLOOR_MIN,
+    check_weight_interval,
+)
 
 MINER_YAML = """
 subnet:
@@ -315,3 +321,70 @@ def test_local_pointing_at_a_hosted_environment_is_a_contradiction() -> None:
     )
     with pytest.raises(ConfigError):
         cfg.require_for_chain()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# weight_interval_min -- bounded on both sides by the chain
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_weight_interval_default_leaves_real_margin() -> None:
+    """The shipped default has to be safe for someone who never touches it.
+
+    It used to be 720 (12 h) against an activity_cutoff of ~16.7 h: one missed
+    cycle, or a restart during a deploy, and the validator is past the cutoff.
+    Past it, its weights stop counting and the miners it backs earn nothing --
+    with no error anywhere, because nothing failed.
+    """
+    interval = Settings().weight_interval_min
+
+    assert check_weight_interval(interval) == []
+    assert interval * CUTOFF_SAFETY_FACTOR <= ACTIVITY_CUTOFF_MIN
+    assert interval >= WEIGHT_INTERVAL_FLOOR_MIN
+
+
+def test_interval_under_the_rate_limit_is_refused() -> None:
+    """Below `weights_rate_limit` the extrinsic is rejected and no weights land.
+
+    This is the shape someone lands in by trusting production's config comment,
+    which says "(in blocks)" while the code reads minutes: "correcting" 20
+    minutes to 20 blocks gives ~4 minutes.
+    """
+    problems = check_weight_interval(4)
+
+    assert problems and "rate limit" in problems[0]
+    # The error has to name the unit, or the next attempt is the same mistake.
+    assert "minutes" in problems[0]
+
+
+def test_interval_too_close_to_the_cutoff_is_refused() -> None:
+    """The old default is now refused outright, not merely discouraged."""
+    problems = check_weight_interval(720)
+
+    assert problems and "activity_cutoff" in problems[0]
+    # Tell them what to use; "too big" alone makes them guess.
+    assert str(ACTIVITY_CUTOFF_MIN // CUTOFF_SAFETY_FACTOR) in problems[0]
+
+
+def test_the_bounds_themselves_are_reachable() -> None:
+    """Exactly on the floor and exactly on the ceiling both pass.
+
+    A check that also rejects its own stated bounds sends people hunting for a
+    value that satisfies an error message that cannot be satisfied.
+    """
+    assert check_weight_interval(WEIGHT_INTERVAL_FLOOR_MIN) == []
+    assert check_weight_interval(ACTIVITY_CUTOFF_MIN // CUTOFF_SAFETY_FACTOR) == []
+
+
+def test_require_for_chain_reports_the_interval_with_everything_else() -> None:
+    """Reported together with the other problems, not in a second round.
+
+    One command re-run per problem just to learn the next one is the experience
+    this check exists to avoid.
+    """
+    cfg = Settings.from_mapping(
+        {"subnet": {"netuid": 80, "network": "finney"}, "weight_interval_min": 720}
+    )
+    with pytest.raises(ConfigError) as excinfo:
+        cfg.require_for_chain()
+    assert "activity_cutoff" in str(excinfo.value)

@@ -1,0 +1,122 @@
+name: E2E (testnet 313)
+
+# Release gate, NOT a pull-request check. It drives the real miner flow against
+# Bittensor testnet and a live backend: check -> upload -> burn -> announce ->
+# the chain scanner admits it (steps 1-5 of the backend repo's
+# `docs/上线验收计划.md` S1). Steps 6-10 need a GPU worker and stay out.
+#
+# Why it is not part of ci.yml:
+#   - it spends testnet TAO on every run, so per-PR execution drains the wallet
+#     and then fails on an empty balance — a failure that reads like a code bug
+#     and is not one;
+#   - it depends on a chain RPC and on HuggingFace, so a flaky third party turns
+#     someone's unrelated PR red, which is how people learn to ignore red;
+#   - AGENTS.md §4 bans skips in the unit suite precisely so network-dependent
+#     cases cannot sneak in there. This file is where they belong instead.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# 🔴 NOT WIRED UP YET — one blocker, and it is not in this repo.
+#
+# The script needs a backend that speaks the ADR 02 envelope (`{data, meta}`).
+# Measured 2026-08-20: `api-dev.openroboto.ai` still runs the old backend and is
+# pointed at MAINNET, not testnet 313:
+#
+#     GET /api/v1/submissions/history
+#       -> {"success": true, "submissions": [...]}     old shape, no data/meta
+#       -> commit_block 8880580, uid 250               mainnet; 313 has 24 neurons
+#
+# so `fetch_submissions()` fails validation before the run even starts. Until the
+# rebuilt backend is deployed to dev and pointed at 313, a scheduled run here
+# could only ever be red.
+#
+# TO ENABLE, once that deployment lands:
+#   1. uncomment the `schedule:` trigger below;
+#   2. set the repository variable E2E_BACKEND_URL to the new dev backend;
+#   3. set the repository variable E2E_CONTROL_JSON to the control.json that
+#      backend's BURN_RATE_TAO agrees with — they are independent settings, and
+#      when they disagree every miner burns the wrong amount and is not refunded
+#      (that is a real failure this script hit on 2026-08-20, not a hypothetical);
+#   4. add the four secrets listed under `env:` below.
+#
+# `workflow_dispatch` is left on so the file can be exercised by hand the day the
+# backend is ready, without editing anything first.
+# ─────────────────────────────────────────────────────────────────────────────
+on:
+  workflow_dispatch:
+  # Nightly, not per-PR: one burn per run is affordable daily and is not
+  # affordable per push. Uncomment together with the variables above.
+  # schedule:
+  #   - cron: "17 3 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  # Never two at once: both runs would use the same wallet, and the second
+  # `announce` would land outside the first burn's 50-block window.
+  group: e2e-testnet
+  cancel-in-progress: false
+
+env:
+  UV_VERSION: "0.11.18"
+
+jobs:
+  e2e:
+    name: miner flow on testnet 313
+    runs-on: ubuntu-latest
+    # Chain round trips dominate: the burn waits for inclusion, and the scanner's
+    # own cycle is 60s, which the script polls for up to 4 minutes.
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - run: uv sync --locked
+
+      # The script drives the installed `openroboto` entry point through a
+      # subprocess, so it has to be on PATH — importing the package would skip
+      # the exit codes, and those are half of what this gate is checking.
+      - name: Run the miner flow
+        env:
+          E2E_BACKEND_URL: ${{ vars.E2E_BACKEND_URL }}
+          E2E_CONTROL_JSON: ${{ vars.E2E_CONTROL_JSON }}
+          E2E_NETUID: "313"
+          E2E_NETWORK: "test"
+          E2E_HF_TOKEN: ${{ secrets.E2E_HF_TOKEN }}
+          E2E_HF_USERNAME: ${{ secrets.E2E_HF_USERNAME }}
+          # The wallet is rebuilt from these two on every run, into a temporary
+          # directory the script deletes on exit. A testnet-only wallet: do not
+          # put a coldkey here that holds anything on finney.
+          E2E_COLDKEY_MNEMONIC: ${{ secrets.E2E_COLDKEY_MNEMONIC }}
+          E2E_HOTKEY_MNEMONIC: ${{ secrets.E2E_HOTKEY_MNEMONIC }}
+        run: uv run python scripts/e2e_testnet.py
+
+      # The wallet pays for every run, so an empty balance is the failure mode
+      # this gate will actually hit first, and "burn failed" does not say so.
+      - name: Report the remaining balance
+        if: always()
+        env:
+          E2E_COLDKEY_MNEMONIC: ${{ secrets.E2E_COLDKEY_MNEMONIC }}
+        run: |
+          uv run python - <<'PY'
+          import os
+
+          import bittensor as bt
+
+          keypair = bt.Keypair.create_from_mnemonic(os.environ["E2E_COLDKEY_MNEMONIC"])
+          balance = bt.Subtensor(network="test").get_balance(keypair.ss58_address)
+          print(f"testnet balance: {balance}")
+          # ~0.011 TAO a run (0.01 fee plus transaction costs); below this the next
+          # run fails inside `burn`, which reads as a code failure and is not one.
+          if balance.tao < 0.1:
+              print("::warning::top the e2e wallet up — fewer than ~9 runs left")
+          PY

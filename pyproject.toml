@@ -123,6 +123,10 @@ ignore = ["RUF001", "RUF002", "RUF003"]
 # constraints of this package (see the note in [tool.mypy]).
 "src/openroboto/templates/*" = ["T20", "B", "RUF"]
 "src/openroboto/runner/*" = ["T20", "B", "RUF", "E", "UP", "I"]
+# The release-gate script's whole output is a progress report on stdout, same as
+# the command layer. Listed here so it stays clean if the lint scope ever widens
+# past `src tests` -- today `scripts/lint.sh` does not reach it.
+"scripts/*.py" = ["T20"]
 
 [tool.mypy]
 strict = true

@@ -28,7 +28,13 @@ backend:
                                    # The validator never needs a write key.
 
 # ─── Weight submission ──────────────────────────────────────
-weight_interval_min: 720           # how often to call set_weights, in minutes
+weight_interval_min: 60            # how often to call set_weights, in MINUTES.
+                                   # Floor 20 (chain rate limit, 100 blocks) --
+                                   # sooner and the extrinsic is rejected.
+                                   # Ceiling 333 (activity_cutoff, 5000 blocks) --
+                                   # go quiet longer and your weights stop
+                                   # counting and your miners earn nothing.
+                                   # Both are refused at startup.
 
 # ─── Logging ────────────────────────────────────────────────
 log_level: INFO
