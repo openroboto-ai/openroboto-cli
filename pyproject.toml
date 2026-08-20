@@ -186,6 +186,6 @@ testpaths = ["tests"]
 # GPU / real chain / real Docker (AGENTS.md §4: those only test argument assembly, not
 # a real run). Its purpose is not to "prove there are enough tests", it is "must not
 # go down".
-fail_under = 64.46
+fail_under = 68.30
 precision = 2
 show_missing = true
