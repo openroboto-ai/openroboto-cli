@@ -1,75 +1,29 @@
-"""Weight normalization and on-chain submission for external validators.
+"""Sending weights on chain, for external validators.
 
-⚠️ **Red line: u16 normalization.** The expression in `normalize_weights()` is the
-last conversion step before on-chain emissions; the old `validator.py` formulation
-was preserved verbatim during the move — keep only positive weights, first normalize
-to sum=1.0, then truncate with `int(w * 65535)` (not rounding). Changing it to
-`round()` would shift every miner's weight by 1 u16 unit, which no longer matches
-the expected value the backend computes.
+The normalisation itself is **not here** -- it lives in
+`openroboto_protocol.weights`, shared with the backend's chain-writer. That is
+the whole point of the protocol package: both sides can be shown to install the
+same code, rather than being observed to agree.
+
+⚠️ Do not reintroduce a local `normalize_weights`. Two copies of an expression
+whose floating-point shape *is* the behaviour is how "a cleanup in one of them,
+months apart, silently changes who gets paid" happens. The red-line reasoning
+(strict `> 0`, share-then-scale, `int()` truncation) is documented there.
+
+What stays here is what genuinely differs between the two callers: the
+`set_weights` call and how this SDK's return shapes are read.
 """
 
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
 from typing import Any
 
+from openroboto_protocol.weights import U16_MAX, NormalizedWeights, normalize_weights
+
+__all__ = ["U16_MAX", "NormalizedWeights", "normalize_weights", "set_weights_on_chain"]
+
 logger = logging.getLogger(__name__)
-
-U16_MAX = 65535
-"""Fixed-point ceiling for Bittensor weights."""
-
-
-@dataclass(frozen=True)
-class NormalizedWeights:
-    """Normalization result.
-
-    `uids` and `weights` correspond one-to-one, and their order is the order
-    submitted on chain.
-    """
-
-    uids: list[int]
-    weights: list[int]
-    detail: list[str]
-    """Per-entry detail, written straight into the log.
-
-    When weights are set wrong, these lines are the only evidence left.
-    """
-
-
-def normalize_weights(
-    weights_raw: dict[str, float], hotkeys: list[str]
-) -> NormalizedWeights:
-    """Convert the backend's `{hotkey: weight}` into the `(uid, u16)` the chain wants.
-
-    Args:
-        weights_raw: raw weights from the backend `/api/weights`, keyed by hotkey.
-        hotkeys: the hotkey list from the metagraph; the index is the uid.
-    """
-    positive: dict[int, float] = {}
-    detail: list[str] = []
-    for uid, hotkey in enumerate(hotkeys):
-        weight = weights_raw.get(hotkey, 0.0)
-        if weight > 0:
-            positive[uid] = weight
-            detail.append(f"  uid={uid:3d} hotkey={hotkey[:12]}... raw={weight:.6f}")
-
-    if not positive:
-        return NormalizedWeights([], [], ["no positive weights"])
-
-    total = sum(positive.values())
-    normed = {uid: weight / total for uid, weight in positive.items()}
-
-    uids = list(normed.keys())
-    # Red-line expression: truncate, not round.
-    weights = [int(w * U16_MAX) for w in normed.values()]
-
-    detail.append(f"  raw total={total:.6f}, normalized to sum=1.0")
-    detail.extend(
-        f"  → uid={uid:3d} u16={w:5d} ({normed[uid]:.6f})"
-        for uid, w in zip(uids, weights, strict=True)
-    )
-    return NormalizedWeights(uids, weights, detail)
 
 
 def set_weights_on_chain(
