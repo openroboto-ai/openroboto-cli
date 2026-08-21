@@ -92,7 +92,10 @@ DEFAULT_LIMIT = 20
 
 HISTORY_PATH = "/api/v1/submissions/history"
 REJECTIONS_PATH = "/api/v1/scan-rejections"
-WEIGHTS_PATH = "/api/weights"
+WEIGHTS_PATH = "/api/v1/weights"
+#: The pre-v1 address. Still live, and still the only one an
+#: un-migrated backend has -- see `fetch_weights`.
+WEIGHTS_PATH_LEGACY = "/api/weights"
 
 KEY_HINT = (
     "\n  This endpoint needs an API key -- validators copy public_key from "
@@ -194,6 +197,11 @@ def fetch_weights(base_url: str, public_key: str = "") -> Weights:
     """Fetch the current weights `{hotkey: share}`. Used by validators,
     requires public_key.
 
+    Prefers `/api/v1/weights` and falls back to `/api/weights`. The fallback is
+    not defensiveness about a hypothetical: production runs the pre-v1 backend
+    today, and external validators point at it. Removing the fallback is safe
+    only once no reachable backend serves the old address alone.
+
     **This endpoint accepts both shapes** (the envelope's `data`, and a bare
     `{hotkey: share}`): ADR 02 §8.5 explicitly says whether `/api/weights`
     should be wrapped in an envelope "is recommended to be decided
@@ -203,12 +211,25 @@ def fetch_weights(base_url: str, public_key: str = "") -> Weights:
     silently**, with nothing but a single warning line in the log. Accepting
     one extra shape is two lines of code.
     """
-    body = _decode(_get(base_url, WEIGHTS_PATH, api_key=public_key), WEIGHTS_PATH)
+    try:
+        raw = _get(base_url, WEIGHTS_PATH, api_key=public_key)
+        path = WEIGHTS_PATH
+    except BackendError:
+        # Fall back rather than fail. The backend being replaced serves only the
+        # pre-v1 address, and it is what production is running right now, so a
+        # validator that insisted on v1 would stop setting weights the moment it
+        # was upgraded ahead of the backend. Emissions stopping is the failure
+        # this whole function is written to avoid.
+        raw = _get(base_url, WEIGHTS_PATH_LEGACY, api_key=public_key)
+        path = WEIGHTS_PATH_LEGACY
+
+    body = _decode(raw, path)
     data = body.get("data", body) if isinstance(body, dict) else body
+    # v1 wraps it once more: {"data": {"weights": {...}}, "meta": {...}}.
+    if isinstance(data, dict) and "weights" in data:
+        data = data["weights"]
     if not isinstance(data, dict):
-        raise BackendError(
-            f"{WEIGHTS_PATH} returned {type(data).__name__}, expected an object"
-        )
+        raise BackendError(f"{path} returned {type(data).__name__}, expected an object")
     return {str(k): float(v) for k, v in data.items() if isinstance(v, (int, float))}
 
 

@@ -288,3 +288,54 @@ def test_weights_accept_the_envelope_too(monkeypatch: pytest.MonkeyPatch) -> Non
     and failing to parse the weights means emissions stall network-wide."""
     _capture(monkeypatch, {"data": {"5A": 0.9}, "meta": {"request_id": REQUEST_ID}})
     assert backend_api.fetch_weights("https://api.example", "pk") == {"5A": 0.9}
+
+
+def test_weights_prefers_v1(monkeypatch: pytest.MonkeyPatch) -> None:
+    """v1 first. The CLI called two v1 endpoints and one pre-v1 one, and the
+    pre-v1 one was the only thing a validator actually needs -- because v1 had
+    no weights endpoint at all until 2026-08-22. A validator that can only be
+    served by the compatibility layer is a validator that stops working the day
+    that layer is switched off, which is the layer's whole stated purpose."""
+    seen: list[str] = []
+
+    def fake_get(base_url: str, path: str, **kw: object) -> bytes:
+        seen.append(path)
+        return b'{"data": {"weights": {"5A": 0.9, "5B": 0.1}}, "meta": {}}'
+
+    monkeypatch.setattr(backend_api, "_get", fake_get)
+
+    assert backend_api.fetch_weights("http://x") == {"5A": 0.9, "5B": 0.1}
+    assert seen == ["/api/v1/weights"], "should not have touched the old address"
+
+
+def test_weights_falls_back_to_the_old_address(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """🔴 The backend being replaced serves only `/api/weights`, and it is what
+    production runs today. A validator upgraded ahead of its backend must keep
+    setting weights -- emissions stopping silently is the exact failure this
+    function is written to avoid."""
+    seen: list[str] = []
+
+    def fake_get(base_url: str, path: str, **kw: object) -> bytes:
+        seen.append(path)
+        if path == backend_api.WEIGHTS_PATH:
+            raise backend_api.BackendError("404")
+        return b'{"5A": 0.9, "5B": 0.1}'
+
+    monkeypatch.setattr(backend_api, "_get", fake_get)
+
+    assert backend_api.fetch_weights("http://x") == {"5A": 0.9, "5B": 0.1}
+    assert seen == ["/api/v1/weights", "/api/weights"]
+
+
+def test_weights_unwraps_only_one_level_of_weights_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The bare shape has hotkeys at the top level. Unwrapping a `weights` key
+    unconditionally would eat a miner whose hotkey happened to be that string --
+    it cannot be, hotkeys are ss58, but the check is cheap and the failure mode
+    (one miner silently paid nothing) is not visible in any response."""
+    monkeypatch.setattr(backend_api, "_get", lambda *a, **k: b'{"5A": 0.9, "5B": 0.1}')
+
+    assert backend_api.fetch_weights("http://x") == {"5A": 0.9, "5B": 0.1}
