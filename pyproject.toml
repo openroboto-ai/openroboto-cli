@@ -1,6 +1,6 @@
 [project]
 name = "openroboto"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "OpenRoboto subnet (Bittensor netuid 80) CLI — everything a miner or external validator types."
 readme = "README.md"
 license = "MIT"

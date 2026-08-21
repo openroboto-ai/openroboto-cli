@@ -231,7 +231,7 @@ Both pre-releases and stable releases go to PyPI, and the version number is what
 separates them:
 
 ```bash
-git tag v0.1.0a1 && git push origin v0.1.0a1    # internal testing build
+git tag v0.1.0a2 && git push origin v0.1.0a2    # internal testing build
 git tag v0.1.0   && git push origin v0.1.0      # stable
 ```
 
@@ -246,7 +246,7 @@ thing standing between a typo and every miner.
 Testers install a pre-release by pinning it exactly — no extra index flags:
 
 ```bash
-pip install openroboto==0.1.0a1
+pip install openroboto==0.1.0a2
 ```
 
 pip does not pick pre-releases when a stable release exists, so a miner running
