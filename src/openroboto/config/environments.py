@@ -69,13 +69,14 @@ DEV = Environment(
 )
 """Testnet. TAO comes from the faucet, so a wrong burn costs nothing.
 
-⚠️ As of 2026-08-19 the deployed dev backend is still configured for
-`network: finney` / `netuid: 80` -- it watches mainnet, and is a sandbox in name
-only. This entry describes where dev is going, not where it is: it becomes true
-when the rebuilt backend is deployed there pointed at 313. Until then,
-`environment: dev` will fail `check_coherent()` against a mainnet netuid, which
-is the correct outcome -- it is exactly the combination that burns mainnet TAO at
-the dev fee.
+✅ True as of 2026-08-21: the rebuilt backend is deployed at
+`api-dev.openroboto.ai` with `NETWORK=test` / `NETUID=313`, and its
+`control.json` burn rate matches production's, so a burn verified here means the
+same thing on mainnet.
+
+(The note that used to sit here said dev still watched mainnet and that this
+entry described where dev was going rather than where it was. That stopped being
+true when the rebuilt backend was deployed and pointed at 313.)
 """
 
 LOCAL = Environment(

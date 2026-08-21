@@ -137,14 +137,23 @@ def resolve_wallet(wallet_root: Path) -> tuple[str, str]:
 def write_config(workspace: Path, hotkey_ss58: str, wallet_name: str) -> Path:
     """Generate miner.yaml from the environment.
 
-    `environment: local` is the only preset that does not pin a network, and the
-    CLI refuses to run when the pieces disagree -- which is the behaviour we want
-    here, since a testnet netuid with a production control.json is exactly the
-    mix that burns real TAO at the wrong rate.
+    `environment: dev` -- the preset for testnet 313 against
+    `api-dev.openroboto.ai`, which is exactly what this script drives.
+
+    It used to write `environment: local`, on the reasoning that local is the
+    only preset that pins no network. That was true and still failed, because
+    `local` also refuses to point at a hosted host: "environment=local, yet
+    backend.url points at a hosted environment" is a contradiction, and
+    `check_coherent()` said so before spending anything (2026-08-21, the first
+    real run of this workflow -- it failed at step 3 of 5 with the HF repo
+    already uploaded, and cleaned that repo up on the way out).
+
+    That refusal was correct. The fix is to name the environment we are actually
+    in, not to weaken the check.
     """
     config = workspace / "miner.yaml"
     config.write_text(
-        "environment: local\n"
+        "environment: dev\n"
         "subnet:\n"
         f"  network: {env('E2E_NETWORK', 'test')}\n"
         f"  netuid: {env('E2E_NETUID', '313')}\n"
