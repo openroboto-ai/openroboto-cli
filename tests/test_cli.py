@@ -75,3 +75,31 @@ def test_known_errors_become_one_line_messages(
     captured = capsys.readouterr()
     assert "openroboto init" in captured.err
     assert "Traceback" not in captured.err
+
+
+def test_version_string_matches_pyproject() -> None:
+    """🔴 The version lives in two files and both are read by something.
+
+    `pyproject.toml` is what pip installs and resolves against;
+    `openroboto.__version__` is what the release workflow compares the git tag
+    to, and what `--version` prints. Bumping one and not the other is not
+    caught by any other test.
+
+    2026-08-21: bumped pyproject to 0.1.0a2, tagged v0.1.0a2, and the release
+    failed at the tag-versus-package check with `__version__` still on 0.1.0a1
+    -- after the tag was already pushed, which is the one thing about a release
+    that cannot be taken back cleanly.
+    """
+    import tomllib
+    from pathlib import Path
+
+    from openroboto import __version__
+
+    pyproject = Path(__file__).parent.parent / "pyproject.toml"
+    parsed = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+    declared = parsed["project"]["version"]
+
+    assert __version__ == declared, (
+        f"openroboto.__version__ is {__version__} but pyproject.toml says "
+        f"{declared} -- the release workflow compares the tag against the former"
+    )
