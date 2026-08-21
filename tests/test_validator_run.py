@@ -255,8 +255,15 @@ def test_hotkeys_missing_from_the_metagraph_are_dropped(one_cycle: Any) -> None:
 
     Silent by nature -- the caller sees a valid weight table either way -- so it
     is pinned here rather than assumed.
+
+    ⚠️ The proportions matter now. This used to drop 3.0 out of 4.0, three
+    quarters of the round, which no real snapshot ever does: a miner holds at
+    most 0.07. Since `set_weights_on_chain` refuses when most of the weight
+    goes missing, those numbers described a case that must be blocked while
+    claiming to describe one that must go through. Kept at a share a miner
+    could actually hold.
     """
-    _, subtensor = one_cycle(weights={"a": 1.0, "gone": 3.0}, hotkeys=["a", "b"])
+    _, subtensor = one_cycle(weights={"a": 1.0, "gone": 0.05}, hotkeys=["a", "b"])
 
     (call,) = subtensor.calls
     assert call["uids"] == [0]
@@ -343,3 +350,54 @@ def test_without_once_the_loop_keeps_going(monkeypatch: pytest.MonkeyPatch) -> N
         validator.run(argparse.Namespace(config="validator.yaml", once=False))
 
     assert cycles == 2, "the loop stopped on its own instead of continuing"
+
+
+def test_losing_the_burn_address_sends_nothing() -> None:
+    """🔴 Most of the weight belonging to absent hotkeys means no extrinsic.
+
+    A normal snapshot is 0.9 on the burn address and 0.1 split across the top
+    three miners. If the burn address is not on this subnet, normalisation
+    renormalises the remaining 0.1 to 1.0 and the whole round's emission goes
+    to miners rather than being destroyed -- a tenfold payout produced by a
+    perfectly ordinary-looking extrinsic.
+
+    Observed on testnet 313 on 2026-08-21: a backend still publishing
+    mainnet's burn address produced `uid=23 u16=65535`, one miner taking
+    everything, with one warning line and a successful transaction.
+
+    An external validator cannot know which address is the burn target, so the
+    test is on how much moved, not on which address moved.
+    """
+    subtensor = FakeSubtensor()
+
+    got = set_weights_on_chain(
+        subtensor,
+        object(),
+        80,
+        {"burn": 0.9, "a": 0.07, "b": 0.02, "c": 0.01},
+        ["a", "b", "c"],  # burn is not registered here
+    )
+
+    assert got is False
+    assert subtensor.calls == [], "0.9 of the weight vanished and it sent anyway"
+
+
+def test_a_deregistered_miner_does_not_stop_the_round() -> None:
+    """The other side of the same rule: miners come and go, and that is normal.
+
+    A miner holds at most 0.07, so dropping one leaves the burn address in
+    place and the round should proceed. A guard that also blocked this would
+    stop emissions every time someone deregistered.
+    """
+    subtensor = FakeSubtensor()
+
+    got = set_weights_on_chain(
+        subtensor,
+        object(),
+        80,
+        {"burn": 0.9, "a": 0.07, "b": 0.02, "c": 0.01},
+        ["burn", "a", "b"],  # c deregistered
+    )
+
+    assert got is True
+    assert len(subtensor.calls) == 1

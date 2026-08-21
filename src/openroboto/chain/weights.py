@@ -23,6 +23,21 @@ from openroboto_protocol.weights import U16_MAX, NormalizedWeights, normalize_we
 
 __all__ = ["U16_MAX", "NormalizedWeights", "normalize_weights", "set_weights_on_chain"]
 
+#: Refuse to send when this fraction of the incoming share belonged to hotkeys
+#: absent from the metagraph.
+#:
+#: A normal snapshot puts 0.9 on the burn address and splits 0.1 across the top
+#: three miners. So a deregistered miner costs at most 0.07, while losing the
+#: burn address costs 0.9 -- and losing it means the emission that should have
+#: been destroyed is paid out to miners instead, ten times over, with a
+#: perfectly ordinary-looking extrinsic. 0.5 sits between the two with room on
+#: both sides.
+#:
+#: Refusing costs one round: the chain keeps the previous weights, which were
+#: correct. Sending costs the round's entire emission, and is only visible
+#: afterwards.
+REFUSE_ABOVE_DROPPED_SHARE = 0.5
+
 logger = logging.getLogger(__name__)
 
 
@@ -37,6 +52,9 @@ def set_weights_on_chain(
 
     If there are no positive weights, no transaction is sent (sending one would
     only waste the fee).
+
+    Nothing is sent either when most of the incoming share belonged to hotkeys
+    that are not on this subnet -- see `REFUSE_ABOVE_DROPPED_SHARE`.
     """
     normalized = normalize_weights(weights_raw, hotkeys)
     for line in normalized.detail:
@@ -44,6 +62,21 @@ def set_weights_on_chain(
 
     if not normalized.uids:
         logger.warning("[set_weights] no positive weights, skipping this round")
+        return False
+
+    if normalized.dropped_share >= REFUSE_ABOVE_DROPPED_SHARE:
+        logger.error(
+            "[set_weights] %.0f%% of the incoming weight belongs to hotkeys that are "
+            "not on netuid %d, and would be redistributed to the ones that are. "
+            "Refusing to send. The chain keeps last round's weights.",
+            normalized.dropped_share * 100,
+            netuid,
+        )
+        logger.error(
+            "[set_weights] This usually means the backend is publishing weights for "
+            "a different subnet than the one this validator is pointed at. Check "
+            "`netuid` and `network` in the config against the backend's control.json."
+        )
         return False
 
     logger.info(
