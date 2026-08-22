@@ -251,8 +251,21 @@ def test_announce_refuses_once_the_burn_window_has_passed(
 
     assert ok is False
     assert captured == []  # not a single commitment was sent
-    err = capsys.readouterr().err
-    assert "51" in err and "50" in err  # distance and window; both numbers must be said
+    out = capsys.readouterr()
+    assert "51" in out.err and "50" in out.err  # distance and window; both must be said
+
+    # 🔴 The last thing printed must not claim a commitment is being sent.
+    #
+    # These lines used to run in the other order: "📡 committing on chain" was
+    # printed before the window was checked, so a refused announce ended with
+    # that line on screen while no extrinsic existed. The exit code was already
+    # 1 -- correct for a script, useless for a person, who reads the last line.
+    # Cost ten minutes of hunting through the chain, the database and the ingest
+    # logs for a commitment that had been deliberately not sent.
+    assert "committing on chain" not in out.out, (
+        "refused to announce, but the output still says it is committing"
+    )
+    assert "nothing was sent on chain" in out.out
 
 
 def test_announce_allows_exactly_at_the_window_edge(

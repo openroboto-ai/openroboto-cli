@@ -69,14 +69,24 @@ def perform_announce(settings: Settings, round_num: int, state: dict[str, Any]) 
         wallet = open_wallet(settings)
         current_block = subtensor.get_current_block()
         block_hash = subtensor.get_block_hash(current_block)
+        # The window check comes first, and nothing is printed before it.
+        #
+        # These two lines used to be the other way round, so a refused announce
+        # ended with "📡 committing on chain" as the last thing on screen while
+        # no extrinsic was ever sent. The exit code was already 1, which is what
+        # a script reads -- but a person reads the last line, and that line said
+        # the opposite of what happened. Spent ten minutes checking the chain,
+        # then the database, then the ingest logs, for a commitment that had
+        # been deliberately not sent.
+        burn_block = int(state.get("burn_block", 0) or 0)
+        if not _burn_window_ok(settings, burn_block, current_block):
+            say("   → nothing was sent on chain, and no transaction fee was paid")
+            return False
+
         say(
             f"📡 committing on chain | round={round_num} "
             f"repo={hf_repo_id} block={current_block}"
         )
-
-        burn_block = int(state.get("burn_block", 0) or 0)
-        if not _burn_window_ok(settings, burn_block, current_block):
-            return False
 
         payload = build_payload(
             hotkey_ss58=str(state.get("hotkey_ss58", "")) or wallet.hotkey.ss58_address,
