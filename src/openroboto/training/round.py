@@ -179,7 +179,14 @@ def train_round(
     proof = {
         "miner_uid": hotkey,
         "dataset_hash": file_hash(train_json_path),
-        "adapter_hash": directory_hash(Path(output_dir) / "adapter"),
+        # Hashes the whole output directory, which is the checkpoint root. It
+        # used to hash `output_dir/adapter` -- the subdirectory the bundled
+        # strategies wrote a LoRA adapter into, a layout that is rejected before
+        # evaluation and is no longer written by anything. The **key** keeps its
+        # name: `training_proof.json` is uploaded to the miner's HF repo, and
+        # renaming a field there breaks whoever is reading it (no consumer in
+        # our own four repositories, which is not the same as no consumer).
+        "adapter_hash": directory_hash(Path(output_dir)),
         "base_model_hash": (
             directory_hash(Path(checkpoint_path)) if checkpoint_path else ""
         ),

@@ -27,6 +27,7 @@ from openroboto.commands import check as check_command
 from openroboto.commands import doctor as doctor_command
 from openroboto.commands import init as init_command
 from openroboto.commands import status as status_command
+from openroboto.commands import train as train_command
 from openroboto.config import ConfigError, ControlFetchError, Settings
 from openroboto.huggingface import build_repo_id, commit_sha_from_url
 from openroboto.preflight import (
@@ -259,14 +260,72 @@ def test_check_names_the_directory_that_should_have_been_uploaded(
     _make_file(jax / "run/params/ocdbt.process_0/d/0001", 1024)
     assert check_command.weights_subdir(jax) == "run"
 
+    # "nothing was exported" and "it is already at the top" are different
+    # answers, and `train` acts on the difference -- see the tests below.
     empty = tmp_path / "empty"
     empty.mkdir()
-    assert check_command.weights_subdir(empty) == ""
+    assert check_command.weights_subdir(empty) is None
     assert check_command.nesting_advice(empty) == []
 
     flat = tmp_path / "flat"
     _make_file(flat / "model.safetensors", 1024)
     assert check_command.weights_subdir(flat) == ""
+
+
+# ─── train: what the run actually produced ───────────────────
+
+
+def test_train_says_nothing_was_exported_when_there_are_no_weights(
+    tmp_path: Path,
+) -> None:
+    """The state the bundled strategies leave behind: they exercise the
+    pipeline, they do not train, and they export no checkpoint.
+
+    The old text told every miner to "merge the adapter into the π0.5 base",
+    which is wrong twice: the LingBot competitions use no LoRA at all, and
+    nothing merges anything anywhere (task `cli-merge-decision`).
+    """
+    (tmp_path / "metrics.json").write_text("{}", encoding="utf-8")
+
+    lines = "\n".join(train_command.export_advice(tmp_path, 7))
+
+    assert "no model weights" in lines
+    assert "merge" in lines  # says there is none, rather than telling them to
+    assert "openroboto check" in lines
+    # must not send them on to spend money
+    assert "openroboto submit" not in lines
+
+
+def test_train_names_the_nested_directory_the_vendor_export_produces(
+    tmp_path: Path,
+) -> None:
+    """The expensive one: the official LingBot export lands three levels down,
+    one deeper than the evaluator searches, so an unchanged upload is silently
+    unevaluable. Catching it here is the whole point of the task -- `check`
+    catches it too, but a miner can go straight to `submit`.
+    """
+    nested = "checkpoints/global_step_50000/hf_ckpt"
+    _make_file(tmp_path / nested / "model-00001-of-00006.safetensors", 1024)
+
+    lines = "\n".join(train_command.export_advice(tmp_path, 7))
+
+    # the miner has to be able to copy the line, not decode "invalid layout"
+    assert f"openroboto check {tmp_path / nested}" in lines
+    assert f"openroboto submit --round 7 --output-dir {tmp_path / nested}" in lines
+
+
+def test_train_points_at_check_when_the_checkpoint_is_at_the_top(
+    tmp_path: Path,
+) -> None:
+    """The good case still stops at `check`: the verdict is the protocol
+    package's, not this command's."""
+    _make_file(tmp_path / "model.safetensors", 1024)
+
+    lines = "\n".join(train_command.export_advice(tmp_path, 7))
+
+    assert f"openroboto check {tmp_path}" in lines
+    assert "openroboto submit --round 7" in lines
+    assert "⚠️" not in lines
 
 
 def test_check_on_missing_directory_returns_error(tmp_path: Path) -> None:

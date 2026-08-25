@@ -252,13 +252,21 @@ def _depth(path: Path) -> int:
     return len(path.parts)
 
 
-def weights_subdir(directory: Path) -> str:
-    """Where the weights actually sit, relative to `directory` (`""` when they
-    are already at the top).
+def weights_subdir(directory: Path) -> str | None:
+    """Where the weights actually sit, relative to `directory`.
 
-    Only used to turn "nested too deep" into a path the miner can copy. The
-    shallowest hit wins, matching the evaluator: it takes the first checkpoint
-    it finds while descending.
+    Three answers, and the miner needs all three kept apart:
+    `""` they are already at the top, `"a/b"` they are in that subdirectory,
+    `None` there are no weight files anywhere under `directory` at all.
+
+    The last one used to be `""` as well, which was harmless while the only
+    caller was the nesting advice below. It is not harmless for `openroboto
+    train`, which uses this to tell "your trainer nested the checkpoint" apart
+    from "nothing exported a checkpoint" -- two different mistakes with two
+    different fixes.
+
+    The shallowest hit wins, matching the evaluator: it takes the first
+    checkpoint it finds while descending.
     """
     roots = [
         path.parent
@@ -271,7 +279,7 @@ def weights_subdir(directory: Path) -> str:
         if path.is_dir()
     ]
     if not roots:
-        return ""
+        return None
     closest = min(roots, key=lambda path: len(path.relative_to(directory).parts))
     return closest.relative_to(directory).as_posix().removeprefix(".")
 

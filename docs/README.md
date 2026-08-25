@@ -64,11 +64,12 @@ replaced it. **Do not treat anything in `archive/` as current.**
 Recorded here rather than left to be discovered by a miner losing money:
 
 - **There is no `openroboto merge`, and there will not be one** (decided 2026-08-25).
-  The bundled training strategy writes a LoRA adapter, and a bare adapter is rejected;
-  merging it into the base and exporting a full checkpoint is part of **training**, so
-  it belongs in your training script, not in this CLI (merging needs the model
-  libraries, which cannot be installed alongside `bittensor` in one interpreter).
-  Run `openroboto check` before paying — it catches exactly this, for free.
+  Exporting a full checkpoint is part of **training**, so it belongs in your training
+  script, not in this CLI (merging needs the model libraries, which cannot be
+  installed alongside `bittensor` in one interpreter). The bundled strategies leave
+  the export step blank and say so, rather than writing an adapter nothing can use.
+  Run `openroboto check` before paying — it catches a bare adapter and a checkpoint
+  nested too deep, for free.
 - **[MIGRATION.md](./MIGRATION.md) §2 (π0.5 → LingBot) is a pre-release draft.** It
   describes a client version that is not published yet and carries `<TBD>`
   placeholders for every date. It is written down early so the announcement can quote

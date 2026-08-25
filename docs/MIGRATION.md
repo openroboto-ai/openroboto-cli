@@ -302,6 +302,25 @@ money you are about to spend buy you a score".
   adapter is rejected; exporting a full merged checkpoint is part of training, and
   `openroboto check` catches an unmerged upload before you pay.
 
+## Changed: what the bundled training strategies leave behind
+
+`templates/simple`, `templates/example` and the container's default flow used to
+write a fabricated LoRA adapter into `<output_dir>/adapter/`. They no longer write
+anything under `adapter/`, and they no longer fabricate weights at all — the export
+step is marked and left for you, and both `train` and `check` say so plainly.
+
+Nothing breaks that was working: that adapter was never a submittable artifact
+(`openroboto check` rejected it as `bare_lora_adapter`, and so did admission), and
+nothing in the pipeline read the `adapter/` directory. **If your own
+`train_strategy.py` writes into `<output_dir>/adapter/`, move the export up to
+`<output_dir>` itself** — that directory is the checkpoint root, uploaded verbatim
+as your Hugging Face repository root.
+
+The same rule catches the LingBot exporter's layout: it writes
+`checkpoints/global_step_N/hf_ckpt/`, three levels down, and the evaluator searches
+two. `openroboto train` now names that directory when it finds the weights there,
+and `openroboto check` prints the `--output-dir` you should submit instead.
+
 ## New: the CLI tells you what you are paying for, before it pays
 
 `<TBD: confirm this shipped in the released version before publishing>`

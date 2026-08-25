@@ -63,8 +63,9 @@ openroboto status
 ```
 
 Steps 2 and 4 exist for one reason: **burns are not refundable.** The most expensive
-mistake on this subnet is discovering after paying that the upload was a bare LoRA
-adapter. `doctor` and `check` are free and catch that.
+mistake on this subnet is discovering after paying that the upload was not something
+the evaluator can load — a bare LoRA adapter, or a checkpoint buried in a
+subdirectory. `doctor` and `check` are free and catch both.
 
 Full walkthrough: [docs/MINER.md](docs/MINER.md).
 Real-machine setup, systemd, custom strategies: [docs/MINER_DEPLOY.md](docs/MINER_DEPLOY.md).
@@ -84,12 +85,12 @@ Real-machine setup, systemd, custom strategies: [docs/MINER_DEPLOY.md](docs/MINE
 | `openroboto validator run` | External validator: read published weights, set them on chain |
 | `openroboto --version` | CLI version and protocol package version |
 
-⚠️ **There is no `openroboto merge`, and none is planned.** The bundled training
-strategy writes a LoRA adapter, and a bare adapter is rejected by the evaluator.
-Merging the adapter into the base and exporting a full checkpoint is part of
-**training** — it needs the model libraries, which cannot live in the same
-interpreter as `bittensor` — so it belongs in your training script, inside the
-training container. `openroboto check` catches an unmerged upload **before you pay**.
+⚠️ **There is no `openroboto merge`, and none is planned.** Exporting a full
+checkpoint is part of **training** — it needs the model libraries, which cannot live
+in the same interpreter as `bittensor` — so it belongs in your training script,
+inside the training container. The bundled strategies leave that step blank on
+purpose and say so; `openroboto train` tells you what the run actually produced, and
+`openroboto check` gives the verdict **before you pay**.
 
 ## Things that will cost you TAO if you skip them
 
@@ -113,6 +114,11 @@ The evaluator accepts **complete model checkpoints** — an openpi JAX `params/`
 directory or a PyTorch `model.safetensors`, plus
 `assets/physical-intelligence/libero/norm_stats.json`. A bare LoRA adapter is rejected
 by a CPU pre-check before any GPU time is spent.
+
+Put them at the **top** of the directory you upload. The evaluator descends two
+levels looking for the weights and stops; the LingBot exporter's own layout,
+`checkpoints/global_step_N/hf_ckpt/`, is one level past that, so an unedited upload
+of a training output is admitted and then never loaded.
 
 Exact requirements: [docs/SUBNET_OVERVIEW.md](docs/SUBNET_OVERVIEW.md).
 

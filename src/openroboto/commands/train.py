@@ -6,6 +6,20 @@ training itself runs inside the openpi-runner container (red line #2, see
 `training/container.py`). When it finishes, the checkpoint is written into
 `state/round_N.json`, and the later upload / burn / announce continue from
 there.
+
+The output directory **is the checkpoint root**
+------------------------------------------------
+Whatever the strategy leaves in `cfg["output_dir"]` is what `submit` uploads,
+byte for byte, as the Hugging Face repository root. Nothing in this package
+rearranges it afterwards: there is no `openroboto merge` and the evaluator
+merges nothing either.
+
+That makes the layout the strategy writes the whole game, and two ways of
+getting it wrong are common enough to be called out at the end of every run
+(see `export_advice`): exporting nothing at all, and exporting into a
+subdirectory. The second one is not carelessness -- the vendor's own LingBot
+export lands in `checkpoints/global_step_N/hf_ckpt/`, three levels down, and
+the evaluator stops searching at two.
 """
 
 from __future__ import annotations
@@ -16,6 +30,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from openroboto.commands.check import weights_subdir
 from openroboto.config import Settings, apply_control, fetch_control
 from openroboto.console import fail, say
 from openroboto.round_state import (
@@ -167,16 +182,66 @@ def run(args: argparse.Namespace) -> int:
         state["hotkey_ss58"] = settings.hotkey_ss58
     save_state(round_num, state)
 
-    say(f"✅ Training finished, model is in {output_dir}")
+    say(f"✅ Training finished, output is in {output_dir}")
     say("")
-    say(
-        "⚠️  The default training output is a LoRA adapter; submitting it as-is "
-        "**will be rejected** (the evaluator does not merge)."
-    )
-    say("    Merge the adapter into the π0.5 base, export a full checkpoint, then:")
-    say(f"    openroboto check {output_dir}      # free, local, do not skip it")
-    say(f"    openroboto submit --round {round_num}")
+    for line in export_advice(Path(output_dir), round_num):
+        say(line)
     return 0
+
+
+def export_advice(output_dir: Path, round_num: int) -> list[str]:
+    """What the run actually produced, and the next command that is true for it.
+
+    This used to be four fixed lines telling every miner to "merge the adapter
+    into the π0.5 base" -- wrong for the LingBot competitions, which do not use
+    LoRA at all, and wrong since the merge decision: nothing merges, on this side
+    or the evaluator's, and the export is the trainer's job.
+
+    Fixed text cannot be right for all three outcomes anyway, and the difference
+    between them is one `rglob` away at the moment the artifact appears. Saying
+    it here rather than leaving it to `check` is the point: the nesting case is
+    the one that costs money, and a miner who skips `check` meets it after the
+    burn.
+
+    The verdict itself still belongs to `check` (red line #1 -- the format rules
+    live in the protocol package); every branch ends by pointing at it.
+    """
+    subdir = weights_subdir(output_dir)
+
+    if subdir is None:
+        return [
+            "⚠️  There are no model weights in the output.",
+            "    Exporting the checkpoint is the training side's job, and the bundled",
+            "    strategies do not do it -- they exercise the pipeline, they do "
+            "not train.",
+            "    Point your trainer's export at the output directory itself: it is",
+            "    the checkpoint root, and `submit` uploads it verbatim as the HF",
+            "    repository root.",
+            "    A bare LoRA adapter is not a substitute: there is no `openroboto "
+            "merge`,",
+            "    and the evaluator merges nothing either.",
+            f"    → openroboto check {output_dir}   # free, local; it names what "
+            "is missing",
+        ]
+
+    if subdir:
+        nested = output_dir / subdir
+        return [
+            f"⚠️  The checkpoint is in {subdir}/, not at the top of the output.",
+            "    `submit` uploads the output directory verbatim as the repository",
+            "    root, and the evaluator only searches a couple of levels below it.",
+            "    The official LingBot export lands in "
+            "checkpoints/global_step_N/hf_ckpt/,",
+            "    which is already too deep -- so this is the normal way to get here.",
+            "    Submit that directory instead, or move its contents to the top:",
+            f"      openroboto check {nested}",
+            f"      openroboto submit --round {round_num} --output-dir {nested}",
+        ]
+
+    return [
+        f"    openroboto check {output_dir}      # free, local, do not skip it",
+        f"    openroboto submit --round {round_num}",
+    ]
 
 
 def _section(control: dict[str, Any], name: str) -> dict[str, Any]:

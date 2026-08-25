@@ -131,8 +131,8 @@ def _run_custom(cfg: dict, custom_script: str) -> tuple:
 
 
 def _run_default(cfg: dict) -> tuple:
-    """Default training flow: a simple training loop with a simulated loss curve and
-    fake LoRA weights, for pipeline testing.
+    """Default flow when no custom strategy is mounted: a simulated loss curve,
+    and no checkpoint. For exercising the pipeline, not for training.
 
     Args:
         cfg: configuration dictionary
@@ -148,8 +148,6 @@ def _run_default(cfg: dict) -> tuple:
     # Load training data
     episodes = _load_episodes(cfg["train_data"])
     logger.info(f"📊 Loaded {len(episodes)} episodes")
-    norm_stats = _compute_norm_stats(episodes)
-    logger.info(f"📈 Norm stats computed")
 
     # Simple training loop with fake loss
     start_time = time.time()
@@ -168,17 +166,32 @@ def _run_default(cfg: dict) -> tuple:
 
         logger.info(f"  Epoch {epoch} done")
 
-    # Save LoRA adapter files (fake but structurally correct)
+    # No checkpoint is exported here on purpose.
+    #
+    # This path is the smoke test: it runs without a GPU and without training
+    # anything, so there are no weights to write. It used to fabricate a LoRA
+    # adapter under `output_dir/adapter/`, which was wrong twice over -- an
+    # adapter is never a submittable artifact (nothing merges it), and the
+    # subdirectory taught the wrong export location. `output_dir` **is** the
+    # checkpoint root; a real run's export writes the full checkpoint at the top
+    # of it.
+    #
+    # Fabricating a `model.safetensors` full of random numbers instead would be
+    # worse than either: `openroboto check` would go green, and that command is
+    # the last thing standing between a miner and a burn of TAO.
+    #
+    # The norm_stats that used to be written here went with it: `_save_norm_stats`
+    # was **never defined in this file**, so every run of this function died on a
+    # NameError at that line -- which is why nobody noticed the fabricated
+    # adapter was useless. (ruff would have caught it as F821; `src/openroboto/
+    # runner` is in `extend-exclude`.) Norm stats without weights buy nothing
+    # anyway: `check` reports the missing weights either way.
     output_dir = cfg["output_dir"]
     os.makedirs(output_dir, exist_ok=True)
-    adapter_dir = os.path.join(output_dir, "adapter")
-    os.makedirs(adapter_dir, exist_ok=True)
-    _save_lora_adapter(adapter_dir, cfg)
-    logger.info(f"💾 LoRA adapter saved to {adapter_dir}")
-
-    # Save norm stats — openpi requires assets/physical-intelligence/libero/norm_stats.json
-    _save_norm_stats(output_dir, norm_stats)
-    logger.info(f"📊 Norm stats saved")
+    logger.warning(
+        "⚠️  No checkpoint exported — this is the default smoke-test flow, it "
+        "does not train. `openroboto check` will report the missing weights."
+    )
 
     # Metrics
     final_loss = loss_curve[-1]["loss"] if loss_curve else 0.5
@@ -208,73 +221,6 @@ def _run_default(cfg: dict) -> tuple:
 
     logger.info(f"✅ Training complete in {duration:.1f}s | loss={final_loss:.4f}")
     return metrics, proof
-
-
-def _save_lora_adapter(adapter_dir: str, cfg: dict):
-    """Generate fake but structurally valid LoRA adapter files.
-
-    Creates:
-    - adapter_config.json (LoRA metadata)
-    - adapter_model.safetensors (fake but valid binary weights)
-
-    Args:
-        adapter_dir: adapter output directory
-        cfg: config dict containing lora_r, lora_alpha, checkpoint_path, etc.
-    """
-    import numpy as np
-    try:
-        import safetensors.numpy as st
-        has_safetensors = True
-    except ImportError:
-        has_safetensors = False
-
-    r = cfg["lora_r"]
-    alpha = cfg["lora_alpha"]
-
-    # Fake LoRA weights for target modules
-    tensors = {}
-    for module in ["q_proj", "k_proj", "v_proj", "o_proj"]:
-        # A matrix: (hidden_dim, r)
-        tensors[f"base_model.model.transformer.layers.0.self_attn.{module}.lora_A.weight"] = \
-            np.random.randn(2048, r).astype(np.float32) * 0.01
-        # B matrix: (r, hidden_dim)
-        tensors[f"base_model.model.transformer.layers.0.self_attn.{module}.lora_B.weight"] = \
-            np.random.randn(r, 2048).astype(np.float32) * 0.01
-
-    # Save safetensors
-    if has_safetensors:
-        st.save_file(tensors, os.path.join(adapter_dir, "adapter_model.safetensors"))
-    else:
-        # Fallback: save as numpy .npz (push_hf.py will convert)
-        np.savez(os.path.join(adapter_dir, "adapter_model.npz"), **tensors)
-
-    # Save adapter config
-    config = {
-        "alpha_pattern": {},
-        "auto_mapping": None,
-        "base_model_name_or_path": cfg.get("checkpoint_path", "openpi/pi05_base"),
-        "bias": "none",
-        "fan_in_fan_out": False,
-        "inference_mode": True,
-        "init_lora_weights": True,
-        "layers_pattern": None,
-        "layers_to_transform": None,
-        "loftq_config": {},
-        "lora_alpha": alpha,
-        "lora_dropout": 0.0,
-        "megatron_config": None,
-        "megatron_core": "megatron.core",
-        "modules_to_save": [],
-        "peft_type": "LORA",
-        "r": r,
-        "rank_pattern": {},
-        "revision": None,
-        "target_modules": ["q_proj", "k_proj", "v_proj", "o_proj"],
-        "task_type": None,
-        "use_rslora": False,
-    }
-    with open(os.path.join(adapter_dir, "adapter_config.json"), "w") as f:
-        json.dump(config, f, indent=2)
 
 
 def _load_episodes(path: str) -> list:

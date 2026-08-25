@@ -163,21 +163,36 @@ def train(cfg: dict, episodes: list, policy=None) -> tuple:
 
 ### Output requirements
 
-Your strategy must produce:
+`/data/output` (`cfg["output_dir"]`) **is the checkpoint root** — `openroboto submit`
+uploads it verbatim as your Hugging Face repository root. Your strategy must leave
+the full checkpoint at the top of it:
+
 ```
 /data/output/
-├── adapter/                    # LoRA adapter weights
-│   ├── adapter_config.json     # LoRA metadata (r, alpha, target_modules)
-│   └── adapter_model.safetensors # LoRA weight matrices
+├── model.safetensors           # the weights, at the TOP -- not in a subdirectory
+├── assets/physical-intelligence/libero/norm_stats.json
 ├── metrics.json                # Training metrics (final_loss, training_steps, ...)
 └── proof.json                  # Training proof (GPU, timestamps, ...)
 ```
 
+(LingBot-VLA 2.0 competitions want sharded safetensors plus
+`model.safetensors.index.json` in the same place instead.)
+
+Two ways to get this wrong, both expensive:
+
+- **Exporting into a subdirectory.** The evaluator descends two levels looking for
+  the weights, and the LingBot exporter writes `checkpoints/global_step_N/hf_ckpt/`
+  — three levels, one too many. Move the contents up. `openroboto train` names the
+  directory it found the weights in when they are not at the top.
+- **Exporting a LoRA adapter.** Nothing merges it. See §"Validate the model locally".
+
 ### Example
 
-`openroboto init` writes a complete working example to `train_strategy.py`, and
-`openroboto init -s example` writes a more heavily commented teaching version. Both
-produce valid adapter files. There is nothing to clone to read them.
+`openroboto init` writes a working skeleton to `train_strategy.py`, and
+`openroboto init -s example` writes a more heavily commented teaching version.
+Neither one trains and neither one exports a checkpoint — they exercise the
+pipeline, and the export is the step marked for you to write. There is nothing to
+clone to read them.
 
 ## 6. Run Miner
 
@@ -211,11 +226,11 @@ openroboto check
 Same format rules the evaluator applies. This used to require cloning a second
 repository; it is now built in.
 
-> **⚠️ Training produces a LoRA adapter, and a bare adapter is rejected.** A
-> merged full checkpoint is what gets evaluated. There is **no `openroboto merge`
-> command, and none is planned** — merging happens in your training script, inside
-> the training container, where the model libraries live. Run `openroboto check`
-> before you burn anything.
+> **⚠️ What gets evaluated is a complete checkpoint at the top of the output
+> directory.** A bare LoRA adapter is rejected, and so is a checkpoint buried
+> deeper than two levels. There is **no `openroboto merge` command, and none is
+> planned** — exporting is part of training, inside the container, where the model
+> libraries live. Run `openroboto check` before you burn anything.
 
 ### Submit: Upload → Burn → Announce
 
