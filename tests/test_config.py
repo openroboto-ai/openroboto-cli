@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import inspect
 import io
 import json
+import re
 import urllib.error
 from pathlib import Path
 from typing import Any
@@ -11,6 +13,7 @@ from typing import Any
 import pytest
 from openroboto_protocol.constants import BURN_BLOCK_WINDOW
 
+from openroboto import adapters
 from openroboto.config import (
     ConfigError,
     ControlFetchError,
@@ -404,3 +407,72 @@ def test_burn_block_window_comes_from_the_protocol_package() -> None:
     burned by then.
     """
     assert Settings().burn_block_window is BURN_BLOCK_WINDOW
+
+
+# ─── competition ─────────────────────────────────────────────
+
+
+def test_competition_section_is_read_and_passed_through_verbatim() -> None:
+    """`init` writes the competition it was told to; the CLI dispatches on the
+    adapter and hands `params` on untouched.
+
+    The pass-through is the point: a competition parameter the client has never
+    heard of must survive into the code that needs it, or every new parameter
+    costs a CLI release and a fleet-wide upgrade.
+    """
+    cfg = Settings.from_mapping(
+        {
+            "competition": {
+                "adapter": "sim_lingbot",
+                "params": {
+                    "fee": {"burn_rate_tao": 0.1},
+                    "format": {"cameras": ["camera_top"], "unknown_key": 7},
+                },
+            }
+        }
+    )
+    assert cfg.competition_adapter == "sim_lingbot"
+    assert cfg.competition_params["format"]["unknown_key"] == 7
+    assert cfg.competition_params["fee"] == {"burn_rate_tao": 0.1}
+
+
+def test_a_config_without_a_competition_section_still_parses() -> None:
+    """Every miner.yaml written before competitions existed. MIGRATION.md §2
+    promises it keeps working; `adapters.DEFAULT_ADAPTER` decides what it means."""
+    cfg = Settings.from_mapping({"subnet": {"netuid": 80}})
+    assert cfg.competition_adapter == ""
+    assert cfg.competition_params == {}
+
+
+def test_competition_params_must_be_a_mapping() -> None:
+    with pytest.raises(ConfigError):
+        Settings.from_mapping({"competition": {"adapter": "x", "params": ["nope"]}})
+
+
+def test_format_profile_of_each_known_adapter() -> None:
+    """The table itself. `real_xarm6` is judged by the LingBot rules too -- the
+    arm changes what is evaluated, not what a checkpoint looks like."""
+    assert adapters.format_profile("sim_openpi") == adapters.OPENPI
+    assert adapters.format_profile("sim_lingbot") == adapters.LINGBOT
+    assert adapters.format_profile("real_xarm6") == adapters.LINGBOT
+    assert adapters.format_profile("") == adapters.OPENPI
+
+
+def test_an_unknown_adapter_is_refused_rather_than_treated_as_simulation() -> None:
+    """🔴 The failure this exists to prevent: a competition this client is too old
+    to know about, silently judged by the π0.5 rules. That verdict is delivered to
+    the miner as "no model weights found" right before they decide whether to burn.
+    """
+    with pytest.raises(ConfigError) as excinfo:
+        adapters.format_profile("real_xarm7")
+    message = str(excinfo.value)
+    assert "real_xarm7" in message
+    assert "pip install -U openroboto" in message
+
+
+def test_the_adapter_table_holds_no_competition_data() -> None:
+    """Values (images, templates, fees, addresses) come from `competition.params`.
+    One written into this table means a CLI release to change a number."""
+    source = inspect.getsource(adapters)
+    assert not re.search(r"5[A-Za-z0-9]{47}", source)
+    assert not re.search(r"\d+\.\d+\s*TAO", source)

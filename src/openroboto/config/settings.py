@@ -14,7 +14,7 @@ Division of labour:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import yaml
@@ -145,6 +145,16 @@ class Settings:
     dataset_train_url: str = ""
     dataset_val_url: str = ""
     dataset_test_url: str = ""
+
+    # ─── Competition ───────────────────────────────────
+    #: Which competition this workspace mines, as the adapter string
+    #: `openroboto init` wrote into `miner.yaml`. Empty = a config from before
+    #: competitions existed; see `adapters.DEFAULT_ADAPTER` for what that means.
+    competition_adapter: str = ""
+    #: That competition's own parameters, verbatim from the snapshot `init`
+    #: wrote. Passed through, never interpreted here: a value the CLI
+    #: understands is a value that needs a CLI release to change.
+    competition_params: dict[str, Any] = field(default_factory=dict)
 
     # ─── Model ─────────────────────────────────────────
     vla_model_id: str = "pi05"
@@ -304,6 +314,16 @@ class Settings:
         cfg.dataset_train_url = urls.get("dataset_train", cfg.dataset_train_url)
         cfg.dataset_val_url = urls.get("dataset_val", cfg.dataset_val_url)
         cfg.dataset_test_url = urls.get("dataset_test", cfg.dataset_test_url)
+
+        # The competition snapshot. `params` is stored raw: the CLI dispatches on
+        # `adapter` and reads the few keys a given step needs, and anything it
+        # does not recognize is a key a later competition added -- dropping it
+        # here would mean a CLI release per competition parameter.
+        competition = _section(data, "competition")
+        cfg.competition_adapter = str(
+            competition.get("adapter", cfg.competition_adapter) or ""
+        )
+        cfg.competition_params = _section(competition, "params")
 
         model = _section(data, "model")
         cfg.vla_model_id = model.get("vla_model_id", cfg.vla_model_id)

@@ -6,11 +6,20 @@ All pure local logic: no network, no GPU, no chain.
 from __future__ import annotations
 
 import argparse
+import json
 import os
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
+from openroboto_protocol.model_format import (
+    CheckpointKind,
+    FormatIssue,
+    FormatIssueCode,
+    FormatReport,
+)
 from openroboto_protocol.schemas import Reason, SubmissionHistoryItem
 
 from openroboto.commands import build as build_command
@@ -209,10 +218,13 @@ def test_check_flags_a_repository_of_lfs_pointers(tmp_path: Path) -> None:
 def test_check_blocks_a_checkpoint_the_evaluator_will_never_find(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """🔴 The layout of the vendor's own post-trained artifact: weights under
-    `checkpoints/global_step_N/hf_ckpt/`, three levels down.
+    """An **openpi** checkpoint nested three levels down, judged by the openpi
+    rules -- a π0.5 miner who uploaded a training output directory whole.
 
-    Admission **accepts** it, the evaluator searches two levels and finds
+    (The vendor's LingBot artifact has the same shape but not the same files;
+    it is a different rule book and lives in `HF_CKPT` below.)
+
+    Admission **accepts** this, the evaluator searches two levels and finds
     nothing. Exiting 0 here would send the miner to `submit` -- burn the TAO,
     take the queue slot, score nothing, and the burn is not refunded. Failing
     at the last step costs more than being rejected at the first, so this run
@@ -258,8 +270,300 @@ def test_check_names_the_directory_that_should_have_been_uploaded(
 
 
 def test_check_on_missing_directory_returns_error(tmp_path: Path) -> None:
-    args = argparse.Namespace(path=str(tmp_path / "nope"), round=0)
+    args = argparse.Namespace(path=str(tmp_path / "nope"), round=0, config="miner.yaml")
     assert check_command.run(args) == 1
+
+
+# ─── check: which competition's rules ────────────────────────
+#
+# The tree below is the vendor's own post-trained artifact,
+# `robbyant/lingbot-vla-v2-6b-robotwin`, file for file: the same list is pinned in
+# the protocol package's golden vectors as `LINGBOT_POST_TRAINED_TREE`. It is what
+# a LingBot miner's training output looks like, because the same script wrote
+# both -- which is why "the miner did nothing wrong" and "the evaluator finds no
+# weights" are true at the same time.
+
+HF_CKPT = "checkpoints/global_step_50000/hf_ckpt"
+
+
+@dataclass(frozen=True)
+class _FakeLayout:
+    """Stands in for `LingbotLayout`, field for field.
+
+    The LingBot rules ship in a protocol release later than the one this client
+    pins, so on the pinned version there is no class to build. This is used
+    **only where the real one is absent** (see `_lingbot_rules`): the day the pin
+    moves, these tests start constructing the real class -- with these exact
+    keyword names -- without anyone editing them.
+    """
+
+    model_config_file: str = "config.json"
+    weights_index_file: str = "model.safetensors.index.json"
+    camera_names: tuple[str, ...] = ()
+    joint_field_names: tuple[str, ...] = ()
+    cli_config_file: str | None = None
+
+
+def _nested_report() -> FormatReport:
+    """What both rule books return for a checkpoint buried past the depth the
+    evaluator searches: admitted, with the warning that costs the most."""
+    return FormatReport(
+        kind=CheckpointKind.PYTORCH,
+        errors=(),
+        warnings=(
+            FormatIssue(
+                FormatIssueCode.NESTED_TOO_DEEP,
+                "the checkpoint is nested 3 levels deep; the evaluator only "
+                "searches 2 levels below the repo root",
+            ),
+        ),
+        counted_size_bytes=25_503_889_124,
+    )
+
+
+#: The names `check` looks up in the protocol package for a LingBot competition,
+#: with a stand-in for each. Values are the ones the protocol package publishes.
+_LINGBOT_STAND_INS: dict[str, Any] = {
+    "LingbotLayout": _FakeLayout,
+    "LINGBOT_MODEL_CONFIG_FILE": "config.json",
+    "LINGBOT_WEIGHTS_INDEX_FILE": "model.safetensors.index.json",
+}
+
+
+def _lingbot_rules(monkeypatch: pytest.MonkeyPatch, checker: Any) -> None:
+    """Install `checker` as the LingBot rule book (the routing is what is under
+    test, never the rules), plus a stand-in for whatever the installed protocol
+    package does not have yet.
+
+    Only what is **missing** is stood in for, so the day the pin moves to the
+    release carrying these rules, the tests below start exercising the real class
+    and the real constants -- with these exact keyword names -- untouched.
+    """
+    monkeypatch.setattr(
+        check_command.model_format, "check_lingbot_layout", checker, raising=False
+    )
+    for name, stand_in in _LINGBOT_STAND_INS.items():
+        if not hasattr(check_command.model_format, name):
+            monkeypatch.setattr(
+                check_command.model_format, name, stand_in, raising=False
+            )
+
+
+#: One real tensor name per prefix the LingBot rules require, plus the six shards
+#: they live in. Copied from the reference checkpoint's index (1708 tensors in
+#: total; the rules do not need the other 1700 and pasting them would hide these).
+LINGBOT_WEIGHT_MAP = {
+    "model.action_in_proj.weight": "model-00006-of-00006.safetensors",
+    "model.action_out_proj.weight": "model-00006-of-00006.safetensors",
+    "model.state_proj.weight": "model-00006-of-00006.safetensors",
+    "model.qwenvl_with_expert.qwen_expert.model.norm.weight": (
+        "model-00006-of-00006.safetensors"
+    ),
+    **{
+        f"model.qwenvl_with_expert.qwenvl.model.language_model.layers.{i}."
+        "self_attn.q_proj.weight": f"model-0000{i + 1}-of-00006.safetensors"
+        for i in range(5)
+    },
+}
+
+#: What a competition row would carry. Three cameras and seven joint fields are
+#: the shape of the vendor's `configs/vla/robotwin/robotwin.yaml`.
+LINGBOT_COMPETITION = {
+    "adapter": "sim_lingbot",
+    "params": {
+        "format": {
+            "cameras": ["camera_top", "camera_wrist_left", "camera_wrist_right"],
+            "joints": [f"joint_{i}" for i in range(6)] + ["gripper"],
+        }
+    },
+}
+
+
+def _official_lingbot_tree(root: Path) -> None:
+    """Write the vendor's post-trained artifact, sizes and all."""
+    _make_file(root / ".gitattributes", 1797)
+    _make_file(root / "README.md", 2227)
+    _make_file(root / "lingbotvla_cli.yaml", 1024)
+    _make_file(root / "assets/lingbot_vla2_framework.png", 1178043)
+    for index, size in enumerate(
+        (4987151072, 4985113408, 4928593216, 4990740540, 4990095864, 622195024), 1
+    ):
+        _make_file(root / HF_CKPT / f"model-0000{index}-of-00006.safetensors", size)
+    for name, size in (
+        ("added_tokens.json", 707),
+        ("config.json", 31),
+        ("preprocessor_config.json", 782),
+        ("special_tokens_map.json", 613),
+        ("tokenizer.json", 11422654),
+        ("tokenizer_config.json", 5472),
+        ("video_preprocessor_config.json", 817),
+        ("vocab.json", 2776833),
+    ):
+        _make_file(root / HF_CKPT / name, size)
+    (root / HF_CKPT / "model.safetensors.index.json").write_text(
+        json.dumps(
+            {"metadata": {"total_size": 25503889124}, "weight_map": LINGBOT_WEIGHT_MAP}
+        ),
+        encoding="utf-8",
+    )
+
+
+def _lingbot_settings() -> Settings:
+    return Settings.from_mapping({"competition": LINGBOT_COMPETITION})
+
+
+def test_check_sends_a_lingbot_competition_to_the_lingbot_rules(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """🔴 The bug this dispatch exists for: the vendor's own artifact, judged by
+    the π0.5 rules, comes back `missing_weights` + `missing_norm_stats` -- two
+    complaints about files a LingBot checkpoint is not supposed to have, and no
+    mention of the one thing that is actually wrong with it.
+
+    What is asserted here is the routing, not the rules: which protocol function
+    is called, with which file list, which competition parameters, and which
+    weight map. The rules themselves are the protocol package's, and its golden
+    vectors pin what they say about this exact tree.
+    """
+    _official_lingbot_tree(tmp_path)
+    calls: list[tuple[Any, ...]] = []
+
+    def recorder(files: Any, layout: Any, **kwargs: Any) -> Any:
+        calls.append((files, layout, kwargs))
+        return _nested_report()
+
+    _lingbot_rules(monkeypatch, recorder)
+
+    layout = check_command.resolve_layout(_lingbot_settings())
+    report = check_command.check_directory(tmp_path, layout=layout)
+
+    assert len(calls) == 1
+    files, sent_layout, kwargs = calls[0]
+    paths = {file.path for file in files}
+    assert f"{HF_CKPT}/model-00001-of-00006.safetensors" in paths
+    assert f"{HF_CKPT}/model.safetensors.index.json" in paths
+    # competition parameters reach the layout; file names fall back to the
+    # protocol package's constants rather than to a literal spelled out here
+    assert sent_layout.camera_names == (
+        "camera_top",
+        "camera_wrist_left",
+        "camera_wrist_right",
+    )
+    assert len(sent_layout.joint_field_names) == 7
+    assert sent_layout.weights_index_file == "model.safetensors.index.json"
+    # the descriptor sits at the repo root of the official artifact, but the fix
+    # for the nesting is to upload the subdirectory -- requiring both at once
+    # would be two contradictory instructions, so the rule stays off by default
+    assert sent_layout.cli_config_file is None
+    # the index is read, so the shard and tensor rules really run
+    assert kwargs["weight_map"] == LINGBOT_WEIGHT_MAP
+    assert [issue.code for issue in report.warnings] == ["nested_too_deep"]
+
+
+def test_check_names_the_hf_ckpt_directory_of_the_official_artifact(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The advice a LingBot miner gets, over the real official layout.
+
+    "Your structure is invalid" is not something anyone can act on. This has to
+    name their own directory and hand them a line they can run, because the
+    alternative is that they upload the tree unchanged, pass admission, burn,
+    and score nothing.
+    """
+    _official_lingbot_tree(tmp_path)
+    assert check_command.weights_subdir(tmp_path) == HF_CKPT
+
+    exit_code = check_command.report_result(
+        tmp_path, _nested_report(), layout=_FakeLayout()
+    )
+    assert exit_code == 1
+
+    out = capsys.readouterr().out
+    assert "rules: LingBot-VLA 2.0" in out
+    assert f"openroboto submit --output-dir {tmp_path / HF_CKPT}" in out
+    assert "not refunded" in out
+
+
+def test_check_refuses_when_the_installed_protocol_cannot_judge_this_competition(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """🔴 The protocol package that shipped the LingBot rules is a later release
+    than some environments hold, and `openroboto doctor` exists because an
+    environment can drift off the pin regardless.
+
+    The one thing that must never happen is a silent fall back to the π0.5
+    rules: the miner would be told "no model weights found" about a checkpoint
+    that is fine, would go looking for a fault that is not there, and would
+    never see the nesting warning that is the one costing money.
+    """
+    for name in ("LingbotLayout", "check_lingbot_layout"):
+        monkeypatch.delattr(check_command.model_format, name, raising=False)
+
+    with pytest.raises(ConfigError) as excinfo:
+        check_command.resolve_layout(_lingbot_settings())
+
+    message = str(excinfo.value)
+    assert "pip install -U openroboto" in message
+    assert "openroboto-protocol" in message
+    # naming the refusal, so nobody later reads the fall back back in
+    assert "openpi" in message
+
+
+def test_check_keeps_judging_an_old_config_by_the_pi05_rules(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A miner.yaml written before competitions existed, and a directory with no
+    config at all. Upgrading the client must not change one verdict for someone
+    who changed nothing."""
+    assert check_command.resolve_layout(Settings()) is None
+    assert check_command.resolve_layout(Settings.from_mapping({})) is None
+    absent = check_command.competition_settings(str(tmp_path / "absent.yaml"))
+    assert absent.competition_adapter == ""
+
+    _make_file(tmp_path / "model.safetensors", BIG_ENOUGH)
+    _make_file(tmp_path / "assets/physical-intelligence/libero/norm_stats.json", 1024)
+    args = argparse.Namespace(
+        path=str(tmp_path), round=0, config=str(tmp_path / "absent.yaml")
+    )
+    assert check_command.run(args) == 0
+    assert "rules: π0.5 (openpi)" in capsys.readouterr().out
+
+
+def test_check_reads_the_competition_out_of_miner_yaml(tmp_path: Path) -> None:
+    """The dispatch is driven by the config file, not by a flag: which
+    competition you mine is a property of the workspace, not something retyped
+    on every command."""
+    config = tmp_path / "miner.yaml"
+    config.write_text(
+        yaml.safe_dump({"competition": LINGBOT_COMPETITION}), encoding="utf-8"
+    )
+    settings = check_command.competition_settings(str(config))
+    assert settings.competition_adapter == "sim_lingbot"
+
+
+def test_check_says_so_when_the_weight_index_cannot_be_read(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Without the index the protocol package does not evaluate the shard and
+    tensor rules at all, while the subnet's admission -- which reads the same
+    file -- does. Passing here and being rejected afterwards is the expensive
+    order, so the gap is printed rather than swallowed."""
+    _official_lingbot_tree(tmp_path)
+    index = tmp_path / HF_CKPT / "model.safetensors.index.json"
+
+    index.write_text("{ not json", encoding="utf-8")
+    assert check_command.read_weight_map(tmp_path, _FakeLayout()) is None
+    assert "shard and tensor rules were not checked" in capsys.readouterr().out
+
+    index.write_text(json.dumps({"weight_map": "not a map"}), encoding="utf-8")
+    assert check_command.read_weight_map(tmp_path, _FakeLayout()) is None
+    assert "shard and tensor rules were not checked" in capsys.readouterr().out
+
+    # no index at all is a different story: the rules that need it say so
+    # themselves ("no LingBot-VLA weights found"), so this stays quiet
+    index.unlink()
+    assert check_command.read_weight_map(tmp_path, _FakeLayout()) is None
+    assert capsys.readouterr().out == ""
 
 
 # ─── build ───────────────────────────────────────────────────

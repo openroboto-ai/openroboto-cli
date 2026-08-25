@@ -83,6 +83,7 @@ openroboto init my-miner    # miner.yaml + train_strategy.py + README.md + .giti
 | `subnet` | `wallet_password` | Optional local unlock value; never commit it |
 | `urls` | `control_json` | Public miner-readable control document |
 | `urls` | `dataset_train`, `dataset_val` | Public training and validation resources |
+| `competition` | `adapter`, `params` | Which competition this workspace mines. Decides the rules `openroboto check` judges your checkpoint by — π0.5 (openpi) and LingBot-VLA 2.0 accept different layouts. Empty = the π0.5 simulation competition, as before |
 | `model` | `vla_model_id`, `vla_checkpoint_path` | Base model selection. Leave the path empty and the container downloads the base checkpoint into `./cache/pi05_base` |
 | `huggingface` | `token`, `username` | Local Hugging Face upload credentials |
 | root | `custom_train_script` | Optional miner-owned training strategy path |

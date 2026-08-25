@@ -11,6 +11,16 @@ The decision rules **are not implemented here**: it calls
 `openroboto_protocol.model_format`, the same code and the same set of error
 codes the backend uses for admission. Purely local, zero GPU, zero network.
 
+Which rules, though, is this module's job
+-----------------------------------------
+The subnet runs more than one competition, and a checkpoint that is perfect for
+one is unloadable rubbish for another: π0.5 (openpi) wants a `model.safetensors`
+next to `assets/.../norm_stats.json`, LingBot-VLA 2.0 wants sharded safetensors
+next to a `model.safetensors.index.json`. The rule book is chosen from the
+competition in `miner.yaml` -- never sniffed from the directory, because
+sniffing is guessing and a wrong guess is delivered to the miner as "your upload
+is broken" seconds before they decide whether to pay.
+
 Why a warning also stops you here
 ---------------------------------
 The protocol package splits its findings in two: `errors` are what admission
@@ -27,8 +37,13 @@ nothing left to fix it with.
 from __future__ import annotations
 
 import argparse
+import json
+from collections.abc import Mapping
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
+from typing import Any
 
+from openroboto_protocol import model_format
 from openroboto_protocol.model_format import (
     LIBERO_LAYOUT,
     CheckpointFile,
@@ -37,6 +52,8 @@ from openroboto_protocol.model_format import (
     check_checkpoint_layout,
 )
 
+from openroboto import adapters
+from openroboto.config import ConfigError, Settings
 from openroboto.console import say
 from openroboto.round_state import resolve_output_dir, resolve_round
 
@@ -56,6 +73,7 @@ def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) 
     parser.add_argument(
         "--round", type=int, default=0, help="round number, auto-detected by default"
     )
+    parser.add_argument("--config", default="miner.yaml")
     parser.set_defaults(handler=run)
 
 
@@ -65,8 +83,109 @@ def run(args: argparse.Namespace) -> int:
         say(f"❌ Directory does not exist: {directory}")
         return 1
 
-    report = check_directory(directory)
-    return report_result(directory, report)
+    layout = resolve_layout(competition_settings(args.config))
+    report = check_directory(directory, layout=layout)
+    return report_result(directory, report, layout=layout)
+
+
+def competition_settings(path: str) -> Settings:
+    """Read `miner.yaml` for the competition, tolerating its absence.
+
+    `check` is free, local, and the documented fix for a too-deeply nested
+    upload is to point it at a subdirectory -- so it has to keep working in a
+    directory that holds no config at all. No config = no competition = the π0.5
+    rules, which is exactly what this command did before competitions existed.
+
+    That default is safe in the direction that matters: a LingBot checkpoint
+    judged by the π0.5 rules is *rejected*, never waved through, so a miner who
+    runs this from the wrong directory loses a minute, not their burn. The
+    `rules:` line in the report says which book was used.
+    """
+    return Settings.load(path) if Path(path).is_file() else Settings()
+
+
+def resolve_layout(settings: Settings) -> Any | None:
+    """The competition's LingBot layout, or `None` for the π0.5 (openpi) rules.
+
+    `None` is what every config without a competition section resolves to, so
+    upgrading the CLI does not change one verdict for a miner who changed
+    nothing.
+    """
+    if adapters.format_profile(settings.competition_adapter) == adapters.OPENPI:
+        return None
+    return lingbot_layout(settings.competition_params)
+
+
+def lingbot_layout(params: Mapping[str, Any]) -> Any:
+    """Build this competition's `LingbotLayout` out of `competition.params`.
+
+    The protocol package deliberately publishes **no** singleton for this class:
+    three of its five fields are competition parameters, and freezing one
+    season's camera count into a published package means a release plus a
+    fleet-wide upgrade to change a number. So they come from the config, and
+    each missing key falls back to the package's own constant -- never to a
+    string spelled out here, which is how two copies of a contract start
+    drifting.
+
+    `cli_config_file` falls back to `None` (rule off) rather than to a file
+    name: the vendor's own base checkpoint does not contain the descriptor and
+    the export path never writes one, so requiring it by default would reject
+    every LingBot submission including the vendor's, after the TAO was burned.
+    """
+    fmt = params.get("format") or {}
+    layout_cls = protocol_rule("LingbotLayout")
+    return layout_cls(
+        model_config_file=fmt.get(
+            "model_config_file", protocol_rule("LINGBOT_MODEL_CONFIG_FILE")
+        ),
+        weights_index_file=fmt.get(
+            "weights_index_file", protocol_rule("LINGBOT_WEIGHTS_INDEX_FILE")
+        ),
+        camera_names=tuple(fmt.get("cameras") or ()),
+        joint_field_names=tuple(fmt.get("joints") or ()),
+        cli_config_file=fmt.get("cli_config_file") or None,
+    )
+
+
+def protocol_rule(name: str) -> Any:
+    """One rule out of the protocol package, or refuse to check at all.
+
+    **Capability detection, not a version comparison.** `pyproject.toml` pins the
+    protocol package exactly, but `openroboto doctor` exists precisely because a
+    real environment can still hold a different build, and what decides whether
+    the LingBot rules can run is whether they are *there* -- not what a version
+    string claims.
+
+    🔴 The one thing this must never do is fall back to the π0.5 rules. Those
+    report `missing_weights` for a flawless LingBot checkpoint, which reads to
+    the miner as "my upload is broken" at the exact moment they are deciding
+    whether to spend, and it hides the nesting warning that is the expensive one.
+    A verdict from the wrong rule book is worse than no verdict: no verdict stops
+    them, a wrong one sends them to fix something that was never wrong.
+    """
+    rule = getattr(model_format, name, None)
+    if rule is None:
+        raise ConfigError(
+            f"This workspace mines a competition judged by the LingBot-VLA layout "
+            f"rules, and the protocol package installed here "
+            f"({protocol_version()}) does not carry them.\n"
+            f"  → pip install -U openroboto\n"
+            f"  (`openroboto --version` prints both versions; the client pins the "
+            f"protocol package it was built against.)\n"
+            f"  Not falling back to the π0.5 (openpi) rules on purpose: they "
+            f"report 'no model weights found' for a perfectly good LingBot "
+            f"checkpoint. Being told nothing costs you a command; being told the "
+            f"wrong thing costs you a burn."
+        )
+    return rule
+
+
+def protocol_version() -> str:
+    """Version of the installed protocol package, for the refusal above."""
+    try:
+        return f"openroboto-protocol {version('openroboto-protocol')}"
+    except PackageNotFoundError:  # pragma: no cover -- a normal install has it
+        return "openroboto-protocol, not installed"
 
 
 def collect_files(directory: Path) -> list[CheckpointFile]:
@@ -81,8 +200,56 @@ def collect_files(directory: Path) -> list[CheckpointFile]:
     ]
 
 
-def check_directory(directory: Path) -> FormatReport:
-    return check_checkpoint_layout(collect_files(directory))
+def check_directory(directory: Path, *, layout: Any = None) -> FormatReport:
+    """Hand the file list to the rule book this competition uses.
+
+    Not one format rule lives in this repository: two copies of the admission
+    contract drift, and the miner is the one who pays for the difference.
+    """
+    files = collect_files(directory)
+    if layout is None:
+        return check_checkpoint_layout(files)
+    report: FormatReport = protocol_rule("check_lingbot_layout")(
+        files, layout, weight_map=read_weight_map(directory, layout)
+    )
+    return report
+
+
+def read_weight_map(directory: Path, layout: Any) -> Mapping[str, str] | None:
+    """Parse `model.safetensors.index.json` -- the `{tensor: shard}` map.
+
+    Reading it is what keeps this command **at least as strict as admission**:
+    without the map, the protocol package does not evaluate the missing-shard and
+    missing-tensor rules at all ("absence of evidence, not evidence of a missing
+    shard"), while the backend, which can read the same file, does. A miner would
+    then pass here, burn, and be rejected afterwards.
+
+    It does not break the "never download the weights" rule either: the index is
+    a few hundred KB of plain text sitting next to the shards, not the shards.
+
+    Unreadable or missing → `None` plus a printed line. Silence would be the bad
+    kind of lenient: two rules quietly not running, and a green check that means
+    less than the miner thinks it does.
+    """
+    found = sorted(directory.rglob(layout.weights_index_file), key=_depth)
+    if not found:
+        return None
+    try:
+        weight_map = json.loads(found[0].read_text(encoding="utf-8"))["weight_map"]
+    except (OSError, ValueError, KeyError, TypeError):
+        weight_map = None
+    if not isinstance(weight_map, dict):
+        say(
+            f"⚠️  could not read the weight index {found[0]} — the shard and "
+            "tensor rules were not checked. The subnet's admission does read it, "
+            "so it can still reject what passes here."
+        )
+        return None
+    return weight_map
+
+
+def _depth(path: Path) -> int:
+    return len(path.parts)
 
 
 def weights_subdir(directory: Path) -> str:
@@ -134,9 +301,14 @@ def nesting_advice(directory: Path) -> list[str]:
     ]
 
 
-def report_result(directory: Path, report: FormatReport) -> int:
+def report_result(directory: Path, report: FormatReport, *, layout: Any = None) -> int:
     """Print the verdict. Returns the exit code: 0 = fine to submit."""
     say(f"checkpoint: {directory}")
+    # Which rule book judged this is part of the verdict, not decoration: the
+    # failure this line exists to make visible is a LingBot checkpoint being told
+    # it has "no model weights" by the π0.5 rules, which looks like a broken
+    # upload and is really a misrouted check.
+    say(f"rules: {'π0.5 (openpi)' if layout is None else 'LingBot-VLA 2.0'}")
     say(f"weights: {report.kind.value if report.kind else 'unrecognized'}")
     say(f"counted size: {report.counted_size_bytes / 1024 / 1024:.1f} MB")
 
