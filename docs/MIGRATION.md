@@ -218,6 +218,75 @@ the workflow above.
 Upload the new checkpoint as a new revision (or a new repository, your choice) — the
 chain announcement points at the exact revision, so the two never get confused.
 
+## Uploading what training produced — read this before you pay
+
+Two things about the LingBot training scripts cost money if you find them out late.
+Neither is a bug in your setup; both are defaults, and both are cheap to fix **before**
+the burn.
+
+### 1. By default the run writes no HuggingFace weights at all
+
+The official templates set `ckpt_manager: dcp` — PyTorch **distributed checkpoint**, a
+sharded format meant for resuming training, not for loading a model. The HF-format
+export is a separate switch, `save_hf_weights`, and it appears in **neither** official
+config template; the exporter opens with
+
+```python
+if not args.train.save_hf_weights:
+    return
+```
+
+so leaving it out means the export never runs. Put it in your training config:
+
+```yaml
+train:
+  save_hf_weights: true
+```
+
+The conversion is asynchronous and best-effort: the training loop does not wait for it
+and does not fail if it breaks. Failures are appended to `async_hf_failures.jsonl` in
+the output directory — **check that the file is absent or empty** before you upload,
+and check that the shards and `model.safetensors.index.json` are really there. A run
+that finished cleanly can still have produced no usable weights.
+
+### 2. The official layout is nested too deep to upload as-is
+
+The vendor's own post-trained artifact, `robbyant/lingbot-vla-v2-6b-robotwin`, is laid
+out like this — and so is your training output, because the same script wrote both:
+
+```
+lingbotvla_cli.yaml
+assets/…
+checkpoints/global_step_50000/hf_ckpt/
+    model-00001-of-00006.safetensors … model-00006-of-00006.safetensors
+    model.safetensors.index.json
+    config.json  tokenizer.json  vocab.json  …
+```
+
+**Do not `git push` that tree as your submission.** The evaluator looks for a
+checkpoint at the repository root, one level down and two levels down — and stops.
+The weights above are three levels down, so it finds nothing.
+
+This is the expensive failure mode, worse than being rejected: the upload **passes**
+admission, your TAO is burned, your queue slot is used, and the run then fails at the
+last step with nothing to show for it. Burns are not refunded.
+
+Upload the checkpoint directory itself as the repository root:
+
+```bash
+openroboto check  checkpoints/global_step_50000/hf_ckpt      # free, local, no GPU
+openroboto submit --output-dir checkpoints/global_step_50000/hf_ckpt
+```
+
+or move everything inside `hf_ckpt/` to the top of your output directory and submit
+that. Either way, `config.json`, `model.safetensors.index.json` and the shards have to
+end up at the top of the repository.
+
+`openroboto check` catches this for you and **exits non-zero**, printing your own
+directory in the fix. That is stricter than the subnet's own admission rules, on
+purpose: admission answers "does this submission count", `check` answers "will the
+money you are about to spend buy you a score".
+
 ## What does **not** change
 
 - **Every command name and flag.** `init` / `doctor` / `build` / `train` / `check` /

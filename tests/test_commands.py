@@ -206,6 +206,57 @@ def test_check_flags_a_repository_of_lfs_pointers(tmp_path: Path) -> None:
     assert any(issue.code == "total_size_too_small" for issue in report.errors)
 
 
+def test_check_blocks_a_checkpoint_the_evaluator_will_never_find(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """🔴 The layout of the vendor's own post-trained artifact: weights under
+    `checkpoints/global_step_N/hf_ckpt/`, three levels down.
+
+    Admission **accepts** it, the evaluator searches two levels and finds
+    nothing. Exiting 0 here would send the miner to `submit` -- burn the TAO,
+    take the queue slot, score nothing, and the burn is not refunded. Failing
+    at the last step costs more than being rejected at the first, so this run
+    has to stop before the money moves.
+    """
+    deep = tmp_path / "checkpoints" / "global_step_50000" / "hf_ckpt"
+    _make_file(deep / "model.safetensors", BIG_ENOUGH)
+    _make_file(deep / "assets/physical-intelligence/libero/norm_stats.json", 1024)
+
+    report = check_command.check_directory(tmp_path)
+    assert report.ok, [issue.code for issue in report.errors]
+    assert [issue.code for issue in report.warnings] == ["nested_too_deep"]
+
+    assert check_command.report_result(tmp_path, report) == 1
+
+    out = capsys.readouterr().out
+    # the advice has to name the miner's own directory, not "the structure is
+    # invalid" -- they have to be able to copy the line and run it
+    assert "checkpoints/global_step_50000/hf_ckpt" in out
+    assert "--output-dir" in out
+    assert "not refunded" in out
+
+
+def test_check_names_the_directory_that_should_have_been_uploaded(
+    tmp_path: Path,
+) -> None:
+    """Both weight forms, plus the two cases where there is nothing to advise."""
+    _make_file(tmp_path / "a/b/c/model.safetensors", 1024)
+    assert check_command.weights_subdir(tmp_path) == "a/b/c"
+
+    jax = tmp_path / "jax"
+    _make_file(jax / "run/params/ocdbt.process_0/d/0001", 1024)
+    assert check_command.weights_subdir(jax) == "run"
+
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    assert check_command.weights_subdir(empty) == ""
+    assert check_command.nesting_advice(empty) == []
+
+    flat = tmp_path / "flat"
+    _make_file(flat / "model.safetensors", 1024)
+    assert check_command.weights_subdir(flat) == ""
+
+
 def test_check_on_missing_directory_returns_error(tmp_path: Path) -> None:
     args = argparse.Namespace(path=str(tmp_path / "nope"), round=0)
     assert check_command.run(args) == 1
