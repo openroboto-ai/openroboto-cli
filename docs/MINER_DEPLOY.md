@@ -213,8 +213,9 @@ repository; it is now built in.
 
 > **⚠️ Training produces a LoRA adapter, and a bare adapter is rejected.** A
 > merged full checkpoint is what gets evaluated. There is **no `openroboto merge`
-> command yet** — until there is, merging is a manual step, so run
-> `openroboto check` before you burn anything.
+> command, and none is planned** — merging happens in your training script, inside
+> the training container, where the model libraries live. Run `openroboto check`
+> before you burn anything.
 
 ### Submit: Upload → Burn → Announce
 

@@ -27,10 +27,12 @@ openroboto submit          # upload → burn → announce
 openroboto status          # what the subnet made of it, and why
 ```
 
-**`check` before `submit`, every time.** Training produces a LoRA adapter, and a
-bare adapter is **rejected** — the evaluator needs a complete merged checkpoint.
-`check` applies the evaluator's own rules locally, for free. `submit` burns TAO,
-and burns are **not refunded**.
+**`check` before `submit`, every time.** The bundled strategy writes a LoRA
+adapter, and a bare adapter is **rejected** — the evaluator needs a complete
+merged checkpoint, and there is **no `openroboto merge` command**: merging the
+adapter into the base belongs in `train_strategy.py`, which runs in the training
+container where the model libraries are. `check` applies the evaluator's own
+rules locally, for free. `submit` burns TAO, and burns are **not refunded**.
 
 ## What is in here
 

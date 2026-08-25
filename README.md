@@ -84,9 +84,12 @@ Real-machine setup, systemd, custom strategies: [docs/MINER_DEPLOY.md](docs/MINE
 | `openroboto validator run` | External validator: read published weights, set them on chain |
 | `openroboto --version` | CLI version and protocol package version |
 
-⚠️ **`openroboto merge` does not exist yet.** Training produces a LoRA adapter, and a
-bare adapter is rejected — merging it into the base model is currently a manual step.
-`openroboto check` catches an unmerged upload before you pay.
+⚠️ **There is no `openroboto merge`, and none is planned.** The bundled training
+strategy writes a LoRA adapter, and a bare adapter is rejected by the evaluator.
+Merging the adapter into the base and exporting a full checkpoint is part of
+**training** — it needs the model libraries, which cannot live in the same
+interpreter as `bittensor` — so it belongs in your training script, inside the
+training container. `openroboto check` catches an unmerged upload **before you pay**.
 
 ## Things that will cost you TAO if you skip them
 

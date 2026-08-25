@@ -1,5 +1,11 @@
 # Custom Training Strategy — Usage Guide
 
+> **Status**: current · **Updated**: 2026-08-25 · **Audience**: miners writing their
+> own training logic.
+> **Scope**: the `train(cfg, episodes, policy)` contract and how your script reaches
+> the training container. For the round workflow around it, read
+> [MINER.md](./MINER.md).
+
 ## Overview
 
 Custom training scripts are injected into the container through a **volume mount**, so you can replace the training logic without rebuilding the Docker image.
@@ -264,31 +270,26 @@ def _gpu_name():
 
 ## How to use it
 
-### Option 1: pass it in miner.py
+### Option 1: `miner.yaml` (the normal way)
 
-```python
-from miner.trainer_vla import train_vla
-
-train_vla(
-    checkpoint_path=...,
-    train_json_path=...,
-    output_dir="/tmp/output_vla",
-    config=train_cfg,
-    hf_token=hf_token,
-    custom_train_script="/path/to/my_strategy.py",  # ← add this line
-)
-```
-
-### Option 2: through config.yaml
-
-Add the path to your miner config:
+`openroboto init` already writes this, pointing at the `train_strategy.py` it
+unpacked next to it:
 
 ```yaml
-training:
-  custom_train_script: /path/to/my_strategy.py
+custom_train_script: "train_strategy.py"   # top level, not nested under `training:`
 ```
 
-Then read the setting in `trainer_vla.py` or `training_pipeline_vla.py` and pass it through.
+Then just run:
+
+```bash
+openroboto train
+```
+
+### Option 2: one run with a different script
+
+```bash
+openroboto train -s /path/to/my_strategy.py     # overrides custom_train_script
+```
 
 ### Option 3: direct docker run for testing
 
@@ -328,7 +329,7 @@ docker run -v /path/to/my_training:/data/scripts ...
 1. **You must define a `train(cfg, episodes, policy)` function**, otherwise the container exits with an error.
 2. **You must return the `(metrics, proof)` dict pair** in the same format as the default pipeline.
 3. **Model save directory** must be `cfg['output_dir']/adapter` — that is where the training pipeline collects your output from the container.
-4. **The adapter saved there is not the submission artifact.** The evaluation service only accepts complete model checkpoints (openpi JAX `params/` or PyTorch `model.safetensors`, plus `assets/physical-intelligence/libero/norm_stats.json`); a bare LoRA adapter is rejected by a CPU pre-check before evaluation. Merge the adapter into the π0.5 base and export the full checkpoint before running `rt.py upload`. See [docs/SUBNET_OVERVIEW.md](../docs/SUBNET_OVERVIEW.md).
+4. **The adapter saved there is not the submission artifact.** The evaluator only accepts complete model checkpoints (openpi JAX `params/` or PyTorch `model.safetensors`, plus `assets/physical-intelligence/libero/norm_stats.json`); a bare LoRA adapter is rejected before evaluation, and there is **no `openroboto merge` command** — your script (or your own export step) has to merge the adapter into the base and write the full checkpoint into `cfg['output_dir']`. Run `openroboto check` before `openroboto submit`: it applies the evaluator's rules locally, for free. See [SUBNET_OVERVIEW.md](./SUBNET_OVERVIEW.md).
 5. **openpi modules are available** — the container ships with openpi installed; `import openpi.*` works out of the box.
 6. **GPU is available** — torch and CUDA work normally inside the container.
 7. **Temporary directories** — `/tmp` is usable inside the container but is lost on exit; persistent output must be written to `cfg['output_dir']`.
