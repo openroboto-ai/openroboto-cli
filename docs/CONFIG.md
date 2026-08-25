@@ -83,13 +83,23 @@ openroboto init my-miner    # miner.yaml + train_strategy.py + README.md + .giti
 | `subnet` | `wallet_password` | Optional local unlock value; never commit it |
 | `urls` | `control_json` | Public miner-readable control document |
 | `urls` | `dataset_train`, `dataset_val` | Public training and validation resources |
-| `competition` | `adapter`, `params` | Which competition this workspace mines. Decides the rules `openroboto check` judges your checkpoint by — π0.5 (openpi) and LingBot-VLA 2.0 accept different layouts. Empty = the π0.5 simulation competition, as before |
+| `competition` | the whole section | Which competition this workspace mines. **Written by `openroboto init`, rewritten by `openroboto init --refresh`** — the season's own spec, kept on disk so `build` / `train` / `check` never go online. Empty = the π0.5 simulation competition, as before |
+| `competition` | `track`, `seq` | The durable key. `id` is stored too, but it is local to one backend database and is re-resolved from `(track, seq)` before it is sent anywhere |
+| `competition` | `adapter` | Decides the rules `openroboto check` judges your checkpoint by (π0.5 and LingBot-VLA 2.0 accept different layouts) and whether `openroboto train` has a container for this season |
+| `competition` | `params` | The season's spec verbatim: `fee`, `training.image`, `strategy_template`, `format`. Read, never rewritten by us — a new season adding a key needs no new CLI |
 | `model` | `vla_model_id`, `vla_checkpoint_path` | Base model selection. Leave the path empty and the container downloads the base checkpoint into `./cache/pi05_base` |
 | `huggingface` | `token`, `username` | Local Hugging Face upload credentials |
 | root | `custom_train_script` | Optional miner-owned training strategy path |
 | root | `log_level`, `log_dir` | Local logging |
 
 `payment` and selected training values are read from the public `control.json`.
+
+> **A workspace with a `competition` section does not read `control.json` for its
+> fee.** That season's `params.fee` is the fee, and `openroboto submit` confirms it
+> against the backend in the moment before paying — printing which season, how long
+> it has left, how much and to whom, and asking. That check cannot be turned off, and
+> `--force` does not skip it. A backend it cannot reach is a refusal, not a warning:
+> without an answer there is no way to say who the money would be going to.
 
 > **Do not set `payment.burn_rate_tao` locally.** The announced fee is the only
 > correct value; a stale local override burns the wrong amount, and a wrong amount is

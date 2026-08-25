@@ -371,7 +371,15 @@ def _confirmed() -> bool:
             "   → run `openroboto submit` from a terminal"
         )
         return False
-    return input("Pay now? [y/N] ").strip().lower() in ("y", "yes")
+    try:
+        return input("Pay now? [y/N] ").strip().lower() in ("y", "yes")
+    except EOFError:
+        # Input closed while the question was on screen -- a terminal that went
+        # away, a wrapper that redirected stdin after opening a tty. Unanswered
+        # is unanswered; letting this out as a traceback would be a stack trace
+        # where the miner is owed a sentence saying their TAO is still theirs.
+        fail("No answer given, so nothing was paid.")
+        return False
 
 
 def _find(snapshot: Snapshot, live_rows: Sequence[Competition]) -> Competition:

@@ -379,6 +379,25 @@ def test_anything_but_yes_is_a_no(monkeypatch: pytest.MonkeyPatch, reply: str) -
         precheck(Settings(), _snapshot(live), NOW)
 
 
+def test_a_terminal_that_goes_away_mid_question_is_not_a_yes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Measured during the end-to-end run: stdin closing at the prompt used to
+    surface as an `EOFError` traceback, which is a stack trace where the miner
+    is owed one sentence saying their TAO is still theirs."""
+    live = _competition()
+    _backend(monkeypatch, [live])
+    monkeypatch.setattr(competition_module.sys.stdin, "isatty", lambda: True)
+
+    def _closed(*args: Any) -> str:
+        raise EOFError
+
+    monkeypatch.setattr("builtins.input", _closed)
+
+    with pytest.raises(PrecheckFailed):
+        precheck(Settings(), _snapshot(live), NOW)
+
+
 def test_a_malformed_snapshot_cannot_escape_as_a_different_exception(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
