@@ -15,6 +15,12 @@ venv/
 # be tracked -- if the *.yaml rule swallows them, a wheel built from a clean
 # clone contains no templates and `openroboto init` fails outright.
 !src/openroboto/templates/*.yaml
+# Exception: the test fixtures. `tests/fixtures/miner_legacy.yaml` is the config a
+# miner wrote before competitions existed, and `tests/test_backward_compat.py`
+# compares against a baseline recorded from it. Swallowed by the `*.yaml` rule it
+# would be absent from a clean clone, and the comparison would then be against
+# whatever a fresh run produced -- green, and guarding nothing.
+!tests/fixtures/*.yaml
 # Exception: the pre-commit config. It must be tracked, otherwise everyone runs
 # a different set of hooks. Measured: `git check-ignore -v
 # .pre-commit-config.yaml` matches the `*.yaml` rule above, so adding it fails
@@ -69,3 +75,9 @@ Thumbs.db
 AGENTS.md
 CLAUDE.md
 SCOPE.md
+
+# ── Trellis / Claude Code 本地工作流 ─────────────────────
+# 这是内部开发工具的运行时目录，不是矿工要读的东西 —— 和上面
+# AGENTS.md / CLAUDE.md / SCOPE.md 同一个理由，公开仓不带它们。
+.trellis/
+.claude/
