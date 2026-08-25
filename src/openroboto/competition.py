@@ -35,7 +35,7 @@ import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Final
+from typing import Any, Final, NoReturn
 
 from openroboto_protocol.schemas import Competition
 
@@ -66,8 +66,24 @@ class PrecheckFailed(Exception):
     """The pre-payment check did not pass, so nothing was paid.
 
     The reason and the next step have **already been printed** by the time this
-    is raised; the command layer only has to return 1.
+    is raised; the command layer only has to return 1
+    (`commands/submit.py` is written against exactly that).
+
+    🔴 **Raise it through `_refuse()`, never directly.** The contract above is a
+    promise made to the caller, and a bare `raise` breaks it silently: the
+    command layer returns 1 and prints nothing at all, on the one path where the
+    miner most needs a sentence. That happened — an unreachable backend exited 1
+    with an empty stderr, discarding the diagnosis the message carried.
+
+    The two are one action, so they live in one function rather than in every
+    author's memory.
     """
+
+
+def _refuse(message: str) -> NoReturn:
+    """Say why, then refuse. **The only sanctioned way to fail a precheck.**"""
+    fail(message)
+    raise PrecheckFailed(message)
 
 
 @dataclass(frozen=True)
@@ -311,10 +327,10 @@ def precheck(settings: Settings, snapshot: Snapshot, now: datetime) -> Verdict:
     try:
         live_rows = fetch_competitions(settings.backend_url).data
     except BackendError as exc:
-        raise PrecheckFailed(
+        _refuse(
             f"Cannot reach the backend, so there is no way to confirm which "
             f"competition this fee would pay for. Nothing was paid.\n  {exc}"
-        ) from exc
+        )
 
     try:
         verdict = judge(snapshot, live_rows, now)
@@ -328,7 +344,11 @@ def precheck(settings: Settings, snapshot: Snapshot, now: datetime) -> Verdict:
 
     _announce(verdict)
     if not _confirmed():
-        raise PrecheckFailed("Cancelled at the confirmation prompt; nothing was paid.")
+        # `_confirmed()` already explained the not-a-tty and closed-stdin cases.
+        # A plain "n" is the one route here that has said nothing yet, and on a
+        # path that spends money the miner is owed the confirmation that it did
+        # not.
+        _refuse("Cancelled at the confirmation prompt; nothing was paid.")
     return verdict
 
 

@@ -428,3 +428,56 @@ def test_the_fee_never_comes_from_the_subnet_wide_rate(
     settings = Settings()
     settings.burn_rate_tao = 0.1
     assert precheck(settings, _snapshot(live), NOW).amount_tao == 2.0
+
+
+def test_an_unreachable_backend_says_so_instead_of_exiting_silently(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """🔴 Refusing to pay must say why. Exit code 1 alone is not a message.
+
+    `PrecheckFailed` promises its caller that the reason is already on screen,
+    and `commands/submit.py` is written against that promise: it catches and
+    returns 1 without printing anything itself. A bare `raise` therefore
+    produces exit 1 with an empty stderr -- on the money path, and while
+    discarding the diagnosis the backend sent back.
+
+    Measured before the fix: `openroboto submit` against a stopped backend
+    exited 1 and wrote zero bytes to stderr. The miner had nothing to act on.
+    """
+    from openroboto.backend_api import BackendError
+
+    def _boom(base_url: str, **kwargs: Any) -> Any:
+        raise BackendError("connection refused", retryable=True)
+
+    monkeypatch.setattr(competition_module, "fetch_competitions", _boom)
+    live = _competition()
+
+    with pytest.raises(PrecheckFailed):
+        precheck(Settings(), _snapshot(live), NOW)
+
+    err = capsys.readouterr().err
+    assert err.strip(), "refused to pay and said nothing at all"
+    assert "Nothing was paid" in err
+    # The backend's own words survive: without them the miner cannot tell a
+    # stopped service from a wrong URL.
+    assert "connection refused" in err
+
+
+def test_declining_at_the_prompt_confirms_that_nothing_was_paid(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Typing `n` is the one refusal route that used to print nothing.
+
+    The two other ways `_confirmed()` returns False -- not a terminal, stdin
+    closed -- each say so themselves. A plain `n` did not, and the miner knows
+    they declined without knowing whether the decline landed before or after
+    the transfer. On a path that spends money, that sentence is owed.
+    """
+    live = _competition()
+    _backend(monkeypatch, [live])
+    _answer(monkeypatch, "n")
+
+    with pytest.raises(PrecheckFailed):
+        precheck(Settings(), _snapshot(live), NOW)
+
+    assert "nothing was paid" in capsys.readouterr().err.lower()
