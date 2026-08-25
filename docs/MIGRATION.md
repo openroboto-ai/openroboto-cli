@@ -154,12 +154,13 @@ They are unmaintained from 2026-08-19 and will not receive fixes.
 >
 > Every `<TBD: …>` below is a value that does not exist yet. Before this section is
 > published, all of them must be filled in and this banner replaced with
-> `**Status**: current`. The release it describes is not out: the client version, the
-> switch date and the protocol package version are all still unset. **Do not treat
-> any number in this section as a commitment until then.**
+> `**Status**: current`. The release it describes is not out: the client version and
+> the switch date are still unset. **Do not treat any number in this section as a
+> commitment until then.**
 >
-> Blocking the release: `openroboto-protocol 0.7.0` (unreleased) · the CLI release
-> that pins it · the LingBot training image · the competition list endpoint.
+> Blocking the release: the CLI release · the LingBot training image · the competition
+> list endpoint. `openroboto-protocol 0.7.0` **is** released (2026-08-25, PyPI) and
+> this repository pins it, so the protocol package is no longer one of them.
 
 ## The three things you actually need to know
 
@@ -188,7 +189,7 @@ Because scores from the two base models are not comparable, they are not merged:
 
 ```bash
 pip install -U openroboto
-openroboto --version          # expect: openroboto <TBD: version> (openroboto-protocol <TBD: 0.7.0>)
+openroboto --version          # expect: openroboto <TBD: version> (openroboto-protocol 0.7.0)
 
 cd my-miner
 openroboto init --refresh     # re-fetch the competition spec into miner.yaml;
