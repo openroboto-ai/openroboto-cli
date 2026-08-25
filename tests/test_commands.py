@@ -6,9 +6,12 @@ All pure local logic: no network, no GPU, no chain.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
+from importlib.resources import files
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -19,8 +22,9 @@ from openroboto_protocol.model_format import (
     FormatIssueCode,
     FormatReport,
 )
-from openroboto_protocol.schemas import Reason, SubmissionHistoryItem
+from openroboto_protocol.schemas import Competition, Reason, SubmissionHistoryItem
 
+from openroboto.backend_api import BackendError, RosterEntry
 from openroboto.commands import build as build_command
 from openroboto.commands import check as check_command
 from openroboto.commands import doctor as doctor_command
@@ -42,23 +46,73 @@ from openroboto.round_state import (
     resolve_round,
     save_state,
 )
+from openroboto.training.container import DEFAULT_IMAGE, runner_image
 
 BIG_ENOUGH = 11 * 1024 * 1024  # the protocol requires >= 10 MB per repo; below that it
 # is judged "only a pointer was uploaded"
 
 
 # ─── init ────────────────────────────────────────────────────
+#
+# `init` is the one command that needs the network, so every case here fakes
+# the competition list. The two that matter most are the ones about **not**
+# writing: an unreachable backend must leave the target directory empty, and
+# `--refresh` must not touch a single line outside the competition section.
+
+COMPETITION_ROW: dict[str, Any] = {
+    "id": 3,
+    "track": "real",
+    "seq": 1,
+    "label": "xArm 6 第一届",
+    "adapter": "real_xarm6",
+    "status": "active",
+    "submit_closes_at": "2026-09-10T00:00:00Z",
+    "base_repo": None,
+    "base_revision": None,
+    "params": {
+        "fee": {"kind": "transfer", "amount_tao": 2.0, "coldkey": None},
+        "training": {"image": "lingbot-runner:1.2"},
+    },
+}
 
 
-def test_init_releases_config_and_strategy(tmp_path: Path) -> None:
-    """Miners clone nothing: the templates ship in the wheel and init unpacks them."""
+def _row(**overrides: Any) -> Competition:
+    return Competition.model_validate(COMPETITION_ROW | overrides)
+
+
+def _serving(monkeypatch: pytest.MonkeyPatch, *rows: Competition) -> list[str]:
+    """Answer `init`'s one request. Returns the base URLs it was called with,
+    so "sent no request at all" is an assertion and not an assumption."""
+    called: list[str] = []
+
+    def _fetch(base_url: str, **kwargs: Any) -> Any:
+        called.append(base_url)
+        return SimpleNamespace(data=list(rows))
+
+    monkeypatch.setattr(init_command, "fetch_competitions", _fetch)
+    return called
+
+
+def _init_args(directory: Path, **overrides: Any) -> argparse.Namespace:
     args = argparse.Namespace(
-        directory=str(tmp_path / "my-miner"),
-        strategy="simple",
+        directory=str(directory),
+        strategy="",
         validator=False,
+        refresh=False,
+        backend_url="http://backend.test",
         force=False,
     )
-    assert init_command.run(args) == 0
+    for key, value in overrides.items():
+        setattr(args, key, value)
+    return args
+
+
+def test_init_releases_config_and_strategy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Miners clone nothing: the templates ship in the wheel and init unpacks them."""
+    _serving(monkeypatch, _row())
+    assert init_command.run(_init_args(tmp_path / "my-miner")) == 0
 
     target = tmp_path / "my-miner"
     assert (target / "miner.yaml").is_file()
@@ -67,13 +121,140 @@ def test_init_releases_config_and_strategy(tmp_path: Path) -> None:
     assert Settings.load(str(target / "miner.yaml")).netuid == 80
 
 
-def test_init_does_not_overwrite_without_force(tmp_path: Path) -> None:
+def test_init_takes_the_only_competition_without_asking(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Asking which of one is not a choice, it is a keystroke."""
+    _serving(monkeypatch, _row())
+
+    def _no_input(*args: Any) -> str:
+        raise AssertionError("init asked a question with only one possible answer")
+
+    monkeypatch.setattr("builtins.input", _no_input)
+
+    assert init_command.run(_init_args(tmp_path / "w")) == 0
+    assert "cid=3" in capsys.readouterr().out
+
+
+def test_init_writes_the_competition_the_miner_picked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _serving(
+        monkeypatch,
+        _row(id=1, track="sim", seq=2, label="LingBot-VLA 2.0", adapter="sim_lingbot"),
+        _row(),
+    )
+    monkeypatch.setattr("builtins.input", lambda *a: "2")
+
+    assert init_command.run(_init_args(tmp_path / "w")) == 0
+
+    listing = capsys.readouterr().out
+    assert "1. LingBot-VLA 2.0" in listing
+    assert "2. xArm 6 第一届" in listing
+    written = Settings.load(str(tmp_path / "w" / "miner.yaml"))
+    assert written.competition["id"] == 3
+    assert written.competition_adapter == "real_xarm6"
+
+
+def test_init_keeps_the_competition_parameters_verbatim(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A season adding a key to `params` must not need a release of this
+    package, so nothing is picked out of it on the way to disk."""
+    _serving(monkeypatch, _row())
+    assert init_command.run(_init_args(tmp_path / "w")) == 0
+
+    written = Settings.load(str(tmp_path / "w" / "miner.yaml"))
+    assert written.competition_params == COMPETITION_ROW["params"]
+    # 🔴 including the `null` collection address: filled in with anything, the
+    # fail-closed gate before payment never fires.
+    assert written.competition_params["fee"]["coldkey"] is None
+
+
+def test_init_writes_nothing_at_all_when_the_backend_is_unreachable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """🔴 Half a workspace is worse than none: the next thing a miner does is
+    `build`, and a config with no competition in it builds the wrong image and
+    is judged by the wrong rules."""
+
+    def _fetch(base_url: str, **kwargs: Any) -> Any:
+        raise BackendError("connection refused", retryable=True)
+
+    monkeypatch.setattr(init_command, "fetch_competitions", _fetch)
+
+    target = tmp_path / "w"
+    assert init_command.run(_init_args(target)) == 1
+    assert not target.exists() or list(target.iterdir()) == []
+
+
+def test_init_does_not_invent_a_competition_when_none_are_open(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _serving(monkeypatch)
+    target = tmp_path / "w"
+    assert init_command.run(_init_args(target)) == 1
+    assert not target.exists() or list(target.iterdir()) == []
+
+
+def test_init_refuses_a_competition_this_client_cannot_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Writing the workspace anyway would leave the miner one `pip install`
+    short of a config that every later command refuses."""
+    _serving(monkeypatch, _row(adapter="real_xarm7"))
+    target = tmp_path / "w"
+    assert init_command.run(_init_args(target)) == 1
+    assert not target.exists() or list(target.iterdir()) == []
+
+
+def test_init_unpacks_the_strategy_the_competition_asks_for(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    params = COMPETITION_ROW["params"] | {"strategy_template": "example"}
+    _serving(monkeypatch, _row(params=params))
+    assert init_command.run(_init_args(tmp_path / "w")) == 0
+
+    unpacked = (tmp_path / "w" / "train_strategy.py").read_text(encoding="utf-8")
+    assert "def train(" in unpacked
+    # the annotated teaching version, not the minimal one
+    assert unpacked != (
+        files("openroboto") / "templates" / "simple" / "train_strategy.py"
+    ).read_text(encoding="utf-8")
+
+
+def test_an_explicit_strategy_beats_the_competitions_choice(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    params = COMPETITION_ROW["params"] | {"strategy_template": "example"}
+    _serving(monkeypatch, _row(params=params))
+    assert init_command.run(_init_args(tmp_path / "w", strategy="simple")) == 0
+
+    assert (tmp_path / "w" / "train_strategy.py").read_text(encoding="utf-8") == (
+        files("openroboto") / "templates" / "simple" / "train_strategy.py"
+    ).read_text(encoding="utf-8")
+
+
+def test_a_strategy_template_this_client_does_not_ship_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Handing over the generic script instead would be found out at `check`,
+    after the training run."""
+    params = COMPETITION_ROW["params"] | {"strategy_template": "lingbot_v2"}
+    _serving(monkeypatch, _row(params=params))
+    target = tmp_path / "w"
+    assert init_command.run(_init_args(target)) == 1
+    assert not target.exists() or list(target.iterdir()) == []
+
+
+def test_init_does_not_overwrite_without_force(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _serving(monkeypatch, _row())
     config = tmp_path / "miner.yaml"
     config.write_text("subnet:\n  netuid: 80\n", encoding="utf-8")
 
-    args = argparse.Namespace(
-        directory=str(tmp_path), strategy="simple", validator=False, force=False
-    )
+    args = _init_args(tmp_path)
     init_command.run(args)
     assert config.read_text(encoding="utf-8") == "subnet:\n  netuid: 80\n"
 
@@ -82,16 +263,22 @@ def test_init_does_not_overwrite_without_force(tmp_path: Path) -> None:
     assert "OpenRoboto" in config.read_text(encoding="utf-8")
 
 
-def test_init_validator_writes_validator_config_only(tmp_path: Path) -> None:
-    args = argparse.Namespace(
-        directory=str(tmp_path), strategy="simple", validator=True, force=False
-    )
-    init_command.run(args)
+def test_init_validator_sends_no_request_at_all(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """External validators watch the whole subnet; there is no competition to
+    pick, and asking for one would break them the day the endpoint is down."""
+    called = _serving(monkeypatch, _row())
+    init_command.run(_init_args(tmp_path, validator=True))
+
+    assert called == []
     assert (tmp_path / "validator.yaml").is_file()
     assert not (tmp_path / "train_strategy.py").exists()
 
 
-def test_init_gitignores_the_file_holding_the_wallet_password(tmp_path: Path) -> None:
+def test_init_gitignores_the_file_holding_the_wallet_password(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """`.gitignore` must block the config file -- this is a security item, not a
     convenience item.
 
@@ -100,15 +287,10 @@ def test_init_gitignores_the_file_holding_the_wallet_password(tmp_path: Path) ->
     this line, the very first `git add .` commits the wallet password, and **there is
     no warning of any kind**.
     """
+    _serving(monkeypatch, _row())
     for validator in (False, True):
         target = tmp_path / ("val" if validator else "miner")
-        args = argparse.Namespace(
-            directory=str(target),
-            strategy="simple",
-            validator=validator,
-            force=False,
-        )
-        assert init_command.run(args) == 0
+        assert init_command.run(_init_args(target, validator=validator)) == 0
 
         ignored = (target / ".gitignore").read_text(encoding="utf-8")
         assert "miner.yaml" in ignored
@@ -119,20 +301,101 @@ def test_init_gitignores_the_file_holding_the_wallet_password(tmp_path: Path) ->
 
 
 def test_init_writes_a_workspace_readme_that_names_the_next_command(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The workspace ships its own manual. A miner should not have to open a web page
     to find out which command comes next."""
-    args = argparse.Namespace(
-        directory=str(tmp_path / "w"), strategy="simple", validator=False, force=False
-    )
-    assert init_command.run(args) == 0
+    _serving(monkeypatch, _row())
+    assert init_command.run(_init_args(tmp_path / "w")) == 0
 
     readme = (tmp_path / "w" / "README.md").read_text(encoding="utf-8")
     for command in ("openroboto doctor", "openroboto train", "openroboto check"):
         assert command in readme, f"README does not mention {command}"
     # skipping check costs non-refundable TAO, so this sentence must be there
     assert "not refunded" in readme
+
+
+# ─── init --refresh ──────────────────────────────────────────
+
+
+def _workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A workspace the miner has since filled in and commented."""
+    _serving(monkeypatch, _row())
+    target = tmp_path / "w"
+    assert init_command.run(_init_args(target)) == 0
+
+    config = target / "miner.yaml"
+    edited = config.read_text(encoding="utf-8").replace(
+        'token: ""', 'token: "hf_secret"  # my write token'
+    )
+    config.write_text(edited, encoding="utf-8")
+    return target
+
+
+def test_refresh_updates_the_competition_and_nothing_else(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """🔴 Overwriting a hand-edited value is the worst accident this command can
+    cause -- and unlike a crash, nobody finds out."""
+    target = _workspace(tmp_path, monkeypatch)
+    _serving(monkeypatch, _row(label="xArm 6 第一届（延长）", status="active"))
+
+    assert init_command.run(_init_args(target, refresh=True)) == 0
+
+    after = (target / "miner.yaml").read_text(encoding="utf-8")
+    assert 'token: "hf_secret"  # my write token' in after
+    assert "延长" in after
+    # every comment of the shipped template is still there, byte for byte
+    assert "# ─── Bittensor subnet ─" in after
+
+
+def test_refresh_keeps_the_previous_version_on_disk(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The backup **is** the rollback path: rewriting the config is the only
+    part of this command that cannot be undone."""
+    target = _workspace(tmp_path, monkeypatch)
+    before = (target / "miner.yaml").read_text(encoding="utf-8")
+    _serving(monkeypatch, _row(label="renamed"))
+
+    assert init_command.run(_init_args(target, refresh=True)) == 0
+
+    assert (target / "miner.yaml.bak").read_text(encoding="utf-8") == before
+
+
+def test_refresh_prints_what_it_is_about_to_change(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    target = _workspace(tmp_path, monkeypatch)
+    _serving(monkeypatch, _row(label="renamed"))
+
+    init_command.run(_init_args(target, refresh=True))
+
+    printed = capsys.readouterr().out
+    assert "-  label: xArm 6 第一届" in printed
+    assert "+  label: renamed" in printed
+
+
+def test_refresh_refuses_rather_than_guessing_where_the_section_went(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Guessing means rewriting a line that is not the one it meant."""
+    target = _workspace(tmp_path, monkeypatch)
+    config = target / "miner.yaml"
+    config.write_text("subnet:\n  netuid: 80\n", encoding="utf-8")
+    digest = hashlib.md5(config.read_bytes()).hexdigest()
+    _serving(monkeypatch, _row())
+
+    assert init_command.run(_init_args(target, refresh=True)) == 1
+    assert hashlib.md5(config.read_bytes()).hexdigest() == digest
+    assert not (target / "miner.yaml.bak").exists()
+
+
+def test_refresh_on_a_workspace_that_does_not_exist_says_so(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _serving(monkeypatch, _row())
+    assert init_command.run(_init_args(tmp_path / "nowhere", refresh=True)) == 1
 
 
 # ─── check ───────────────────────────────────────────────────
@@ -704,6 +967,126 @@ def test_build_command_assembly() -> None:
     ]  # fmt: skip
 
 
+# ─── build / train: which image, and whether there is one ────
+
+
+def _competition_config(tmp_path: Path, **section: Any) -> str:
+    """A `miner.yaml` for one competition, written the way `init` writes it."""
+    config = tmp_path / "miner.yaml"
+    config.write_text(
+        yaml.safe_dump({"competition": section}, allow_unicode=True), encoding="utf-8"
+    )
+    return str(config)
+
+
+def test_build_uses_the_image_this_competition_names(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.delenv("OPENPI_RUNNER_IMAGE", raising=False)
+    config = _competition_config(
+        tmp_path,
+        track="real",
+        seq=1,
+        adapter="real_xarm6",
+        params={"training": {"image": "lingbot-runner:1.2"}},
+    )
+    args = argparse.Namespace(
+        config=config, context="", image="", no_cache=False, dry_run=True
+    )
+    assert build_command.run(args) == 0
+    assert "lingbot-runner:1.2" in capsys.readouterr().out
+
+
+def test_an_explicit_image_beats_the_competitions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    config = _competition_config(
+        tmp_path, track="real", seq=1, params={"training": {"image": "from-params"}}
+    )
+    args = argparse.Namespace(
+        config=config, context="", image="mine:dev", no_cache=False, dry_run=True
+    )
+    assert build_command.run(args) == 0
+    printed = capsys.readouterr().out
+    assert "mine:dev" in printed
+    assert "from-params" not in printed
+
+
+def test_the_environment_override_still_wins(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A miner building their own image sets `OPENPI_RUNNER_IMAGE`, and that has
+    always won. Losing to a competition parameter would silently start ignoring
+    the image they built."""
+    monkeypatch.setenv("OPENPI_RUNNER_IMAGE", "mine:local")
+    config = _competition_config(
+        tmp_path, track="real", seq=1, params={"training": {"image": "from-params"}}
+    )
+    args = argparse.Namespace(
+        config=config, context="", image="", no_cache=False, dry_run=True
+    )
+    assert build_command.run(args) == 0
+    assert "mine:local" in capsys.readouterr().out
+
+
+def test_a_config_from_before_competitions_builds_what_it_always_did(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.delenv("OPENPI_RUNNER_IMAGE", raising=False)
+    args = argparse.Namespace(
+        config=str(tmp_path / "absent.yaml"),
+        context="",
+        image="",
+        no_cache=False,
+        dry_run=True,
+    )
+    assert build_command.run(args) == 0
+    assert DEFAULT_IMAGE in capsys.readouterr().out
+
+
+def test_train_refuses_a_competition_whose_training_is_not_released(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """🔴 Not a no-op: an empty output directory is something `openroboto check`
+    would then deliver a verdict about."""
+    called: list[Any] = []
+    monkeypatch.setattr(
+        train_command, "train_round", lambda **kwargs: called.append(kwargs)
+    )
+    monkeypatch.setattr(
+        train_command,
+        "fetch_control",
+        lambda *a, **k: pytest.fail("train went to the network before refusing"),
+    )
+    config = _competition_config(
+        tmp_path, track="real", seq=1, adapter="real_xarm6", params={}
+    )
+    args = argparse.Namespace(
+        config=config, output_dir=str(tmp_path / "out"), strategy=""
+    )
+
+    assert train_command.run(args) == 1
+    assert called == []
+    assert not (tmp_path / "out").exists()
+
+
+def test_train_runs_the_same_image_build_built(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Building one image and training in another is the kind of mismatch that
+    only shows up as a training run that behaves oddly."""
+    monkeypatch.delenv("OPENPI_RUNNER_IMAGE", raising=False)
+    config = _competition_config(
+        tmp_path,
+        track="sim",
+        seq=2,
+        adapter="sim_lingbot",
+        params={"training": {"image": "lingbot-runner:1.2"}},
+    )
+    assert build_command.competition_image(config) == "lingbot-runner:1.2"
+    assert runner_image(build_command.competition_image(config)) == "lingbot-runner:1.2"
+
+
 # ─── round_state ─────────────────────────────────────────────
 
 
@@ -1092,3 +1475,120 @@ def test_doctor_survives_an_unreachable_control_json(
     assert result.ok is False
     assert "Cannot reach" in result.detail
     assert "network" in result.fix  # tells them where to look, not just that it failed
+
+
+# ─── status: where a miner stands in the entry list ──────────
+
+
+def _roster_settings() -> Settings:
+    return Settings.from_mapping(
+        {
+            "backend": {"url": "http://backend.test"},
+            "competition": {
+                "track": "real",
+                "seq": 1,
+                "label": "xArm 6 第一届",
+                "adapter": "real_xarm6",
+                "params": {},
+            },
+        }
+    )
+
+
+def _entry(hotkey: str, **overrides: Any) -> RosterEntry:
+    return RosterEntry.model_validate(
+        {
+            "hotkey": hotkey,
+            "uid": 23,
+            "hf_repo_id": "miner/model",
+            "payment_status": "paid",
+            "hf_access_status": "verified",
+            **overrides,
+        }
+    )
+
+
+def _roster(
+    monkeypatch: pytest.MonkeyPatch,
+    entries: list[RosterEntry],
+    *,
+    total: int | None = None,
+) -> None:
+    monkeypatch.setattr(
+        status_command,
+        "fetch_competitions",
+        lambda *a, **k: SimpleNamespace(data=[_row()]),
+    )
+    page = SimpleNamespace(
+        total=len(entries) if total is None else total,
+        limit=1000,
+        offset=0,
+        has_more=total is not None and total > len(entries),
+    )
+    monkeypatch.setattr(
+        status_command,
+        "fetch_roster",
+        lambda *a, **k: SimpleNamespace(data=entries, meta=SimpleNamespace(page=page)),
+    )
+
+
+def test_status_counts_the_place_in_the_order_entries_were_joined(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The list arrives newest first; the queue is worked oldest first. Printing
+    the index as it arrives would tell the first entrant they are last."""
+    mine = "5Hb5muCtV2SqiVkZf1exftoccKrbeYsDf67xZpmSiYEDjmz7"
+    _roster(monkeypatch, [_entry("5Other"), _entry(mine), _entry("5Third")])
+
+    status_command.say_roster(_roster_settings(), mine)
+
+    printed = capsys.readouterr().out
+    assert "#2 of 3" in printed
+    assert mine[:8] in printed
+    assert "payment: paid" in printed
+
+
+def test_status_says_nothing_for_a_config_from_before_competitions(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(
+        status_command,
+        "fetch_roster",
+        lambda *a, **k: pytest.fail("asked for an entry list without a competition"),
+    )
+    status_command.say_roster(Settings(), "5X")
+    assert capsys.readouterr().out == ""
+
+
+def test_status_does_not_print_an_empty_entry_list(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _roster(monkeypatch, [_entry("5Other")])
+    status_command.say_roster(_roster_settings(), "5Mine")
+    assert "not on the entry list" in capsys.readouterr().out
+
+
+def test_a_backend_without_the_endpoint_does_not_take_status_down(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """🔴 This is the troubleshooting command. A 404 here must not cost the
+    miner the two sections they actually came for."""
+    _roster(monkeypatch, [])
+    monkeypatch.setattr(
+        status_command,
+        "fetch_roster",
+        lambda *a, **k: (_ for _ in ()).throw(BackendError("404")),
+    )
+
+    status_command.say_roster(_roster_settings(), "5Mine")
+
+    assert "cannot answer entry-list queries" in capsys.readouterr().out
+
+
+def test_status_says_so_rather_than_computing_a_place_from_part_of_the_list(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    mine = "5Hb5muCtV2SqiVkZ"
+    _roster(monkeypatch, [_entry(mine)], total=1200)
+    status_command.say_roster(_roster_settings(), mine)
+    assert "most recent" in capsys.readouterr().out

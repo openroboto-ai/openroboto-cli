@@ -26,6 +26,7 @@ import subprocess
 from pathlib import Path
 
 from openroboto import OPENPI_RUNNER_CONTEXT, runner_context
+from openroboto.config import Settings
 from openroboto.console import fail, hint, say
 from openroboto.training.container import runner_image
 
@@ -42,11 +43,20 @@ def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) 
         help="build context; defaults to the copy inside the package, but a local "
         f"./{OPENPI_RUNNER_CONTEXT}/ takes precedence",
     )
+    parser.add_argument("--config", default="miner.yaml")
     parser.add_argument(
-        "--image", default="", help="image name, defaults to $OPENPI_RUNNER_IMAGE"
+        "--image",
+        default="",
+        help="image name; defaults to $OPENPI_RUNNER_IMAGE, then to the image "
+        "this competition names",
     )
     parser.add_argument(
         "--no-cache", action="store_true", help="build without the layer cache"
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="print the docker command that would run, and stop",
     )
     parser.set_defaults(handler=run)
 
@@ -75,14 +85,31 @@ def build_command(image: str, context: str, no_cache: bool = False) -> list[str]
     return command
 
 
+def competition_image(config_path: str) -> str:
+    """The image this workspace's competition names, or `""`.
+
+    A missing or unreadable config is not an error here: `build` worked without
+    one before competitions existed, and the image it built then is still the
+    fallback (`runner_image()`).
+    """
+    if not Path(config_path).is_file():
+        return ""
+    training = Settings.load(config_path).competition_params.get("training") or {}
+    return str(training.get("image") or "") if isinstance(training, dict) else ""
+
+
 def run(args: argparse.Namespace) -> int:
-    image = args.image or runner_image()
+    image = args.image or runner_image(competition_image(args.config))
     context = resolve_context(args.context)
     if not args.context and not Path(OPENPI_RUNNER_CONTEXT).is_dir():
         hint(f"Building from the image definition inside the package ({context})")
 
     command = build_command(image, context, args.no_cache)
     say(f"🐳 {' '.join(command)}")
+    if args.dry_run:
+        # Checking that the right image name comes out otherwise means really
+        # running `docker build`, which pulls several gigabytes.
+        return 0
 
     try:
         completed = subprocess.run(command, timeout=BUILD_TIMEOUT_SEC, check=False)

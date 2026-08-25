@@ -147,6 +147,15 @@ class Settings:
     dataset_test_url: str = ""
 
     # ─── Competition ───────────────────────────────────
+    #: The `competition:` section verbatim -- the snapshot `openroboto init`
+    #: wrote of the season this workspace mines. Empty = a config from before
+    #: competitions existed, which keeps working unchanged.
+    #:
+    #: Stored raw because that is what it is: a copy of one backend row, read
+    #: through `competition.Snapshot`. The two fields below are the parts the
+    #: commands reach for often enough to deserve a name of their own; they are
+    #: read out of this same section, never set independently.
+    competition: dict[str, Any] = field(default_factory=dict)
     #: Which competition this workspace mines, as the adapter string
     #: `openroboto init` wrote into `miner.yaml`. Empty = a config from before
     #: competitions existed; see `adapters.DEFAULT_ADAPTER` for what that means.
@@ -320,6 +329,7 @@ class Settings:
         # does not recognize is a key a later competition added -- dropping it
         # here would mean a CLI release per competition parameter.
         competition = _section(data, "competition")
+        cfg.competition = competition
         cfg.competition_adapter = str(
             competition.get("adapter", cfg.competition_adapter) or ""
         )

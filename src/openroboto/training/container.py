@@ -40,13 +40,16 @@ FREE_GPU_MEMORY_RATIO = 0.1
 """A card using less than 10% of its total VRAM counts as free."""
 
 
-def runner_image() -> str:
+def runner_image(competition_image: str = "") -> str:
     """The training image name.
 
-    `OPENPI_RUNNER_IMAGE` can override it (needed when a miner builds their own
-    image).
+    `OPENPI_RUNNER_IMAGE` still wins (a miner building their own image needs it
+    to win, and it did before competitions existed). Below it comes the image
+    this competition names in `params.training.image`, and below that the
+    built-in default -- which is the π0.5 image, the one every config without a
+    competition section has always used.
     """
-    return os.getenv("OPENPI_RUNNER_IMAGE", DEFAULT_IMAGE)
+    return os.getenv("OPENPI_RUNNER_IMAGE") or competition_image or DEFAULT_IMAGE
 
 
 def build_docker_command(
@@ -256,6 +259,7 @@ def run_training(
     lora_alpha: int = 64,
     hotkey: str = "unknown",
     custom_train_script: str | None = None,
+    image: str = "",
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Run the training container once and return (metrics, proof).
 
@@ -294,6 +298,11 @@ def run_training(
             hotkey=hotkey,
             custom_train_script=custom_train_script,
             visible_devices=detect_free_gpus(),
+            # Empty = whatever `runner_image()` resolves to, which is what every
+            # call did before competitions existed. The container **interface**
+            # is untouched (red line #2): this only picks which image the same
+            # `docker run` line names.
+            image=image or None,
         )
         logger.info("🐳 Starting openpi-runner: %s", " ".join(command))
 

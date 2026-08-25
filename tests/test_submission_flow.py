@@ -9,7 +9,9 @@ Chain and HF are entirely faked, so these tests need no network, wallet or GPU.
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -20,6 +22,7 @@ from openroboto.commands import announce as announce_command
 from openroboto.commands import burn as burn_command
 from openroboto.commands import submit as submit_command
 from openroboto.config import Settings
+from openroboto.preflight import payload_size, payload_track
 from openroboto.round_state import save_state
 
 HOTKEY = "5" + "M" * 47
@@ -520,3 +523,581 @@ def test_submit_force_clears_the_previous_burn(
     args = argparse.Namespace(config="miner.yaml", round=3, output_dir="", force=True)
     assert submit_command.run(args) == 0
     assert burned == [True]
+
+
+# ─── the gate before the money ───────────────────────────────
+#
+# Skipping `openroboto check` must not skip this, `--force` must not skip it,
+# and there is no flag that does. Every case below asserts on the payment
+# function's **call count**, because that is the only assertion that
+# distinguishes "refused" from "refused after paying".
+
+
+def _season_settings(**fee: Any) -> Settings:
+    """A config `init` wrote for the LingBot simulation season."""
+    return Settings.from_mapping(
+        {
+            "subnet": {"netuid": 80, "network": "finney", "hotkey_ss58": HOTKEY},
+            "competition": {
+                "id": 2,
+                "track": "sim",
+                "seq": 2,
+                "label": "LingBot-VLA 2.0",
+                "adapter": "sim_lingbot",
+                "params": {
+                    "fee": {"kind": "burn", "amount_tao": 0.25, "coldkey": None, **fee}
+                },
+            },
+        }
+    )
+
+
+def _submitting(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> tuple[list[Any], list[Any]]:
+    """Wire `submit` up to fakes and return (precheck calls, payment calls)."""
+    monkeypatch.setattr(
+        submit_command.Settings, "load", staticmethod(lambda path: settings)
+    )
+    monkeypatch.setattr(submit_command, "perform_upload", lambda *a, **k: None)
+    monkeypatch.setattr(submit_command, "perform_announce", lambda *a, **k: True)
+
+    checked: list[Any] = []
+    paid: list[Any] = []
+
+    def _precheck(cfg: Settings, snapshot: Any, now: Any) -> Any:
+        checked.append(snapshot)
+        return SimpleNamespace(
+            live=SimpleNamespace(label="LingBot-VLA 2.0", id=2),
+            kind="burn",
+            amount_tao=0.25,
+            cid=2,
+        )
+
+    def _burn(cfg: Settings, round_num: int, state: dict[str, Any]) -> bool:
+        paid.append(cfg.burn_rate_tao)
+        state["burn_tx_hash"] = "0x" + "e" * 64
+        return True
+
+    monkeypatch.setattr(submit_command, "precheck", _precheck)
+    monkeypatch.setattr(submit_command, "perform_burn", _burn)
+    return checked, paid
+
+
+def test_submit_checks_the_competition_even_when_check_was_skipped(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    save_state(4, _uploaded_state())
+    checked, paid = _submitting(monkeypatch, _season_settings())
+
+    args = argparse.Namespace(config="miner.yaml", round=4, output_dir="", force=False)
+    assert submit_command.run(args) == 0
+    assert len(checked) == 1
+    # and the amount paid is the season's own, not a subnet-wide rate
+    assert paid == [0.25]
+
+
+def test_force_does_not_skip_the_competition_check(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """`--force` means "burn again", not "burn without looking"."""
+    monkeypatch.chdir(tmp_path)
+    state = _uploaded_state()
+    state.update({"burn_tx_hash": "0x" + "d" * 64})
+    save_state(5, state)
+    checked, _ = _submitting(monkeypatch, _season_settings())
+
+    args = argparse.Namespace(config="miner.yaml", round=5, output_dir="", force=True)
+    assert submit_command.run(args) == 0
+    assert len(checked) == 1
+
+
+def test_a_failed_check_spends_nothing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    save_state(6, _uploaded_state())
+    _, paid = _submitting(monkeypatch, _season_settings())
+
+    def _refuse(*args: Any, **kwargs: Any) -> Any:
+        raise submit_command.PrecheckFailed("the season closed")
+
+    monkeypatch.setattr(submit_command, "precheck", _refuse)
+    monkeypatch.setattr(
+        submit_command,
+        "perform_announce",
+        lambda *a, **k: pytest.fail("announced without paying"),
+    )
+
+    args = argparse.Namespace(config="miner.yaml", round=6, output_dir="", force=False)
+    assert submit_command.run(args) == 1
+    assert paid == []
+
+
+def test_a_season_paid_by_transfer_is_not_quietly_burned_instead(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """🔴 Burning the right amount the wrong way spends it and still leaves the
+    submission unpaid. Until transfers can be sent, this refuses."""
+    monkeypatch.chdir(tmp_path)
+    save_state(7, _uploaded_state())
+    _, paid = _submitting(monkeypatch, _season_settings())
+    monkeypatch.setattr(
+        submit_command,
+        "precheck",
+        lambda *a, **k: SimpleNamespace(
+            live=SimpleNamespace(label="xArm 6 第一届", id=3),
+            kind="transfer",
+            amount_tao=2.0,
+            cid=3,
+        ),
+    )
+
+    args = argparse.Namespace(config="miner.yaml", round=7, output_dir="", force=False)
+    assert submit_command.run(args) == 1
+    assert paid == []
+
+
+def test_a_config_from_before_competitions_takes_the_old_path(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """No section to check against, so the check does not run at all -- and the
+    rate still comes from control.json, exactly as it did."""
+    monkeypatch.chdir(tmp_path)
+    save_state(8, _uploaded_state())
+    checked, _ = _submitting(monkeypatch, _settings())
+    monkeypatch.setattr(
+        submit_command,
+        "precheck",
+        lambda *a, **k: pytest.fail("an old config has no competition to check"),
+    )
+
+    args = argparse.Namespace(config="miner.yaml", round=8, output_dir="", force=False)
+    assert submit_command.run(args) == 0
+    assert checked == []
+
+
+def test_a_season_config_reads_no_control_json_when_it_burns(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Two sources for one number with no rule for which wins -- and this one is
+    money. It is also one more request between "checked" and "paid"."""
+    monkeypatch.chdir(tmp_path)
+    settings = _season_settings()
+    settings.burn_rate_tao = 0.25
+    monkeypatch.setattr(
+        burn_command,
+        "refresh_burn_rate",
+        lambda *a, **k: pytest.fail("control.json was read for a season's fee"),
+    )
+    monkeypatch.setattr(burn_command, "get_subtensor", lambda network: _FakeSubtensor())
+    monkeypatch.setattr(burn_command, "open_wallet", lambda cfg: object())
+    monkeypatch.setattr(
+        burn_command,
+        "execute_stake_burn",
+        lambda **kwargs: SimpleNamespace(tx_hash="0x" + "f" * 64, block_number=1),
+    )
+    state = _uploaded_state()
+    state["competition_id"] = 2
+    save_state(9, state)
+
+    assert burn_command.perform_burn(settings, 9, state) is True
+
+
+def test_a_season_fee_nobody_checked_is_not_burned(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Reaching the burn with no rate means the gate never ran. Falling back to
+    control.json here would be that gate quietly becoming optional."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        burn_command,
+        "execute_stake_burn",
+        lambda **kwargs: pytest.fail("burned a fee that was never confirmed"),
+    )
+
+    assert burn_command.perform_burn(_season_settings(), 10, _uploaded_state()) is False
+
+
+# ─── the two keys 0.7.0 adds: cid and m ──────────────────────
+#
+# Everything a season can be looked up by stays **off** the payload: the track,
+# the base model, the fee, the format rules are all columns of the row `cid`
+# points at, and a second copy on chain is a second thing that can disagree with
+# the database. `m` is the one exception, and only because it cannot be looked
+# up -- the real track allows private repositories, so the backend cannot pull
+# the weights and fingerprint them itself.
+
+MODEL_HASH = "9" * 64
+CID = 3
+
+
+def _competition_settings(track: str = "real") -> Settings:
+    """A `miner.yaml` that `openroboto init` wrote for one season."""
+    return Settings.from_mapping(
+        {
+            "subnet": {"netuid": 80, "network": "finney", "hotkey_ss58": HOTKEY},
+            "payment": {"burn_rate_tao": 0.1},
+            "competition": {
+                "track": track,
+                "seq": 1,
+                "adapter": "real_xarm6" if track == "real" else "sim_openpi",
+                "params": {"fee": {"kind": "burn", "amount_tao": 0.1}},
+            },
+        }
+    )
+
+
+def _paid_state(**extra: Any) -> dict[str, Any]:
+    state = _uploaded_state()
+    state.update({"burn_tx_hash": "0x" + "d" * 64, "burn_block": 8_888_880})
+    state.update(extra)
+    return state
+
+
+def test_a_real_track_payload_carries_exactly_the_nine_keys(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The full key set, asserted as a **set** rather than by searching the
+    bytes for names -- a substring check passes on a payload that also carries
+    three keys nobody meant to send."""
+    monkeypatch.chdir(tmp_path)
+    captured = _capture_announcement(monkeypatch)
+
+    state = _paid_state(competition_id=CID, model_hash=MODEL_HASH)
+    assert announce_command.perform_announce(_competition_settings(), 1, state) is True
+
+    raw = encode(captured[0])
+    assert set(json.loads(raw)) == {"s", "h", "c", "r", "i", "b", "bb", "cid", "m"}
+    decoded = decode(raw).payload
+    assert decoded.competition_id == CID
+    assert decoded.model_hash == MODEL_HASH
+
+
+def test_a_simulation_season_carries_cid_but_no_fingerprint(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A public repository is one the backend can fingerprint itself, so `m` is
+    not written at all -- and "not written" is a missing key, not an empty
+    one."""
+    monkeypatch.chdir(tmp_path)
+    captured = _capture_announcement(monkeypatch)
+
+    state = _paid_state(competition_id=CID)
+    settings = _competition_settings(track="sim")
+    assert announce_command.perform_announce(settings, 1, state) is True
+
+    raw = encode(captured[0])
+    assert set(json.loads(raw)) == {"s", "h", "c", "r", "i", "b", "bb", "cid"}
+    assert b'"m"' not in raw
+
+
+@pytest.mark.parametrize("track", ["sim", "real"])
+def test_no_payload_ever_carries_track_or_a_second_pair_of_payment_keys(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, track: str
+) -> None:
+    """🔴 No `t`, no `f`, no `fb`.
+
+    The track is a column on the row `cid` points at; writing it on chain as
+    well creates a second source that can contradict the database. And `b`/`bb`
+    are the payment credential whatever the payment was -- a separate pair for
+    transfers would mean every reader had to know which pair to look at.
+    """
+    monkeypatch.chdir(tmp_path)
+    captured = _capture_announcement(monkeypatch)
+
+    state = _paid_state(competition_id=CID, model_hash=MODEL_HASH)
+    announce_command.perform_announce(_competition_settings(track), 1, state)
+
+    assert set(json.loads(encode(captured[0]))) & {"t", "f", "fb"} == set()
+
+
+def test_the_payment_credential_keys_are_the_historical_ones(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """`b` / `bb` carry whichever payment this season takes. Same keys, same
+    meaning: which transaction, which block."""
+    monkeypatch.chdir(tmp_path)
+    captured = _capture_announcement(monkeypatch)
+
+    state = _paid_state(competition_id=CID, model_hash=MODEL_HASH)
+    announce_command.perform_announce(_competition_settings(), 1, state)
+
+    decoded = decode(encode(captured[0])).payload
+    assert decoded.burn_tx_hash == "0x" + "d" * 64
+    assert decoded.burn_block == 8_888_880
+
+
+def test_a_real_track_announcement_without_a_season_is_not_sent(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Without `cid` the backend reads the submission as `(sim, seq=round_num)`
+    -- the entry fee would buy a place on the wrong leaderboard. Refuse, and say
+    so without claiming anything was sent."""
+    monkeypatch.chdir(tmp_path)
+    captured = _capture_announcement(monkeypatch)
+
+    state = _paid_state(model_hash=MODEL_HASH)
+    assert announce_command.perform_announce(_competition_settings(), 1, state) is False
+
+    assert captured == []
+    out = capsys.readouterr()
+    assert "`cid`" in out.err
+    assert "do not pay a second time" in out.err.lower()
+    assert "committing on chain" not in out.out
+
+
+def test_a_malformed_fingerprint_is_not_sent(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """63 hex digits, or upper case: the evaluator compares strings, so a
+    fingerprint that is nearly right is a fingerprint that never matches."""
+    monkeypatch.chdir(tmp_path)
+    captured = _capture_announcement(monkeypatch)
+
+    state = _paid_state(competition_id=CID, model_hash="9" * 63)
+    assert announce_command.perform_announce(_competition_settings(), 1, state) is False
+    assert captured == []
+    assert "`m`" in capsys.readouterr().err
+
+
+def test_an_unknown_track_never_falls_back_to_simulation(tmp_path: Path) -> None:
+    """`Track("banana")` raises and carries the offending value.
+
+    Reading it as simulation would put a real-track submission on the simulation
+    leaderboard *after* the entry fee has been paid, and nothing would look
+    wrong at the time.
+    """
+    settings = Settings.from_mapping(
+        {
+            "subnet": {"netuid": 80, "network": "finney"},
+            "competition": {"track": "banana", "seq": 1},
+        }
+    )
+    with pytest.raises(ValueError) as caught:
+        payload_track(settings)
+    assert "banana" in str(caught.value)
+    assert "sim" not in str(caught.value).replace("simulation", "")
+
+
+# ─── the sentinel: None, never "" ────────────────────────────
+
+
+def test_an_empty_model_hash_really_does_reach_the_chain() -> None:
+    """🔴 The negative case, and it is here to stay red-adjacent on purpose.
+
+    `encode()` decides with `is not None`, not with truthiness, so `""` is
+    written out as `"m":""` -- six bytes that every older payload does not have.
+    This asserts that it *would* happen, so that the assertion below (no
+    production code passes `""`) is guarding something real rather than
+    restating a `False`.
+    """
+    from openroboto.chain import build_payload
+
+    payload = build_payload(
+        hotkey_ss58=HOTKEY,
+        block_hash="c" * 64,
+        hf_commit=COMMIT,
+        round_num=1,
+        hf_repo_id="kyleab/pi05-abcdefghijkl",
+        burn_tx_hash="0x" + "d" * 64,
+        burn_block=8_888_880,
+        model_hash="",
+    )
+    assert b'"m":""' in encode(payload)
+
+
+def test_the_checkpoint_readers_turn_an_empty_value_into_none() -> None:
+    """Which is why nothing in this repo ever hands `""` over: the two readers
+    every command goes through map absent and empty onto the same `None`."""
+    from openroboto.round_state import competition_id, model_hash
+
+    assert model_hash({}) is None
+    assert model_hash({"model_hash": ""}) is None
+    assert model_hash({"model_hash": MODEL_HASH}) == MODEL_HASH
+
+    assert competition_id({}) is None
+    assert competition_id({"competition_id": CID}) == CID
+
+
+# ─── size: the new keys are paid for before the fee, not after ───
+
+
+def test_the_size_estimate_counts_the_new_keys() -> None:
+    """`payload_size` is what the pre-spend self-check prints and judges. If it
+    did not count `cid` and `m`, a repo name near the limit would pass the
+    check, the fee would be paid, and `encode()` would then refuse the
+    commitment that the fee had already bought."""
+    legacy = payload_size(_paid_state(), 1)
+    real = payload_size(_paid_state(competition_id=CID, model_hash=MODEL_HASH), 1)
+
+    assert real > legacy
+    assert real - legacy == len(f',"cid":{CID},"m":"{MODEL_HASH}"')
+
+
+def test_the_worst_real_track_payload_still_fits_on_chain() -> None:
+    """368 bytes of fixed overhead leaves 144 characters for the repo name.
+    Right at that limit it must encode, because the miner has paid by then."""
+    state = _paid_state(
+        competition_id=999_999,
+        model_hash=MODEL_HASH,
+        hf_repo_id="x" * 144,
+        hf_commit=COMMIT,
+    )
+    assert payload_size(state, 999) <= 512
+
+
+# ─── the gate that runs before the money ─────────────────────
+
+
+@pytest.mark.parametrize(
+    ("missing", "expected"),
+    [
+        ({}, "which season the fee is for"),
+        ({"competition_id": CID}, "model fingerprint"),
+    ],
+    ids=["no-cid", "no-fingerprint"],
+)
+def test_a_real_track_burn_spends_nothing_when_a_field_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    missing: dict[str, Any],
+    expected: str,
+) -> None:
+    """🔴 This is the one that matters. `announce` refusing afterwards saves an
+    extrinsic fee; refusing **here** saves the entry fee, which is not
+    refunded.
+
+    The rule about what the real track requires is `check_payload`'s, not a
+    second copy written into this repo -- two hand-written copies of it is how
+    the two sides drift apart. What this repo adds is the sentence about what to
+    do next, which the protocol package has no business knowing.
+    """
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(burn_command, "refresh_burn_rate", lambda *a: None)
+
+    def _explode(*args: Any, **kwargs: Any) -> None:
+        raise AssertionError(
+            "connected to the chain for a payload the backend would refuse -- "
+            "this is exactly the path that burns TAO for nothing"
+        )
+
+    monkeypatch.setattr(burn_command, "get_subtensor", _explode)
+
+    state = _uploaded_state()
+    state.update(missing)
+    assert burn_command.perform_burn(_competition_settings(), 1, state) is False
+    assert expected in capsys.readouterr().out
+
+
+def test_a_legacy_burn_is_not_asked_for_the_new_fields(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The same self-check, on a config with no competition section, still
+    passes with neither `cid` nor `m` anywhere in the checkpoint."""
+    monkeypatch.chdir(tmp_path)
+    from openroboto.payment import BurnReceipt
+
+    monkeypatch.setattr(burn_command, "refresh_burn_rate", lambda *a: None)
+    monkeypatch.setattr(burn_command, "get_subtensor", lambda network: _FakeSubtensor())
+    monkeypatch.setattr(burn_command, "open_wallet", lambda settings: _FakeWallet())
+    monkeypatch.setattr(
+        burn_command,
+        "execute_stake_burn",
+        lambda **kwargs: BurnReceipt(tx_hash="0x" + "d" * 64, block_number=8_888_880),
+    )
+
+    assert burn_command.perform_burn(_settings(), 1, _uploaded_state()) is True
+
+
+# ─── model_hash reaches the checkpoint from HF, after the push ───
+
+
+def _upload_settings(track: str) -> Settings:
+    settings = _competition_settings(track)
+    settings.hf_token = "hf_test_token"
+    settings.hf_username = "kyleab"
+    return settings
+
+
+def _fake_push(monkeypatch: pytest.MonkeyPatch) -> None:
+    from openroboto.commands import upload as upload_command
+    from openroboto.huggingface import UploadResult
+
+    monkeypatch.setattr(
+        upload_command,
+        "push_model",
+        lambda **kwargs: UploadResult(
+            url=f"https://huggingface.co/kyleab/pi05-x/commit/{COMMIT}",
+            commit_sha=COMMIT,
+        ),
+    )
+
+
+def test_the_fingerprint_is_taken_from_hf_after_the_push(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The input is the HF tree of the commit that was just created, **not** the
+    local directory: LFS object hashes only exist once HF has received the
+    files."""
+    monkeypatch.chdir(tmp_path)
+    from openroboto.commands import upload as upload_command
+
+    _fake_push(monkeypatch)
+    asked: list[tuple[str, str, str]] = []
+
+    def _fetch(repo_id: str, revision: str, hf_token: str = "") -> str:
+        asked.append((repo_id, revision, hf_token))
+        return MODEL_HASH
+
+    monkeypatch.setattr(upload_command, "fetch_model_hash", _fetch)
+
+    state: dict[str, Any] = {"hotkey_ss58": HOTKEY}
+    upload_command.perform_upload(_upload_settings("real"), 1, str(tmp_path), state)
+
+    assert state["model_hash"] == MODEL_HASH
+    assert asked == [(state["hf_repo_id"], COMMIT, "hf_test_token")]
+
+
+def test_a_simulation_upload_asks_hf_for_nothing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A public repository is one the backend fingerprints itself, so this path
+    keeps working exactly as it did -- no extra request, no extra way to
+    fail."""
+    monkeypatch.chdir(tmp_path)
+    from openroboto.commands import upload as upload_command
+
+    _fake_push(monkeypatch)
+
+    def _explode(*args: Any, **kwargs: Any) -> str:
+        raise AssertionError("the simulation track must not need a fingerprint")
+
+    monkeypatch.setattr(upload_command, "fetch_model_hash", _explode)
+
+    state: dict[str, Any] = {"hotkey_ss58": HOTKEY}
+    upload_command.perform_upload(_upload_settings("sim"), 1, str(tmp_path), state)
+    assert "model_hash" not in state
+
+
+def test_an_empty_fingerprint_stops_the_run_before_any_payment(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """No LFS object in the repository means the weights never arrived -- only
+    the pointers did. Saying so here, in those words, beats `check_payload`
+    saying "not 64 hex characters" three steps later."""
+    monkeypatch.chdir(tmp_path)
+    from openroboto.commands import upload as upload_command
+    from openroboto.huggingface import UploadError
+
+    _fake_push(monkeypatch)
+    monkeypatch.setattr(upload_command, "fetch_model_hash", lambda *a, **k: "")
+
+    state: dict[str, Any] = {"hotkey_ss58": HOTKEY}
+    with pytest.raises(UploadError) as caught:
+        upload_command.perform_upload(_upload_settings("real"), 1, str(tmp_path), state)
+
+    assert "no LFS file" in str(caught.value)
+    assert "model_hash" not in state

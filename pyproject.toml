@@ -202,8 +202,9 @@ testpaths = ["tests"]
 # GPU / real chain / real Docker (AGENTS.md §4: those only test argument assembly, not
 # a real run). Its purpose is not to "prove there are enough tests", it is "must not
 # go down".
-# Sits on the measured value: 73.34 as of `train`'s export advice (2026-08-25, up
-# from 73.14). Slack between
+# Sits on the measured value: 79.49 as of the competition snapshot, the pre-payment
+# check and the `cid` / `m` payload keys (2026-08-25, up from 73.34 and before that
+# 73.14). Slack between
 # the gate and reality is not safety margin, it is permission for exactly that many
 # points of silent regression. Raise it whenever a real run comes in higher.
 #
@@ -212,6 +213,6 @@ testpaths = ["tests"]
 # ~100% covered by construction, so it reports about 12 points higher — 82.38 rather
 # than 70.26. That number was briefly committed here and CI rejected the very commit
 # that introduced it. The gate is not the place to find out you measured differently.
-fail_under = 73.34
+fail_under = 79.49
 precision = 2
 show_missing = true

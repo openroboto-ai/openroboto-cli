@@ -6,9 +6,17 @@ from __future__ import annotations
 import argparse
 from typing import Any
 
+from openroboto_protocol.commitment import Track
+
 from openroboto.config import ConfigError, Settings
 from openroboto.console import say
-from openroboto.huggingface import build_repo_id, push_model
+from openroboto.huggingface import (
+    UploadError,
+    build_repo_id,
+    fetch_model_hash,
+    push_model,
+)
+from openroboto.preflight import payload_track
 from openroboto.round_state import (
     load_state,
     resolve_output_dir,
@@ -84,4 +92,43 @@ def perform_upload(
     state["status"] = "completed"
     if hotkey_ss58:
         state["hotkey_ss58"] = hotkey_ss58
+    _record_model_hash(settings, repo_id, result.commit_sha, state)
     save_state(round_num, state)
+
+
+def _record_model_hash(
+    settings: Settings, repo_id: str, commit_sha: str, state: dict[str, Any]
+) -> None:
+    """Ask HF for the fingerprint of what was just pushed -- **real track only**.
+
+    Two things decide the shape of this:
+
+    - it happens **after** the push and nowhere else. The fingerprint is made of
+      the repository's LFS object hashes, and those are computed by HuggingFace
+      while receiving the files; there is no such value in the local checkpoint
+      directory, so "compute it before uploading" is not a slower option, it is
+      not an option;
+    - it happens **only on the real track**. The simulation track's repositories
+      are public, so the backend computes the fingerprint itself and the `m` key
+      is not written at all -- doing this for everyone would add a network call,
+      and a way to fail, to a path that has worked for every miner so far.
+
+    An empty fingerprint stops the run here. It means the repository holds no
+    LFS object -- the pointers were pushed and the weights were not -- and the
+    next thing to happen would be paying an entry fee for an empty repository.
+    `check_payload` would refuse it later anyway, but by then with a message
+    about hex digits rather than about the weights.
+    """
+    if payload_track(settings) is not Track.REAL:
+        return
+    fingerprint = fetch_model_hash(repo_id, commit_sha, settings.hf_token)
+    if not fingerprint:
+        raise UploadError(
+            f"{repo_id} contains no LFS file at this commit, so there are no "
+            f"weights to fingerprint.\n"
+            f"  Usually this means only the pointer files were pushed, or the "
+            f"directory that was uploaded held no model at all.\n"
+            f"  → run `openroboto check` on the output directory, then "
+            f"upload again. **Nothing has been paid.**"
+        )
+    state["model_hash"] = fingerprint

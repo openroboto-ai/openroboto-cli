@@ -58,6 +58,37 @@ def save_state(round_num: int, state: dict[str, Any], base: Path = STATE_DIR) ->
     )
 
 
+def competition_id(state: dict[str, Any]) -> int | None:
+    """Which season this round is being submitted to, or `None`.
+
+    It is written by the step that **paid** -- the pre-payment check resolves it
+    from the row the backend served at that moment -- and read back here by
+    `announce`, the same way `burn_tx_hash` travels between two commands that
+    can be run minutes apart. Keeping it in the checkpoint is what makes a bare
+    `openroboto announce` after a failed pipeline carry the same `cid` the fee
+    was paid under.
+
+    `None` means the key is absent, which is every config written before
+    competitions existed; on chain the `cid` key is then not written at all.
+    """
+    value = state.get("competition_id")
+    return int(value) if value else None
+
+
+def model_hash(state: dict[str, Any]) -> str | None:
+    """The fingerprint of the weights this round uploaded, or `None`.
+
+    🔴 An empty string is **not** passed on. On chain, `encode()` distinguishes
+    `None` (key absent) from `""` (key present and empty), and `""` would both
+    break byte compatibility with every older payload and pin a fingerprint that
+    says "there were no weights". A checkpoint that somehow holds one is treated
+    as not having a fingerprint at all, and `check_payload` then refuses the
+    real track by name.
+    """
+    value = state.get("model_hash")
+    return str(value) if value else None
+
+
 def is_step_done(state: dict[str, Any], step: str) -> bool:
     """Whether a given step has already finished. The `step` and `status`
     fields are judged together; neither one may be omitted."""

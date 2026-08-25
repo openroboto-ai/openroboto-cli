@@ -46,17 +46,25 @@ urls:
   dataset_val: "https://api.openroboto.ai/val.json"
 
 # ─── Competition ────────────────────────────────────────────
-# Which competition this workspace mines. Leave it empty and everything is
-# judged as the pi0.5 simulation competition, exactly as it was before there was
-# more than one competition.
+# Which competition this workspace mines. **`openroboto init` fills this in**
+# from the season you picked, and `openroboto init --refresh` rewrites it (and
+# only it -- everything else in this file is left byte for byte as you left it,
+# and the previous version is kept as miner.yaml.bak).
 #
-# It decides which checkpoint layout `openroboto check` judges your model by:
-# pi0.5 (openpi) and LingBot-VLA 2.0 accept completely different trees, so this
-# is what stops you being told your upload is broken when it is not.
+# Everything about a season lives here, so `build` / `train` / `check` never
+# have to go online: which image to build, which starting script, which
+# checkpoint layout your model is judged by (pi0.5 and LingBot-VLA 2.0 accept
+# completely different trees), and what the entry fee is.
+#
+# Left empty, everything is judged as the pi0.5 simulation competition, exactly
+# as it was before there was more than one competition.
+#
+# ⚠️ Do not hand-edit `params.fee`. It is confirmed against the backend in the
+# moment before you pay, and a value edited here only ever produces a refusal.
 competition:
   adapter: ""                      # sim_openpi | sim_lingbot | real_xarm6
-  params: {}                       # the competition's own parameters (base model,
-                                   # image, format rules, fee) as announced
+  params: {}                       # the season's own spec (fee, base model,
+                                   # image, format rules) as announced
 
 # ─── Model ──────────────────────────────────────────────────
 model:

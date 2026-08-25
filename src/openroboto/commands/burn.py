@@ -14,10 +14,11 @@ import logging
 from typing import Any
 
 from openroboto.chain import get_subtensor, open_wallet
+from openroboto.competition import load_snapshot
 from openroboto.config import Settings, refresh_burn_rate
 from openroboto.console import fail, say
 from openroboto.payment import execute_stake_burn
-from openroboto.preflight import check_announce_ready, payload_size
+from openroboto.preflight import check_announce_ready, payload_size, payload_track
 from openroboto.round_state import load_state, resolve_round, save_state
 
 logger = logging.getLogger("openroboto")
@@ -52,7 +53,24 @@ def perform_burn(settings: Settings, round_num: int, state: dict[str, Any]) -> b
     """Burn once and write the tx and block into the checkpoint. Returning
     False means the self-check did not pass and nothing was spent."""
     settings.require_for_chain()
-    refresh_burn_rate(settings, logger)
+    if load_snapshot(settings) is None:
+        refresh_burn_rate(settings, logger)
+    elif settings.burn_rate_tao is None:
+        # With a competition section, the rate comes from that season's own
+        # `params.fee`, established by the pre-payment check in `submit`.
+        # control.json's rate is subnet-wide and is not a substitute: two
+        # sources for one number, with no rule for which wins when they differ.
+        # Reaching here means nothing checked it, so nothing is burned.
+        fail(
+            "This workspace mines a specific competition, and that competition's"
+            " fee is confirmed against the backend in the moment before it is"
+            " paid -- which has not happened, so **nothing was burned**.\n"
+            "   → run `openroboto submit`; it uploads, confirms the competition"
+            " and pays in one go\n"
+            "   → `openroboto burn` on its own is for configs from before there"
+            " was more than one competition"
+        )
+        return False
 
     # If the rate could not be parsed, **stop right here**; do not guess. The
     # old code defaulted to 0.01 while production was 0.1: when the
@@ -80,7 +98,9 @@ def perform_burn(settings: Settings, round_num: int, state: dict[str, Any]) -> b
         )
         return False
 
-    reasons = check_announce_ready(state, round_num)
+    # The track decides which fields the payload must carry, and this is the
+    # last look at them before the money moves.
+    reasons = check_announce_ready(state, round_num, payload_track(settings))
     if reasons:
         fail(f"Pre-chain self-check failed (round {round_num}); **not** burning:")
         for reason in reasons:

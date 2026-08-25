@@ -65,11 +65,33 @@ def build_payload(
     hf_repo_id: str,
     burn_tx_hash: str,
     burn_block: int,
+    competition_id: int | None = None,
+    model_hash: str | None = None,
 ) -> CommitmentPayload:
     """Assemble the on-chain payload.
 
     The mapping between field meanings and on-chain key names is defined in the
     protocol package.
+
+    🔴 **The absent value for the last two is `None`, never `""` or `0`.**
+    `encode()` decides with `if payload.competition_id is not None` — a value
+    test, not a truth test — so an empty string writes `"m":""` onto the chain
+    and every miner's payload is six bytes longer than it was. The protocol
+    package keeps those two apart deliberately: an empty string means the miner
+    supplied a value that cannot be used, and `check_payload` rejects it.
+
+    Both are passed through **verbatim**, and that is the choice: normalizing
+    `""` to `None` here would make this function quietly correct its callers,
+    and the caller that needed correcting is a caller that is about to write a
+    fingerprint it does not have onto the chain. Callers hand over `None`;
+    `tests/test_submission_flow.py` pins both halves.
+
+    - `competition_id`: which season, on chain `cid`. Absent for every
+      commitment written before 0.7.0, which the backend reads as
+      `(sim, seq=round_num)`.
+    - `model_hash`: the weights fingerprint, on chain `m`. Required on the real
+      track, where the repository may be private and the backend therefore
+      cannot compute it itself.
     """
     return CommitmentPayload(
         hotkey_ss58=hotkey_ss58,
@@ -79,6 +101,8 @@ def build_payload(
         hf_repo_id=hf_repo_id,
         burn_tx_hash=burn_tx_hash,
         burn_block=burn_block,
+        competition_id=competition_id,
+        model_hash=model_hash,
     )
 
 

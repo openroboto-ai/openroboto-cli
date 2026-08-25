@@ -339,3 +339,104 @@ def test_weights_unwraps_only_one_level_of_weights_key(
     monkeypatch.setattr(backend_api, "_get", lambda *a, **k: b'{"5A": 0.9, "5B": 0.1}')
 
     assert backend_api.fetch_weights("http://x") == {"5A": 0.9, "5B": 0.1}
+
+
+# ─── competitions ────────────────────────────────────────────
+
+
+def _competition_row(**overrides: Any) -> dict[str, Any]:
+    row = {
+        "id": 3,
+        "track": "real",
+        "seq": 1,
+        "label": "xArm 6 第一届",
+        "adapter": "real_xarm6",
+        "status": "active",
+        "submit_closes_at": "2026-09-10T00:00:00Z",
+        "base_repo": None,
+        "base_revision": None,
+        "params": {"fee": {"kind": "transfer", "amount_tao": 2.0, "coldkey": None}},
+    }
+    return {**row, **overrides}
+
+
+def test_competitions_come_back_as_the_protocol_declares_them(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _capture(monkeypatch, _list_envelope([_competition_row()]))
+
+    listed = backend_api.fetch_competitions("https://api.example")
+
+    row = listed.data[0]
+    assert (row.track, row.seq, row.adapter) == ("real", 1, "real_xarm6")
+    # 🔴 `null` survives as `None`. Filled in with anything here, the CLI's
+    # fail-closed gate never fires and the fee leaves for an address nobody
+    # holds the key to.
+    assert row.params["fee"]["coldkey"] is None
+    assert listed.meta.page.total == 1
+
+
+def test_the_archived_flag_is_the_one_fastapi_declares(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """⚠️ `?archived=1` is not a synonym: FastAPI drops query parameters it has
+    not declared, so the archived season never comes back **and nothing reports
+    an error** -- it just looks like a shorter list."""
+    seen = _capture(monkeypatch, _list_envelope([]))
+    backend_api.fetch_competitions("https://api.example", include_archived=True)
+    assert "include_archived=true" in seen[0].full_url
+
+
+def test_the_archived_flag_is_absent_when_it_is_not_asked_for(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen = _capture(monkeypatch, _list_envelope([]))
+    backend_api.fetch_competitions("https://api.example")
+    assert "include_archived" not in seen[0].full_url
+
+
+def test_competitions_need_no_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A miner who has just run `pip install` holds no key, and this is their
+    first call. A key attached here fails exactly like a 404 does."""
+    seen = _capture(monkeypatch, _list_envelope([]))
+    backend_api.fetch_competitions("https://api.example")
+    assert seen[0].get_header("X-api-key") is None
+
+
+def test_a_competition_list_in_the_wrong_shape_is_an_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """It feeds the pre-payment check. Parsing it loosely means comparing a fee
+    against `None` and calling that a match."""
+    _capture(monkeypatch, _list_envelope([{"id": 3, "track": "real"}]))
+    with pytest.raises(backend_api.BackendError, match="does not match the shape"):
+        backend_api.fetch_competitions("https://api.example")
+
+
+# ─── roster ──────────────────────────────────────────────────
+
+
+def test_the_roster_reads_payment_status_not_burn_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The new endpoints call it by its real name -- a fee can be a transfer.
+    The older ones still say `burn_*`; reading the wrong one here yields an
+    empty string and a miner told nothing about their payment."""
+    row = {
+        "hotkey": "5Hb5muCtV2SqiVkZ",
+        "uid": 23,
+        "hf_repo_id": "miner/model",
+        "submitted_at": "2026-08-24T00:00:00Z",
+        "payment_status": "paid",
+        "hf_access_status": "verified",
+        "invalid_reason": None,
+    }
+    seen = _capture(monkeypatch, _list_envelope([row]))
+
+    listed = backend_api.fetch_roster(
+        "https://api.example", 3, hotkey="5Hb5muCtV2SqiVkZ"
+    )
+
+    assert listed.data[0].payment_status == "paid"
+    assert "/api/v1/competitions/3/roster?" in seen[0].full_url
+    assert "hotkey=5Hb5muCtV2SqiVkZ" in seen[0].full_url

@@ -136,6 +136,7 @@ def train_round(
     hotkey: str,
     val_json_path: str | None = None,
     custom_train_script: str | None = None,
+    image: str = "",
 ) -> TrainOutcome:
     """Load the data → run the container → assemble metrics and the training proof."""
     started = time.time()
@@ -162,6 +163,7 @@ def train_round(
         lora_alpha=params.lora_alpha,
         hotkey=hotkey,
         custom_train_script=custom_train_script,
+        image=image,
     )
 
     duration = time.time() - started

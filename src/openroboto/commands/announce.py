@@ -12,6 +12,8 @@ from __future__ import annotations
 import argparse
 from typing import Any
 
+from openroboto_protocol.commitment import CommitmentFieldError, check_payload
+
 from openroboto.chain import (
     build_payload,
     get_subtensor,
@@ -21,8 +23,14 @@ from openroboto.chain import (
 from openroboto.config import ConfigError, Settings
 from openroboto.console import fail, say
 from openroboto.huggingface import commit_sha_from_url
-from openroboto.preflight import check_burn_window
-from openroboto.round_state import load_state, resolve_round, save_state
+from openroboto.preflight import check_burn_window, payload_track
+from openroboto.round_state import (
+    competition_id,
+    load_state,
+    model_hash,
+    resolve_round,
+    save_state,
+)
 
 
 def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
@@ -83,19 +91,49 @@ def perform_announce(settings: Settings, round_num: int, state: dict[str, Any]) 
             say("   → nothing was sent on chain, and no transaction fee was paid")
             return False
 
-        say(
-            f"📡 committing on chain | round={round_num} "
-            f"repo={hf_repo_id} block={current_block}"
-        )
-
         payload = build_payload(
             hotkey_ss58=str(state.get("hotkey_ss58", "")) or wallet.hotkey.ss58_address,
             block_hash=str(block_hash),
             hf_commit=hf_commit,
             round_num=round_num,
             hf_repo_id=hf_repo_id,
+            # `b` / `bb` are the **payment credential** -- which transaction,
+            # which block. Whether that payment was a burn or a transfer to the
+            # season's coldkey is decided by the season `cid` points at; there
+            # is no second pair of keys for it.
             burn_tx_hash=str(state.get("burn_tx_hash", "")),
             burn_block=burn_block,
+            # Both come from the checkpoint, and both are `None` when absent --
+            # which is what a config from before competitions existed produces,
+            # and what makes its bytes identical to what it wrote a year ago.
+            competition_id=competition_id(state),
+            model_hash=model_hash(state),
+        )
+        # The last gate, and like the window check above it runs **before
+        # anything is printed**: a refused announce that ends with "committing
+        # on chain" on screen sends the miner looking through the chain, the
+        # database and the ingest logs for an extrinsic that was deliberately
+        # never sent (fixed once already, 2026-08-19 -- do not reorder these).
+        #
+        # It cannot save the fee, which is already gone by now; what it saves is
+        # the extrinsic fee and the belief that the submission is in. The gate
+        # that runs before the money is `preflight.check_announce_ready`.
+        try:
+            check_payload(payload, payload_track(settings))
+        except CommitmentFieldError as exc:
+            fail(
+                f"This commitment would be refused by the backend over its "
+                f"`{exc.field}` field, so it is **not** being sent.\n"
+                f"   {exc}\n"
+                f"   Your payment stays valid -- fix this and run `openroboto "
+                f"announce` again. **Do not pay a second time.**"
+            )
+            say("   → nothing was sent on chain, and no transaction fee was paid")
+            return False
+
+        say(
+            f"📡 committing on chain | round={round_num} "
+            f"repo={hf_repo_id} block={current_block}"
         )
         result = submit_announcement(subtensor, wallet, settings.netuid, payload)
     finally:

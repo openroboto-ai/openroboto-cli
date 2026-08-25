@@ -30,6 +30,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from openroboto import adapters
+from openroboto.commands.build import competition_image
 from openroboto.commands.check import weights_subdir
 from openroboto.config import Settings, apply_control, fetch_control
 from openroboto.console import fail, say
@@ -68,6 +70,22 @@ def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) 
 
 def run(args: argparse.Namespace) -> int:
     settings = Settings.load(args.config)
+
+    adapter = adapters.resolve(settings.competition_adapter)
+    if adapter.training == adapters.UNAVAILABLE:
+        # Refuse before anything is fetched or created. A no-op "run" would
+        # leave an empty output directory behind, and the next `openroboto
+        # check` would deliver a verdict about it -- a verdict about nothing.
+        fail(
+            f"Training support for this competition (adapter "
+            f"`{settings.competition_adapter}`) has not been released yet: "
+            f"neither its dataset nor its training image exists to install.\n"
+            f"   → train it however you like, then `openroboto check` and "
+            f"`openroboto submit` -- both work on a checkpoint this CLI did not "
+            f"produce\n"
+            f"   → watch for the announcement, then `pip install -U openroboto`"
+        )
+        return 1
 
     if not settings.control_json_url:
         fail(
@@ -160,6 +178,10 @@ def run(args: argparse.Namespace) -> int:
             params=params,
             hotkey=settings.hotkey_ss58 or settings.hotkey,
             custom_train_script=strategy or None,
+            # The same image `openroboto build` builds. Resolved from the
+            # competition rather than fixed here, so that building one image and
+            # training in another is not a thing that can happen quietly.
+            image=competition_image(args.config),
         )
 
     if not outcome.metrics.get("final_loss"):

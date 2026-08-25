@@ -24,14 +24,30 @@ import argparse
 from datetime import datetime
 from typing import TypeVar
 
-from openroboto_protocol.schemas import Reason, ScanRejection, SubmissionHistoryItem
+from openroboto_protocol.schemas import (
+    Competition,
+    Reason,
+    ScanRejection,
+    SubmissionHistoryItem,
+)
 from openroboto_protocol.status import normalize_status
 
-from openroboto.backend_api import fetch_rejections, fetch_submissions, retry_advice
+from openroboto.backend_api import (
+    BackendError,
+    fetch_competitions,
+    fetch_rejections,
+    fetch_roster,
+    fetch_submissions,
+    retry_advice,
+)
+from openroboto.competition import Snapshot, load_snapshot
 from openroboto.config import ConfigError, Settings
 from openroboto.console import say
 
 DEFAULT_LIMIT = 10
+#: One request instead of a paging loop. It is the backend's maximum, and a
+#: season with more entries than this has other problems.
+ROSTER_LIMIT = 1000
 
 _Row = TypeVar("_Row", SubmissionHistoryItem, ScanRejection)
 
@@ -97,7 +113,67 @@ def run(args: argparse.Namespace) -> int:
             "A rejected burn is not refunded. Fix the reason, then run "
             "`openroboto submit` again (it burns a new one)."
         )
+
+    say_roster(settings, hotkey)
     return 0
+
+
+def say_roster(settings: Settings, hotkey: str) -> None:
+    """Where this miner stands in their competition's entry list.
+
+    Only printed for a workspace that mines a specific competition, and only
+    when this hotkey is actually on that list -- an empty table under a heading
+    tells a miner nothing they did not already know.
+
+    **Never fatal.** This is the troubleshooting command: a backend too old to
+    serve the endpoint, or a competition that has gone away, must not take the
+    submission and rejection sections down with it. Those two are what the miner
+    came here for.
+    """
+    snapshot = load_snapshot(settings)
+    if snapshot is None:
+        return
+
+    try:
+        live = _live_competition(settings, snapshot)
+        roster = fetch_roster(settings.backend_url, live.id, limit=ROSTER_LIMIT)
+    except BackendError:
+        say("")
+        say(f"{snapshot.label}: this backend cannot answer entry-list queries yet")
+        return
+
+    say("")
+    say(f"{live.label} ({live.track}/{live.seq} · cid={live.id})")
+    mine = [row for row in roster.data if row.hotkey == hotkey]
+    if not mine:
+        say("  You are not on the entry list yet.")
+        return
+
+    # The list arrives newest first. Counting from the far end therefore counts
+    # in the order entries were **joined**, which is the order they are worked
+    # -- and the miner's own earliest entry is the last of theirs in the list.
+    entry = mine[-1]
+    place = roster.meta.page.total - roster.data.index(entry)
+    say(f"  {hotkey[:8]}… is #{place} of {roster.meta.page.total} by submission time")
+    say(f"  payment: {entry.payment_status} | HF access: {entry.hf_access_status}")
+    if entry.invalid_reason:
+        say(f"  ⚠️  {entry.invalid_reason} — this entry cannot be evaluated as it is")
+    if roster.meta.page.has_more:
+        # One page is 1000 entries. Saying the number anyway would be saying a
+        # number computed from part of the list.
+        say(
+            f"  ⚠️  more than {ROSTER_LIMIT} entries; the place above counts only "
+            f"the {ROSTER_LIMIT} most recent"
+        )
+
+
+def _live_competition(settings: Settings, snapshot: Snapshot) -> Competition:
+    """Resolve the workspace's competition against the backend, by `(track,
+    seq)` -- the id in `miner.yaml` is local to one database."""
+    for row in fetch_competitions(settings.backend_url, include_archived=True).data:
+        if row.track == snapshot.track and row.seq == snapshot.seq:
+            return row
+    raise BackendError(f"{settings.backend_url} does not list {snapshot.name}")
 
 
 def explain(reason: Reason | None) -> list[str]:
