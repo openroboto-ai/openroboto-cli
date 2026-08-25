@@ -1,4 +1,16 @@
-# Migration: `python rt.py` → `openroboto`
+# Migration
+
+Two migrations live in this file. They are independent — read the one that applies
+to you, or both.
+
+| Migration | Who it affects |
+|---|---|
+| [`python rt.py` → `openroboto`](#1-python-rtpy--openroboto) | Miners who cloned this repository before 2026-08-19 |
+| [π0.5 → LingBot base model](#2-π05--lingbot-base-model) | **Every miner.** Your current model does not carry over |
+
+---
+
+# 1. `python rt.py` → `openroboto`
 
 > **Status**: current · **Updated**: 2026-08-19 · **Audience**: miners who cloned this
 > repository before 2026-08-19
@@ -132,3 +144,123 @@ git show <commit>^:rt.py > rt.py               # recover one file
 ```
 
 They are unmaintained from 2026-08-19 and will not receive fixes.
+
+---
+
+# 2. π0.5 → LingBot base model
+
+> **Status**: ⛔ **PRE-RELEASE DRAFT — do not announce this section yet.**
+> **Updated**: 2026-08-25 · **Audience**: every miner on the simulation competition.
+>
+> Every `<TBD: …>` below is a value that does not exist yet. Before this section is
+> published, all of them must be filled in and this banner replaced with
+> `**Status**: current`. The release it describes is not out: the client version, the
+> switch date and the protocol package version are all still unset. **Do not treat
+> any number in this section as a commitment until then.**
+>
+> Blocking the release: `openroboto-protocol 0.7.0` (unreleased) · the CLI release
+> that pins it · the LingBot training image · the competition list endpoint.
+
+## The three things you actually need to know
+
+| Question | Answer |
+|---|---|
+| **Do I have to change anything?** | Yes. New CLI version, and you have to **retrain from a new base model**. Nothing you have trained so far carries over. |
+| **By when?** | `<TBD: switch date/time UTC>`. Until then the π0.5 competition keeps running normally. |
+| **What if I don't?** | Everything you submit after the switch is **rejected on format**, and the evaluation fee for a rejected submission is **not refunded**. |
+
+## What is changing
+
+The simulation competition swaps its base model: **π0.5 (openpi) → LingBot-VLA 2.0**.
+The exam is the same — the same LIBERO task suites in simulation — but the textbook is
+different: different training code, different weight files, different checkpoint
+layout.
+
+Because scores from the two base models are not comparable, they are not merged:
+
+- The π0.5 competition becomes a **read-only archive**. Its leaderboard stays visible.
+- The new competition starts from zero. **The current champion does not carry over.**
+- A π0.5 checkpoint submitted to the new competition **fails admission** — the layout
+  rules the backend applies come from the competition's base model, and yours will not
+  match.
+
+## What you must do
+
+```bash
+pip install -U openroboto
+openroboto --version          # expect: openroboto <TBD: version> (openroboto-protocol <TBD: 0.7.0>)
+
+cd my-miner
+openroboto init --refresh     # re-fetch the competition spec into miner.yaml;
+                              # keeps your wallet settings and HF token
+openroboto build              # the training image changed — rebuild it
+openroboto train              # retrain from the new base
+openroboto check              # must pass before you pay. Free, local, no GPU
+openroboto submit
+```
+
+`init` lists the competitions that are open and writes the one you pick into
+`miner.yaml` — base model, training image, format rules, fee and deadline, all in one
+snapshot. Every later command reads that file instead of asking the network, so once
+`init` has run you can train offline.
+
+There is **no `--track` flag and no new subcommand**: which competition you are
+submitting to is a value in your config, not something you type each time.
+
+## Your existing HuggingFace repository
+
+**It has nothing to do with the new competition.** It is not deleted and it is not
+migrated — it simply is not evaluated any more. Nothing you upload to it counts
+towards the new competition, and there is no conversion path from a π0.5 fine-tune to
+a LingBot one. To keep mining you have to train again, from the new base, following
+the workflow above.
+
+Upload the new checkpoint as a new revision (or a new repository, your choice) — the
+chain announcement points at the exact revision, so the two never get confused.
+
+## What does **not** change
+
+- **Every command name and flag.** `init` / `doctor` / `build` / `train` / `check` /
+  `upload` / `burn` / `announce` / `submit` / `status` all keep working the same way.
+- **Your `miner.yaml` field names.** A competition section is added; nothing is
+  renamed. A file without that section keeps working and is treated as the simulation
+  competition, exactly as before.
+- **The burn → announce window** is still 50 blocks (~10 minutes). Do not split the
+  two steps unless you are recovering.
+- **The custom-strategy contract** `train(cfg, episodes, policy) -> (metrics, proof)`
+  is unchanged — your own training script keeps its shape.
+- **There is still no `openroboto merge`, and there will not be one.** A bare LoRA
+  adapter is rejected; exporting a full merged checkpoint is part of training, and
+  `openroboto check` catches an unmerged upload before you pay.
+
+## New: the CLI tells you what you are paying for, before it pays
+
+`<TBD: confirm this shipped in the released version before publishing>`
+
+Right before spending anything, `submit` verifies against the backend that the
+competition in your config is still the one running, that its submission window is
+still open, and that the fee and recipient still match your config. It prints the
+competition name, its id, **how long is left before submissions close**, the fee and
+the recipient — and only then continues.
+
+If any of that does not line up, or the backend cannot be reached, **it refuses to
+pay**. There is no flag to skip it: a burn cannot be undone, and a rejected submission
+is not refunded.
+
+## If you keep running the old client after the switch
+
+An older client cannot say which competition it is submitting to, so the submission is
+attributed to whichever simulation competition is running at that moment — the LingBot
+one. Your π0.5 checkpoint then fails that competition's format check, the submission is
+rejected, and **the fee is gone**. This is the single most expensive way to ignore this
+page.
+
+## Timetable
+
+| What | When |
+|---|---|
+| Announcement with the final numbers | `<TBD>` |
+| New client on PyPI | `<TBD>` |
+| Maintenance window, switch performed | `<TBD>` |
+| π0.5 competition closes to new submissions | `<TBD>` |
+| First round of the LingBot competition opens | `<TBD>` |

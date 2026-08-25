@@ -16,13 +16,14 @@ you find the same rule stated in two files, that is a bug — report it.
 |---|---|
 | understand what this subnet rewards and how | [SUBNET_OVERVIEW.md](./SUBNET_OVERVIEW.md) |
 | get from nothing to a first submission | [MINER.md](./MINER.md) |
-| move off `python rt.py` / `python miner.py` | [MIGRATION.md](./MIGRATION.md) |
+| move off `python rt.py` / `python miner.py`, or move from the π0.5 base to LingBot | [MIGRATION.md](./MIGRATION.md) |
 | set up a real machine (GPU, Docker, systemd) | [MINER_DEPLOY.md](./MINER_DEPLOY.md) |
 | know what every `miner.yaml` field does | [CONFIG.md](./CONFIG.md) |
 | know exactly what the evaluation fee costs me and when it is wasted | [PAYMENT.md](./PAYMENT.md) |
 | read the round contract the subnet publishes | [control_json.md](./control_json.md) |
 | verify my evaluation seed was not rigged | [SEED_GENERATION.md](./SEED_GENERATION.md) |
 | run an external weight-setting validator | [VALIDATOR.md](./VALIDATOR.md) |
+| write my own training logic | [custom-training.md](./custom-training.md) |
 | see how the CLI itself is put together | [ARCHITECTURE.md](./ARCHITECTURE.md) |
 
 ## Before you spend anything
@@ -62,9 +63,16 @@ replaced it. **Do not treat anything in `archive/` as current.**
 
 Recorded here rather than left to be discovered by a miner losing money:
 
-- **`openroboto merge` does not exist.** Training produces a LoRA adapter, and a bare
-  adapter is rejected. Merging into a full checkpoint is currently manual. Run
-  `openroboto check` before paying — it catches exactly this.
+- **There is no `openroboto merge`, and there will not be one** (decided 2026-08-25).
+  The bundled training strategy writes a LoRA adapter, and a bare adapter is rejected;
+  merging it into the base and exporting a full checkpoint is part of **training**, so
+  it belongs in your training script, not in this CLI (merging needs the model
+  libraries, which cannot be installed alongside `bittensor` in one interpreter).
+  Run `openroboto check` before paying — it catches exactly this, for free.
+- **[MIGRATION.md](./MIGRATION.md) §2 (π0.5 → LingBot) is a pre-release draft.** It
+  describes a client version that is not published yet and carries `<TBD>`
+  placeholders for every date. It is written down early so the announcement can quote
+  it — **not** so that anyone follows it today.
 - **These guides still describe the subnet as of 2026-08-19.** The fee, round number
   and dataset URLs are published live in `control.json`; where a document names a
   number, the live file wins.
