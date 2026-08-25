@@ -21,6 +21,7 @@ import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
+from importlib.metadata import PackageNotFoundError, requires, version
 
 from openroboto.config import (
     ConfigError,
@@ -34,6 +35,11 @@ from openroboto.console import say
 from openroboto.training.container import runner_image
 
 MIN_PYTHON = (3, 11)
+
+#: The package that owns the commitment encoding. Its version **is** the
+#: contract version between this CLI and the backend (see the note on the
+#: dependency in `pyproject.toml`).
+PROTOCOL_PACKAGE = "openroboto-protocol"
 
 
 @dataclass(frozen=True)
@@ -61,7 +67,7 @@ def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) 
 
 
 def run(args: argparse.Namespace) -> int:
-    results = [check_python()]
+    results = [check_python(), check_protocol()]
 
     settings: Settings | None
     try:
@@ -113,6 +119,82 @@ def check_python() -> CheckResult:
         f"install Python >= {MIN_PYTHON[0]}.{MIN_PYTHON[1]}",
         required=True,
     )
+
+
+def check_protocol() -> CheckResult:
+    """Whether the installed protocol package is the one this CLI is pinned to.
+
+    This is a money item, not a tidiness item. `openroboto-protocol` is what
+    encodes the on-chain commitment, so a miner who upgrades it on its own
+    (`pip install -U openroboto-protocol` succeeds and only *warns* about the
+    pin) announces bytes the backend does not expect -- and finds out after
+    the TAO is gone. `openroboto --version` already prints the number, but
+    printing it is not checking it: nobody knows by heart which version this
+    release wanted.
+
+    The expected version is read back out of this package's own metadata
+    rather than written down again here. `pyproject.toml` already declares
+    `openroboto-protocol==<v>`; a second copy of that number in this file
+    would drift silently at the next release, which is precisely the failure
+    mode this check exists to catch.
+    """
+    try:
+        installed = version(PROTOCOL_PACKAGE)
+    except PackageNotFoundError:
+        return CheckResult(
+            "protocol package",
+            False,
+            f"{PROTOCOL_PACKAGE} is not installed",
+            "pip install -U openroboto",
+        )
+
+    pinned = pinned_protocol_version()
+    if pinned is None:
+        # Running from a source tree that was never installed: there is no
+        # declaration to compare against, and guessing one here would be the
+        # very second copy this function avoids. Report what is loaded and
+        # move on -- a miner never hits this path, a developer does.
+        return CheckResult(
+            "protocol package",
+            True,
+            f"{installed} (no pin found to compare against)",
+            required=False,
+        )
+    if installed != pinned:
+        return CheckResult(
+            "protocol package",
+            False,
+            f"{installed} installed, this CLI is pinned to {pinned}",
+            f"pip install '{PROTOCOL_PACKAGE}=={pinned}' -- the commitment "
+            f"encoding lives in that package, so a mismatch is paid for in TAO",
+        )
+    return CheckResult("protocol package", True, installed)
+
+
+def pinned_protocol_version() -> str | None:
+    """The exact version this package declares for `openroboto-protocol`.
+
+    Returns None when there is nothing to compare against: either this package
+    is not installed as a distribution, or the dependency is not pinned with
+    `==`. Both mean "cannot tell", which is not the same as "mismatch".
+    """
+    try:
+        declared = requires("openroboto") or []
+    except PackageNotFoundError:
+        return None
+    for requirement in declared:
+        name, pin, rest = requirement.partition("==")
+        if pin and _normalized(name) == PROTOCOL_PACKAGE:
+            # A requirement string may carry an environment marker
+            # (`; python_version < "3.12"`) after the version.
+            return rest.split(";")[0].strip()
+    return None
+
+
+def _normalized(name: str) -> str:
+    """PEP 503 name comparison -- `openroboto_protocol` and
+    `openroboto-protocol` are the same distribution."""
+    return name.strip().replace("_", "-").lower()
 
 
 def check_settings(settings: Settings) -> list[CheckResult]:

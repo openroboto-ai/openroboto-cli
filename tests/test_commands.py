@@ -18,7 +18,7 @@ from openroboto.commands import check as check_command
 from openroboto.commands import doctor as doctor_command
 from openroboto.commands import init as init_command
 from openroboto.commands import status as status_command
-from openroboto.config import ConfigError, Settings
+from openroboto.config import ConfigError, ControlFetchError, Settings
 from openroboto.huggingface import build_repo_id, commit_sha_from_url
 from openroboto.preflight import (
     check_announce_ready,
@@ -591,3 +591,82 @@ def test_doctor_balance_check_does_not_crash_on_an_unknown_rate(
     result = doctor_command.check_wallet(settings)
     assert result.ok is False
     assert "unknown" in result.detail.lower()
+
+
+def test_doctor_protocol_check_passes_on_the_pinned_version() -> None:
+    """Happy path: whatever the test environment installed came from the same
+    pyproject, so the installed version and the declared pin must agree.
+
+    This deliberately asserts against the real metadata rather than a stubbed
+    pair. The bug this check guards against is "the two numbers drifted apart
+    and nobody noticed", and a stub on both sides would drift right along with
+    it.
+    """
+    result = doctor_command.check_protocol()
+    assert result.ok, result.detail
+    assert doctor_command.pinned_protocol_version() in result.detail
+
+
+def test_doctor_protocol_check_flags_a_mismatch_as_a_money_problem(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A miner who ran `pip install -U openroboto-protocol` must be stopped
+    here, not after the burn: the fix line has to name the exact version to go
+    back to."""
+    monkeypatch.setattr(doctor_command, "version", lambda name: "9.9.9")
+    monkeypatch.setattr(doctor_command, "pinned_protocol_version", lambda: "0.6.0")
+
+    result = doctor_command.check_protocol()
+    assert result.ok is False
+    assert result.required is True  # a required failure, so doctor exits non-zero
+    assert "9.9.9" in result.detail and "0.6.0" in result.detail
+    assert "0.6.0" in result.fix
+
+
+def test_doctor_protocol_check_says_cannot_tell_when_there_is_no_pin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No declaration to compare against is "cannot tell", not "mismatch" --
+    reporting a failure here would train developers to ignore the item."""
+    monkeypatch.setattr(doctor_command, "version", lambda name: "0.6.0")
+    monkeypatch.setattr(doctor_command, "pinned_protocol_version", lambda: None)
+
+    result = doctor_command.check_protocol()
+    assert result.ok and result.required is False
+
+
+def test_doctor_reads_the_pin_out_of_metadata_not_a_second_copy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The expected version comes from the installed metadata. Names are
+    compared PEP 503 style, and non-`==` entries are skipped rather than
+    mistaken for a pin."""
+    monkeypatch.setattr(
+        doctor_command,
+        "requires",
+        lambda name: ["pyyaml>=6.0", "openroboto_protocol==1.2.3", "bittensor>=10.5"],
+    )
+    assert doctor_command.pinned_protocol_version() == "1.2.3"
+
+
+def test_doctor_survives_an_unreachable_control_json(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A miner may run doctor on a machine with no route to the internet --
+    exactly to find out why. An unreachable control.json is reported as one
+    failed item with a readable sentence; it must not raise, and must not stop
+    the remaining checks from running.
+    """
+
+    def _unreachable(url: str) -> object:
+        raise ControlFetchError("Cannot reach https://example.invalid/control.json")
+
+    monkeypatch.setattr(doctor_command, "fetch_control", _unreachable)
+    settings = Settings.from_mapping(
+        {"urls": {"control_json": "https://example.invalid/control.json"}}
+    )
+
+    result = doctor_command.check_control(settings)
+    assert result.ok is False
+    assert "Cannot reach" in result.detail
+    assert "network" in result.fix  # tells them where to look, not just that it failed
