@@ -1,4 +1,4 @@
-"""Push the training artifacts to a public HuggingFace repository.
+"""Push the training artifacts to the miner's HuggingFace repository.
 
 What is uploaded is **the directory as-is**. The evaluator only accepts a complete
 checkpoint (`params/` or `model.safetensors` +
@@ -54,8 +54,9 @@ def push_model(
     hf_token: str,
     round_num: int = 0,
     metrics: dict[str, Any] | None = None,
+    base_model: str = "",
 ) -> UploadResult:
-    """Push all of `model_dir` to `repo_id` (a public repo).
+    """Push all of `model_dir` to `repo_id`, whatever its visibility.
 
     Returns the URL and the commit SHA.
 
@@ -77,7 +78,7 @@ def push_model(
             "--output-dir"
         )
 
-    _write_round_info(path, round_num, metrics)
+    _write_round_info(path, round_num, metrics, base_model)
 
     total_bytes = sum(f.stat().st_size for f in path.rglob("*") if f.is_file())
     file_count = sum(1 for f in path.rglob("*") if f.is_file())
@@ -89,22 +90,37 @@ def push_model(
     )
 
     try:
+        # 🔴 Do not flip an existing repository's visibility. This used to call
+        # `update_repo_visibility(..., "public")` unconditionally, which silently
+        # published a miner's private weights on the first upload -- and
+        # publishing is not undoable: whoever fetched them while the repo was
+        # open still has them.
+        #
+        # A private repository is explicitly supported, not tolerated. The real
+        # track's spec says so in as many words (`docs/specs/10` §2.5): "a
+        # miner's HF repository **may stay private indefinitely**; it only has to
+        # add the official account as a read-only collaborator." The backend
+        # reads those repos with `settings.HF_READ_TOKEN` and reports the access
+        # verdict per submission, so this client has nothing to guarantee here.
+        #
+        # `exist_ok=True` leaves an existing repo exactly as it is. A repo this
+        # call creates gets huggingface_hub's own default -- which is public, and
+        # is the miner's to change afterwards.
         create_repo(repo_id=repo_id, token=hf_token, repo_type="model", exist_ok=True)
         api = HfApi(token=hf_token)
-        try:
-            api.update_repo_visibility(repo_id, visibility="public", repo_type="model")
-        except AttributeError:
-            # Older huggingface_hub versions do not have this method; create_repo
-            # is public by default anyway.
-            pass
 
         commit_url = upload_folder(
             folder_path=str(path),
             repo_id=repo_id,
             repo_type="model",
             token=hf_token,
+            # Named after the season's base model, not after pi0.5. This message
+            # lands in the miner's own commit history, where "pi0.5 LIBERO model"
+            # over a LingBot checkpoint is a claim nobody made on purpose.
             commit_message=(
-                f"Round {round_num} π₀.₅ LIBERO model — {datetime.now(UTC).isoformat()}"
+                f"Round {round_num}"
+                f"{' ' + base_model if base_model else ''} model"
+                f" — {datetime.now(UTC).isoformat()}"
             ),
         )
         commit_sha = commit_sha_from_url(str(commit_url)) or str(
@@ -123,12 +139,23 @@ def push_model(
 
 
 def _write_round_info(
-    path: Path, round_num: int, metrics: dict[str, Any] | None
+    path: Path,
+    round_num: int,
+    metrics: dict[str, Any] | None,
+    base_model: str = "",
 ) -> None:
-    """Put a `round_info.json` into the model directory, uploaded with the model."""
+    """Put a `round_info.json` into the model directory, uploaded with the model.
+
+    `model` used to be the literal `"pi05"`, written next to a LingBot checkpoint
+    just as readily as next to a pi0.5 one. This file ships inside the miner's
+    repository, so the wrong value there is a claim about the artifact it sits in.
+
+    An empty `base_model` writes `""` rather than guessing: the season names the
+    base model (`competition.base_model_family`), and a workspace whose season has
+    not named one has nothing true to put here.
+    """
     info: dict[str, Any] = {
-        "model": "pi05",
-        "config": "pi05_libero",
+        "model": base_model,
         "round_num": round_num,
         "created_at": datetime.now(UTC).isoformat(),
         "client": f"openroboto-cli/{_client_version()}",

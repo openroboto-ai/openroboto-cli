@@ -214,6 +214,12 @@ def _run_default(cfg: dict) -> tuple:
         "ended_at": datetime.now(timezone.utc).isoformat(),
         "total_steps": global_step,
         "gpu_device": _get_gpu_name(),
+        # Measured here because here is where the training happened. The CLI on
+        # the host cannot see it: `docker run --gpus all` puts the process in
+        # another namespace, so a host-side `torch.cuda.max_memory_allocated()`
+        # reads its own (empty) context and reports 0.0 -- which then went into
+        # the miner's public training proof as if the run had used no VRAM.
+        "gpu_memory_peak_gb": _peak_vram_gb(),
     }
 
     with open(os.path.join(output_dir, "proof.json"), "w") as f:
@@ -351,6 +357,23 @@ def _get_gpu_name() -> str:
     except ImportError:
         pass
     return "cpu"
+
+
+def _peak_vram_gb() -> float:
+    """Peak VRAM this process allocated, in GB. 0.0 when there is no CUDA.
+
+    Pairs with `_get_gpu_name()`: both describe the machine that ran the
+    training, and both have to be read inside the container for the same reason.
+    `max_memory_allocated` is cumulative for the process, so calling it after the
+    loop gives the run's peak without instrumenting the loop itself.
+    """
+    try:
+        import torch
+        if torch.cuda.is_available():
+            return round(torch.cuda.max_memory_allocated() / 1024**3, 2)
+    except ImportError:
+        pass
+    return 0.0
 
 
 # ─── Main ─────────────────────────────────────────────────

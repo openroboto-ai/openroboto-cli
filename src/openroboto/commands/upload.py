@@ -83,6 +83,7 @@ def perform_upload(
         hf_token=settings.hf_token,
         round_num=round_num,
         metrics=training_metrics(round_num),
+        base_model=settings.competition_base_model_family,
     )
 
     state["hf_repo_id"] = repo_id

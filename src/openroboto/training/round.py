@@ -147,7 +147,7 @@ def train_round(
     if val_json_path and Path(val_json_path).is_file():
         eval_samples = prepare_samples(load_episodes(val_json_path))
 
-    container_metrics, _container_proof = run_training(
+    container_metrics, container_proof = run_training(
         train_samples=train_samples,
         eval_samples=eval_samples,
         output_dir=output_dir,
@@ -163,7 +163,26 @@ def train_round(
     )
 
     duration = time.time() - started
+    # 🔴 Ask the container, not this machine. Training runs inside `docker run
+    # --gpus all`; `_gpu_stats()` reads the *host* process, which on a laptop
+    # driving a remote box has no CUDA at all and answers `("cpu", 0.0)`.
+    #
+    # That answer used to be written straight into `training_proof.json` and
+    # published to the miner's public HF repo. Measured on 2026-08-26: the proof
+    # said `gpu_device: "cpu"` and `gpu_memory_peak_gb: 0.0` for a run that the
+    # container's own `proof.json`, in the same directory, recorded as an
+    # A100-SXM4-80GB peaking at 20.64 GiB. The file exists so a miner can show
+    # how a checkpoint was produced -- one that contradicts the run it describes
+    # is worse than no file, because it reads as a claim rather than a gap.
+    #
+    # The host reading stays as the fallback: an in-process trainer (no
+    # container, so no `proof.json`) really is measured by `_gpu_stats()`.
     gpu_name, gpu_memory_gb = _gpu_stats()
+    if container_proof:
+        gpu_name = str(container_proof.get("gpu_device") or gpu_name)
+        gpu_memory_gb = float(
+            container_proof.get("gpu_memory_peak_gb") or gpu_memory_gb
+        )
 
     metrics = {
         "final_loss": container_metrics.get("final_loss", 0.0),
