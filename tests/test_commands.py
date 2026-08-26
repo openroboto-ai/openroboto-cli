@@ -1005,11 +1005,18 @@ def test_build_will_not_fill_a_competitions_image_name_with_another_base(
     images` lists whatever was built, `doctor` calls it ready and `train` runs
     it.
 
-    A LingBot context now ships (`runner/lingbot/`), so this is no longer the
-    "only context installs π0.5" case -- and the refusal has to survive that.
-    `training` is a claim that `openroboto train` drives the image to a
-    checkpoint, and for LingBot nobody has run it on a card yet. Building
-    silently here would hand back an image the next command refuses to touch.
+    Two contexts now ship (`runner/` and `runner/lingbot/`), so this is no
+    longer the "only context installs π0.5" case -- and the refusal has to
+    survive that. `training` is a claim that `openroboto train` drives the
+    image to a checkpoint; `real_xarm6` has no context of its own, so building
+    silently here would hand back an image built out of somebody else's base
+    that the next command refuses to touch.
+
+    ⚠️ This used to use `sim_lingbot`, which moved to `DOCKER` on 2026-08-26
+    once `scripts/verify_lingbot_runner.py` ran green on a card. The property
+    is about `training=UNAVAILABLE`, not about LingBot -- `real_xarm6` keeps
+    the exact shape (a LINGBOT-profile competition that names an image this
+    client must not fill).
     """
     monkeypatch.delenv("OPENPI_RUNNER_IMAGE", raising=False)
     built: list[Any] = []
@@ -1018,10 +1025,10 @@ def test_build_will_not_fill_a_competitions_image_name_with_another_base(
     )
     config = _competition_config(
         tmp_path,
-        track="sim",
+        track="real",
         seq=2,
-        adapter="sim_lingbot",
-        params={"training": {"image": "lingbot-runner:1.2"}},
+        adapter="real_xarm6",
+        params={"training": {"image": "xarm6-runner:1.0"}},
     )
     args = argparse.Namespace(
         config=config, context="", image="", no_cache=False, dry_run=False
@@ -1108,18 +1115,23 @@ def test_a_config_from_before_competitions_builds_what_it_always_did(
     assert DEFAULT_IMAGE in capsys.readouterr().out
 
 
-@pytest.mark.parametrize("adapter", ["real_xarm6", "sim_lingbot"])
+@pytest.mark.parametrize("adapter", ["real_xarm6"])
 def test_train_refuses_a_competition_whose_training_is_not_released(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, adapter: str
 ) -> None:
     """🔴 Not a no-op: an empty output directory is something `openroboto check`
     would then deliver a verdict about.
 
-    `sim_lingbot` is here because its dataset does exist and its image does not,
-    so the refusal cannot key off "is this competition released at all". The
-    failure it prevents is the quiet one: with an image built by an earlier
-    release sitting under this competition's name, `docker run` succeeds and
-    trains on π0.5.
+    The failure this prevents is the quiet one: with an image built by an
+    earlier release sitting under this competition's name, `docker run`
+    succeeds and trains on π0.5, with no error anywhere.
+
+    ⚠️ `sim_lingbot` used to be the second case here, precisely because its
+    dataset exists and its image did not -- proof the refusal does not key off
+    "is this competition released at all". It ships a verified container as of
+    2026-08-26, so it moved to `DOCKER` and out of this list. The parametrize
+    stays for the next competition that lands dataset-first; `real_xarm6` has
+    neither, which is a weaker case than the one this test was written for.
     """
     called: list[Any] = []
     monkeypatch.setattr(
@@ -1497,24 +1509,29 @@ def test_doctor_does_not_call_a_foreign_image_ready(
 ) -> None:
     """🔴 The competition names the image, this client cannot build it, and yet
     something with that name is on the machine -- an earlier release built it out
-    of the openpi context. "ready" is the one word that must not appear: it is
-    the last place the name and the contents can be told apart.
+    of another competition's context. "ready" is the one word that must not
+    appear: it is the last place the name and the contents can be told apart.
+
+    ⚠️ Was `sim_lingbot` until 2026-08-26, when a green
+    `scripts/verify_lingbot_runner.py` moved it to `DOCKER`. `real_xarm6` is
+    the same shape and the property is unchanged -- it is about
+    `training=UNAVAILABLE`, not about any one base model.
     """
     monkeypatch.delenv("OPENPI_RUNNER_IMAGE", raising=False)
     monkeypatch.setattr(doctor_command.shutil, "which", lambda name: "/usr/bin/docker")
     monkeypatch.setattr(doctor_command, "_run", lambda command: "sha256:abc")
     config = _competition_config(
         tmp_path,
-        track="sim",
+        track="real",
         seq=2,
-        adapter="sim_lingbot",
-        params={"training": {"image": "lingbot-runner:1.2"}},
+        adapter="real_xarm6",
+        params={"training": {"image": "xarm6-runner:1.0"}},
     )
 
     result = doctor_command.check_image(config)
     assert result.ok is False
     assert "ready" not in result.detail
-    assert "lingbot-runner:1.2" in result.detail
+    assert "xarm6-runner:1.0" in result.detail
     # ...and it does not fail the whole run: `openroboto build` refuses this
     # competition on purpose, so there is nothing here for the miner to fix.
     assert result.required is False

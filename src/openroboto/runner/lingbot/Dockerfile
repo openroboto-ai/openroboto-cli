@@ -14,13 +14,16 @@
 #     -e CUSTOM_TRAIN=/data/scripts/strategy.py \
 #     lingbot-runner:latest
 #
-# 🔴 **NOT VERIFIED ON A GPU.** No NVIDIA card was available when this was
-# written, so `docker build` was never run on it either (the base image is
-# linux/amd64 and the host was darwin/arm64). Every ⚠️ below marks a
-# specific thing that is expected to work and has not been observed to.
-# `scripts/verify_lingbot_runner.py` checks them in about ten minutes on a
-# machine that has a card — run it before anyone flips
-# `adapters.sim_lingbot.training` to `DOCKER`.
+# ✅ **VERIFIED ON A GPU, 2026-08-26.** `docker build` and
+# `scripts/verify_lingbot_runner.py` both ran green on an A100-SXM4-80GB
+# (driver 580.126.09, Docker 27.3.1); the resulting image is 10.9 GB. That run
+# is what moved `adapters.sim_lingbot.training` to `DOCKER`.
+#
+# ⚠️ The ⚠️ marks below are kept, not cleared. They flag pins and versions
+# that were *observed to work together once*, on one driver, against one
+# checkpoint revision — re-run the script after touching any of them. What no
+# run here has covered is a training step: the verification builds the model,
+# injects LoRA, merges and exports, and stops.
 # ═══════════════════════════════════════════════════════════
 FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04
 

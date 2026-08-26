@@ -93,25 +93,35 @@ passes, and uses `policy.processor` to turn it into model input. This is the
 difference that lets the container interface stay fixed.
 
 
-🔴 Not verified on a GPU
-========================
-Written on a machine with no NVIDIA card, so `docker build` never ran and
-neither did any of this. The signatures below were read from
-`Robbyant/lingbot-vla-v2` at the commit the Dockerfile pins; the reasoning is
-as good as the reading. Specifically unproven:
+Verified on a GPU, 2026-08-26
+=============================
+`scripts/verify_lingbot_runner.py`, A100-SXM4-80GB, driver 580.126.09, all
+stages green — which is what moved `adapters.sim_lingbot.training` to
+`DOCKER`. This file was originally written on a machine with no NVIDIA card,
+and six things were listed here as unproven. Five are now observed:
 
-  1. that 14–18 GB is the real number, on a real card, with real batches
-  2. that `build_foundation_model()` completes with no process group — the
-     reasoning above says yes, only a run says so
-  3. that `LORA_TARGET_MODULES` matches modules that exist in this
-     architecture (peft raises when it matches nothing, so this fails loudly)
-  4. that `moe_implementation="fused"` works outside their sharded setup
-  5. that torch 2.8.0's cu128 wheel runs on the CUDA 12.4 runtime base image
-  6. that `merge_lora_and_export()` produces a checkpoint the evaluator loads
+  2. `build_foundation_model()` completes with no process group ✅ — single
+     process, `global_rank=-1`, `world_size=1`, no `init_process_group`, no
+     FSDP2. The earlier survey that concluded the vendor's training entry
+     point "cannot fit the container interface" rested on the opposite claim.
+  3. `LORA_TARGET_MODULES` matches real modules ✅ — 396 of them, 38.9 M
+     trainable parameters. It did *not* match on the first run; the vendor's
+     signature default names another architecture entirely. See below.
+  4. `moe_implementation="fused"` works outside their sharded setup ✅
+  5. torch 2.8.0's cu128 wheel runs on the CUDA 12.4 runtime base image ✅
+  6. `merge_lora_and_export()` produces a flat checkpoint root ✅
 
-`scripts/verify_lingbot_runner.py` walks 2–4 and 6 in about ten minutes.
-Until it has been run, `adapters.sim_lingbot.training` stays `UNAVAILABLE` and
-`openroboto train` refuses this competition.
+⚠️ Item 1 is **still arithmetic.** Measured peak was 12.4 GiB and that is
+weights only, before any batch: the verification builds, merges and exports,
+it never runs a training step. The 14–18 GiB figure below is that 12.4 plus an
+estimate for optimizer state and activations. On a 24 GB card it leaves
+11.6 GiB of headroom, which is a miner's report to make, not this run's.
+
+⚠️ Seven of the vendor's defaults had to be overridden to get here, and they
+share one shape: **the vendor's own entry point never takes this path**, so
+those defaults have never executed anywhere. Each is commented at its call
+site with the symptom, the vendor `file:line`, and why the fix is what it is.
+Expect an eighth the first time anything here meets a real batch.
 """
 
 import json

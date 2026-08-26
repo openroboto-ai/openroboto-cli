@@ -61,9 +61,10 @@ class Adapter:
 
 ADAPTERS: Final = {
     "sim_openpi": Adapter(format_profile=OPENPI),
-    # 🔴 Still `UNAVAILABLE`, but for a different reason than before -- and the
-    # two previous reasons written here are both now wrong, so they are worth a
-    # line each so nobody re-derives them.
+    # `DOCKER` since 2026-08-26, on evidence rather than arithmetic. Three
+    # reasons were written here over time for holding it at `UNAVAILABLE`; all
+    # three are now discharged, and they are worth a line each so nobody
+    # re-derives them.
     #
     # "This package ships no LingBot Dockerfile": **fixed.**
     # `runner/lingbot/` ships one, and `runner_context(LINGBOT)` selects it.
@@ -78,19 +79,23 @@ ADAPTERS: Final = {
     # uninitialised), sharding is a separate call nobody has to make, and their
     # unused `add_lora_to_model()` brings a 6.38 B model onto one card. The
     # data pipeline never comes up because this runner does not use theirs.
-    # See `runner/lingbot/train_runner.py` for the four decisions in full.
     #
-    # What is actually missing is **a run**. It was written on a machine with
-    # no NVIDIA card: `docker build` never ran, `build_foundation_model()` was
-    # never called, and "14-18 GB fits on a 24 GB card" is arithmetic. `DOCKER`
-    # is a promise that `openroboto train` drives this image to a checkpoint,
-    # and a promise made from arithmetic costs a miner a round to disprove.
+    # "What is actually missing is a run": **it has been run.**
+    # `scripts/verify_lingbot_runner.py` on an A100-SXM4-80GB, all stages
+    # green -- the container builds, `build_foundation_model()` returns a model
+    # whose every parameter was filled from the released checkpoint,
+    # `LORA_TARGET_MODULES` matches 396 real modules for 38.9 M trainable
+    # parameters, `moe_implementation="fused"` works unsharded, and
+    # `merge_lora_and_export()` writes a flat checkpoint root. Seven of the
+    # vendor's own defaults had to be overridden to get there; each one is
+    # commented at its call site in `runner/lingbot/train_runner.py`.
     #
-    # → `scripts/verify_lingbot_runner.py` turns each assumption into a
-    #   PASS/FAIL in about ten minutes on a box with a card. All stages green
-    #   is what this line is waiting for; then it becomes `Adapter(
-    #   format_profile=LINGBOT)` and nothing else here changes.
-    "sim_lingbot": Adapter(format_profile=LINGBOT, training=UNAVAILABLE),
+    # ⚠️ Measured peak was **12.4 GiB, weights only, before any batch**. The
+    # 14-18 GiB written in that file is weights *plus* activations and remains
+    # arithmetic -- the verification builds and exports, it does not run a
+    # training step. A 24 GB card has 11.6 GiB of headroom for activations;
+    # that is the number a miner reports back on, not one this run proved.
+    "sim_lingbot": Adapter(format_profile=LINGBOT),
     # The dataset (`xarm6-libero-seed-v1`) and the training image do not exist
     # yet, so there is nothing to install and nothing to run.
     "real_xarm6": Adapter(format_profile=LINGBOT, training=UNAVAILABLE),

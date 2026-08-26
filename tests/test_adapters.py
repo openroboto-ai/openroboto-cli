@@ -34,7 +34,7 @@ def test_a_config_from_before_competitions_is_the_pi05_simulation() -> None:
     ("adapter", "profile", "training"),
     [
         ("sim_openpi", adapters.OPENPI, adapters.DOCKER),
-        ("sim_lingbot", adapters.LINGBOT, adapters.UNAVAILABLE),
+        ("sim_lingbot", adapters.LINGBOT, adapters.DOCKER),
         ("real_xarm6", adapters.LINGBOT, adapters.UNAVAILABLE),
     ],
 )

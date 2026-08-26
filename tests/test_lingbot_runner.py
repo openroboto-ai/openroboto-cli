@@ -4,11 +4,14 @@ What is checkable here is small and specific: that the build context is
 complete, that its pins agree with each other, and that the two runners hand a
 strategy script the same `cfg`. Everything that needs a card --
 `build_foundation_model()`, the VRAM figure, LoRA target modules matching real
-modules -- lives in `scripts/verify_lingbot_runner.py` and has **not** been
-run. `adapters.sim_lingbot.training` stays `UNAVAILABLE` until it has.
+modules -- lives in `scripts/verify_lingbot_runner.py`, which ran green on an
+A100 on 2026-08-26 and is what moved `adapters.sim_lingbot.training` to
+`DOCKER`.
 
 The one thing these tests are *not* is reassurance. Green here means the
-container is well-formed, not that it trains.
+container is well-formed, not that it trains -- and re-running them proves
+nothing about a checkpoint or a driver, so they cannot notice if either moves
+out from under the verified run.
 """
 
 from __future__ import annotations
