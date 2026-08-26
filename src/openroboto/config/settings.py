@@ -164,6 +164,14 @@ class Settings:
     #: wrote. Passed through, never interpreted here: a value the CLI
     #: understands is a value that needs a CLI release to change.
     competition_params: dict[str, Any] = field(default_factory=dict)
+    #: `competition.source` -- **which backend served the season above**.
+    #: `""` = the file does not say (written before the key existed).
+    #:
+    #: It is not decoration: `(track, seq)` is unique per database, not across
+    #: them, so a season fetched from one backend matches a season on another
+    #: and nothing else in this file records which one it was. That is the fact
+    #: `require_for_chain()` hands to `check_coherent()`.
+    competition_source: str = ""
 
     # ─── Model ─────────────────────────────────────────
     vla_model_id: str = "pi05"
@@ -241,6 +249,9 @@ class Settings:
             netuid=self.netuid,
             control_json_url=self.control_json_url,
             backend_url=self.backend_url,
+            # 🔴 The fact none of the fields above can contradict: they describe
+            # each other, while this one describes where the season came from.
+            competition_source=self.competition_source,
         )
         if missing:
             raise ConfigError(
@@ -333,6 +344,7 @@ class Settings:
         cfg.competition_adapter = str(
             competition.get("adapter", cfg.competition_adapter) or ""
         )
+        cfg.competition_source = str(competition.get("source") or "")
         cfg.competition_params = _section(competition, "params")
 
         model = _section(data, "model")

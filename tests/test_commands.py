@@ -80,9 +80,17 @@ def _row(**overrides: Any) -> Competition:
     return Competition.model_validate(COMPETITION_ROW | overrides)
 
 
-def _serving(monkeypatch: pytest.MonkeyPatch, *rows: Competition) -> list[str]:
-    """Answer `init`'s one request. Returns the base URLs it was called with,
-    so "sent no request at all" is an assertion and not an assumption."""
+def _serving(
+    monkeypatch: pytest.MonkeyPatch, *rows: Competition, netuid: int = 313
+) -> list[str]:
+    """Answer `init`'s requests. Returns the base URLs the competition list was
+    asked for, so "sent no request at all" is an assertion and not an assumption.
+
+    `netuid` is what a backend this client does not host answers when asked which
+    subnet it watches. The default `--backend-url` below is exactly that kind of
+    address, so every case here goes down the self-hosted path unless it says
+    otherwise.
+    """
     called: list[str] = []
 
     def _fetch(base_url: str, **kwargs: Any) -> Any:
@@ -90,6 +98,7 @@ def _serving(monkeypatch: pytest.MonkeyPatch, *rows: Competition) -> list[str]:
         return SimpleNamespace(data=list(rows))
 
     monkeypatch.setattr(init_command, "fetch_competitions", _fetch)
+    monkeypatch.setattr(init_command, "fetch_netuid", lambda base_url: netuid)
     return called
 
 
@@ -118,7 +127,85 @@ def test_init_releases_config_and_strategy(
     assert (target / "miner.yaml").is_file()
     assert "def train(" in (target / "train_strategy.py").read_text(encoding="utf-8")
     # the template must be readable back by our own parser
-    assert Settings.load(str(target / "miner.yaml")).netuid == 80
+    assert Settings.load(str(target / "miner.yaml")).netuid == 313
+
+
+def test_the_workspace_points_where_the_backend_url_points(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """🔴 The one that was broken: **ask a testnet backend, get a testnet
+    workspace.**
+
+    `init` used to write a static mainnet block around whatever season it had
+    just fetched. Asking a local backend on netuid 313 produced a `competition:`
+    from that backend inside `environment: mainnet` / `netuid: 80` / production
+    URLs, with no `backend:` section at all -- so `submit` would confirm the
+    season against **production**, match it by `(track, seq)` (both sides seed
+    the same tracks), and burn mainnet TAO for a season nobody there had heard
+    of. Nothing in the file was inconsistent with anything else in it.
+    """
+    _serving(monkeypatch, _row(), netuid=313)
+    args = _init_args(tmp_path / "w", backend_url="http://127.0.0.1:8011")
+    assert init_command.run(args) == 0
+
+    written = Settings.load(str(tmp_path / "w" / "miner.yaml"))
+    assert written.netuid == 313
+    assert written.environment == "local"
+    assert written.network != "finney"
+    assert written.backend_url == "http://127.0.0.1:8011"
+    assert written.control_json_url == "http://127.0.0.1:8011/control.json"
+    # and the season carries where it came from, which is the fact no field
+    # above can contradict on its own.
+    assert written.competition_source == "http://127.0.0.1:8011"
+
+
+def test_the_default_still_writes_the_mainnet_workspace_it_always_did(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """🔴 No `--backend-url` is the miner's normal path, and it must be the
+    workspace they have always got: mainnet, finney, 80, production URLs.
+
+    It also asks no probe. A hosted environment states its own netuid in
+    `config/environments.py` -- which is the same table `check_coherent()`
+    enforces -- so asking the backend instead would be a second source for one
+    fact, and one more request between a miner and their first command.
+    """
+    _serving(monkeypatch, _row())
+
+    def _no_probe(base_url: str) -> int:
+        raise AssertionError("mainnet states its own netuid; do not go and ask")
+
+    monkeypatch.setattr(init_command, "fetch_netuid", _no_probe)
+
+    assert init_command.run(_init_args(tmp_path / "w", backend_url="")) == 0
+
+    written = Settings.load(str(tmp_path / "w" / "miner.yaml"))
+    assert (written.environment, written.network, written.netuid) == (
+        "mainnet",
+        "finney",
+        80,
+    )
+    assert written.backend_url == "https://api.openroboto.ai"
+    assert written.control_json_url == "https://api.openroboto.ai/control.json"
+    # coherent end to end, including where the season came from
+    written.require_for_chain()
+
+
+def test_a_backend_that_will_not_say_which_subnet_it_watches_writes_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The same rule as the competition list: a netuid is not something to
+    guess, so not knowing it stops the command instead of picking one."""
+    _serving(monkeypatch, _row())
+
+    def _unreachable(base_url: str) -> int:
+        raise BackendError("connection refused", retryable=True)
+
+    monkeypatch.setattr(init_command, "fetch_netuid", _unreachable)
+
+    target = tmp_path / "w"
+    assert init_command.run(_init_args(target)) == 1
+    assert not target.exists() or list(target.iterdir()) == []
 
 
 def test_init_takes_the_only_competition_without_asking(
@@ -389,6 +476,45 @@ def test_refresh_refuses_rather_than_guessing_where_the_section_went(
     assert init_command.run(_init_args(target, refresh=True)) == 1
     assert hashlib.md5(config.read_bytes()).hexdigest() == digest
     assert not (target / "miner.yaml.bak").exists()
+
+
+def test_a_refresh_from_another_backend_is_refused_rather_than_written(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """🔴 The one case writing cannot fix.
+
+    `--refresh` rewrites the competition section **and nothing else** -- that is
+    its contract and the reason miners trust it with a hand-edited file. So a
+    season fetched from another backend would land inside this workspace's
+    existing chain settings, which is precisely the shape that pays one
+    subnet's fee for another subnet's season. It is refused instead.
+    """
+    target = _workspace(tmp_path, monkeypatch)
+    _serving(monkeypatch, _row(label="renamed"))
+    before = (target / "miner.yaml").read_text(encoding="utf-8")
+
+    args = _init_args(target, refresh=True, backend_url="http://127.0.0.1:8011")
+    assert init_command.run(args) == 1
+
+    assert (target / "miner.yaml").read_text(encoding="utf-8") == before
+    assert not (target / "miner.yaml.bak").exists()
+
+
+def test_the_picker_on_a_closed_stdin_says_so_instead_of_raising(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A traceback out of `input()` reads like a broken client, and the miner
+    running this in CI has no way to tell that it is not one."""
+    _serving(monkeypatch, _row(), _row(id=1, track="sim", seq=2))
+
+    def _eof(*args: Any) -> str:
+        raise EOFError
+
+    monkeypatch.setattr("builtins.input", _eof)
+
+    target = tmp_path / "w"
+    assert init_command.run(_init_args(target)) == 1
+    assert not target.exists() or list(target.iterdir()) == []
 
 
 def test_refresh_on_a_workspace_that_does_not_exist_says_so(

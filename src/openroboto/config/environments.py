@@ -16,6 +16,13 @@ them is not a harmless mistake -- both half-states cost the miner money:
 So `environment` is one name for the whole decision, and `check_coherent()`
 refuses to go on chain when the pieces disagree.
 
+There is a third half-state, and it is the one those four fields cannot see:
+**the season came from one backend and the money leaves on another's chain.**
+Nothing in the config contradicts anything else -- the contradiction is between
+the file and an event that happened while it was being written. That fact is
+`competition.source`, written by `openroboto init`, and `check_coherent()` takes
+it as an argument for exactly this reason.
+
 **It deliberately does not supply `subnet.netuid`.** That field has no default on
 purpose: a config that forgets it must fail, not quietly pick a subnet, because
 picking the wrong one burns real TAO (see the comment on `Settings.netuid`).
@@ -118,6 +125,30 @@ def host_of(url: str) -> str:
     return urlparse(url).hostname or ""
 
 
+def origin_of(url: str) -> str:
+    """`host:port` of a URL, lowercased; empty string if there isn't one.
+
+    The port is part of the answer here, unlike in `host_of`: two backends on one
+    developer's machine differ by nothing else, and `127.0.0.1:8001` and
+    `127.0.0.1:8011` are not the same subnet.
+    """
+    return urlparse(url).netloc.lower()
+
+
+def find(backend_url: str) -> Environment | None:
+    """Which environment hosts this backend; `None` when none of ours does.
+
+    `None` is the ordinary answer for a self-hosted backend, and it is what makes
+    the difference visible: for a host we know, this file already states the chain
+    and the netuid, so `openroboto init` can write them; for one we do not, only
+    that backend knows, so it has to be asked rather than assumed.
+    """
+    # A URL with no host at all matches nothing here on its own: `local` is the
+    # only entry without a host and it stores `None`, never `""`.
+    host = host_of(backend_url)
+    return next((env for env in ENVIRONMENTS.values() if env.host == host), None)
+
+
 def check_coherent(
     *,
     environment: str,
@@ -125,6 +156,7 @@ def check_coherent(
     netuid: int,
     control_json_url: str,
     backend_url: str,
+    competition_source: str = "",
 ) -> list[str]:
     """Return every way this config contradicts itself; empty means it is consistent.
 
@@ -133,6 +165,16 @@ def check_coherent(
     this function's job to insist everyone uses ours. What it will not tolerate is
     naming an environment and then pointing somewhere else, because that is the
     shape of both money-losing mistakes described in the module docstring.
+
+    `competition_source` is the backend that served the season in this workspace
+    (`competition.source`, written by `openroboto init`). 🔴 **Without it the five
+    self-describing fields can be perfectly consistent and still be wrong**, and
+    they were: `init --backend-url <local backend>` used to take the season from
+    that backend and write a mainnet workspace around it. Every field agreed with
+    every other field -- mainnet, finney, 80, production URLs -- because the one
+    fact that disagreed, *where the season came from*, was not among them. Empty
+    means the workspace does not say (written before the key existed); that is not
+    checked rather than assumed to be fine, which is why `init` writes it.
     """
     env = ENVIRONMENTS.get(environment)
     if env is None:
@@ -140,6 +182,23 @@ def check_coherent(
         return [f"environment: unknown value {environment!r}, valid options: {known}"]
 
     problems: list[str] = []
+    if (
+        competition_source
+        and backend_url
+        and origin_of(competition_source) != origin_of(backend_url)
+    ):
+        problems.append(
+            f"the competition in this workspace came from {competition_source}, "
+            f"but backend.url is {backend_url}."
+            f"\n     One backend named the season you trained for; a different one "
+            f"is asked to confirm it in the second before you pay. They can agree "
+            f"on `(track, seq)` and still be two different seasons -- both sides "
+            f"seed the same tracks -- so the fee goes to whichever subnet "
+            f"**this** file names."
+            f"\n     → `openroboto init <directory> --backend-url "
+            f"{competition_source}` writes a whole workspace that matches that "
+            f"backend; or point backend.url at the one you meant to mine on."
+        )
     if env.host is None:
         # Self-hosted backend: the chain is left unconstrained, but you
         # **must** say where the backend is.

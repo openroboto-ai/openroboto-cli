@@ -327,6 +327,72 @@ def test_local_pointing_at_a_hosted_environment_is_a_contradiction() -> None:
         cfg.require_for_chain()
 
 
+def test_a_season_from_one_backend_is_not_paid_for_on_another_chain() -> None:
+    """🔴 **Every self-describing field agrees, and the config is still wrong.**
+
+    This is the workspace `init --backend-url <a local backend>` used to write:
+    the season came from 127.0.0.1:8011, and everything written around it says
+    mainnet -- environment, network, netuid, both URLs, all consistent with each
+    other. The contradiction is not among them, which is exactly why it was
+    never caught: it is between the file and where the season came from.
+
+    What it costs is not theoretical. `(track, seq)` is unique inside one
+    database, not across them, and both sides seed the same tracks -- so
+    `submit` looks up `(sim, 2)`, **finds** production's `(sim, 2)`, and burns
+    real TAO for a season this workspace was never trained for.
+    """
+    cfg = Settings.from_mapping(
+        {
+            "environment": "mainnet",
+            "subnet": {"netuid": 80, "network": "finney"},
+            "competition": {
+                "track": "sim",
+                "seq": 2,
+                "source": "http://127.0.0.1:8011",
+            },
+        }
+    )
+    with pytest.raises(ConfigError) as excinfo:
+        cfg.require_for_chain()
+    assert "127.0.0.1:8011" in str(excinfo.value)
+
+
+def test_the_same_host_on_another_port_is_another_backend() -> None:
+    """Two backends on one machine differ by nothing but the port, and the
+    dev default (8001) is one keystroke from the one in the report (8011)."""
+    cfg = Settings.from_mapping(
+        {
+            "environment": "local",
+            "subnet": {"netuid": 313, "network": "test"},
+            "backend": {"url": "http://127.0.0.1:8001"},
+            "urls": {"control_json": "http://127.0.0.1:8001/control.json"},
+            "competition": {
+                "track": "sim",
+                "seq": 2,
+                "source": "http://127.0.0.1:8011",
+            },
+        }
+    )
+    with pytest.raises(ConfigError):
+        cfg.require_for_chain()
+
+
+def test_a_workspace_that_names_its_own_backend_passes() -> None:
+    """The ordinary case, and the one `init` writes: the season came from the
+    backend this config talks to. Being stricter than that would refuse every
+    workspace the command produces."""
+    Settings.from_mapping(
+        {
+            "subnet": {"netuid": 80, "network": "finney"},
+            "competition": {
+                "track": "sim",
+                "seq": 1,
+                "source": "https://api.openroboto.ai",
+            },
+        }
+    ).require_for_chain()
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # weight_interval_min -- bounded on both sides by the chain
 # ─────────────────────────────────────────────────────────────────────────────

@@ -68,7 +68,9 @@ def _snapshot(live: Competition) -> Any:
     the miner ends up with, so a key that survives the write but not the read
     fails here rather than in front of a miner about to pay.
     """
-    settings = Settings.from_mapping(yaml.safe_load(render_section(live)))
+    settings = Settings.from_mapping(
+        yaml.safe_load(render_section(live, "https://api.openroboto.ai"))
+    )
     snapshot = load_snapshot(settings)
     assert snapshot is not None
     return snapshot

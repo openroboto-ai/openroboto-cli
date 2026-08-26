@@ -413,6 +413,49 @@ def test_a_competition_list_in_the_wrong_shape_is_an_error(
         backend_api.fetch_competitions("https://api.example")
 
 
+# ─── which subnet the backend watches ────────────────────────
+#
+# `openroboto init` writes this number into `subnet.netuid`, so everything here
+# is about one question: is the value in front of us really the backend's answer,
+# or something that merely parsed?
+
+
+def test_the_backend_states_its_own_netuid(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`/healthz` is bare JSON on purpose (backend ADR 02 §3.3) -- probes are
+    read by orchestrators on fixed field paths, so it carries no envelope."""
+    seen = _capture(monkeypatch, {"status": "ok", "round": 1, "netuid": 313})
+    assert backend_api.fetch_netuid("https://api.example") == 313
+    assert seen[0].full_url == "https://api.example/healthz"
+
+
+def test_a_backend_that_does_not_answer_the_probe_is_not_a_netuid_of_zero(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """🔴 Every way of not knowing has to raise.
+
+    A missing key reads as `None`, an old backend returns a page of HTML, a
+    misconfigured one could serve `0` -- and each of those, turned into a number
+    by a `.get(..., 0)` or an `int()`, is a subnet this miner never chose. The
+    fee is burned on whatever comes out of here.
+    """
+    for payload in ({"status": "ok"}, {"netuid": 0}, {"netuid": "313"}, ["ok"]):
+        _capture(monkeypatch, payload)
+        with pytest.raises(backend_api.BackendError, match="not a subnet number"):
+            backend_api.fetch_netuid("https://api.example")
+
+
+def test_an_unreachable_probe_says_what_it_was_for(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The miner asked for a workspace, not for a health check; the message has
+    to connect the two, and keep the retry advice that came with it."""
+    _fail_with(monkeypatch, _http_error(404))
+    with pytest.raises(backend_api.BackendError) as excinfo:
+        backend_api.fetch_netuid("https://api.example")
+    assert "which subnet it watches" in str(excinfo.value)
+    assert "Nothing was written" in str(excinfo.value)
+
+
 # ─── roster ──────────────────────────────────────────────────
 
 

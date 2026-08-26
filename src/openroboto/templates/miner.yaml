@@ -5,31 +5,33 @@
 # here is what the CLI uses.
 
 # ─── Which subnet and backend ───────────────────────────────
+# **This block was written to match the backend `openroboto init` asked**, and
+# not from a template: the season below came from that backend, so the chain the
+# fee is burned on has to come from there too.
+#
 # `mainnet` = netuid 80 on finney, real TAO, non-refundable fees.
 # `dev`     = netuid 313 on testnet, faucet TAO, nothing to lose.
-# `local`   = your own backend. Pins nothing, but you must fill in backend.url
-#             and urls.control_json below — otherwise they would keep their
-#             built-in defaults, which are the production ones, and you would be
-#             talking to mainnet while believing you were testing locally:
-#
-#               environment: local
-#               subnet:   { netuid: 313, network: test }
-#               backend:  { url: http://localhost:8001 }
-#               urls:     { control_json: http://localhost:8001/control.json }
+# `local`   = your own backend, wherever it runs. `init --backend-url <address>`
+#             fills in backend.url, urls.control_json and the netuid that
+#             backend says it watches — but a netuid does not say which chain it
+#             is on, and nothing else can answer that for you, so subnet.network
+#             below is left empty and every on-chain command refuses until you
+#             set it (`test` for a testnet backend, `finney` for a mainnet one).
 #
 # This one name covers four settings that must agree: subnet.network,
 # subnet.netuid, urls.control_json and backend.url. Changing only some of them
 # is how you burn mainnet TAO at the dev fee rate, or submit to testnet and then
 # ask production why nothing showed up. Anything below can still be overridden
 # individually — the CLI just refuses to run on chain when the pieces disagree.
-environment: mainnet
+environment: $environment
 
 # ─── Bittensor subnet ───────────────────────────────────────
 subnet:
-  network: finney                  # finney (mainnet) | test | local
-  netuid: 80                       # mainnet netuid. Required — the CLI refuses
-                                   # to touch the chain without it, because a
-                                   # wrong netuid burns real TAO on the wrong subnet.
+  network: $network                  # finney (mainnet) | test | local
+  netuid: $netuid                       # the subnet this workspace mines. Required —
+                                   # the CLI refuses to touch the chain without
+                                   # it, because a wrong netuid burns real TAO on
+                                   # the wrong subnet.
   subtensor_endpoint: ""           # optional WS endpoint override
   wallet_path: ""                  # empty = Bittensor SDK default (~/.bittensor/wallets)
   coldkey: default
@@ -41,7 +43,15 @@ subnet:
 
 # ─── Public HTTP resources ──────────────────────────────────
 urls:
-  control_json: "https://api.openroboto.ai/control.json"
+  control_json: "$control_json"
+
+# ─── Backend API ────────────────────────────────────────────
+# The backend that served the competition below, written down instead of left to
+# a default. Left out, every later command asks the built-in default, which is
+# **production** — so a workspace initialised against any other backend would
+# train for one season and pay for another.
+backend:
+  url: "$backend_url"
   dataset_train: "https://api.openroboto.ai/train.json"
   dataset_val: "https://api.openroboto.ai/val.json"
 

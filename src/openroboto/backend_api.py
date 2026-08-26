@@ -95,6 +95,7 @@ DEFAULT_LIMIT = 20
 HISTORY_PATH = "/api/v1/submissions/history"
 REJECTIONS_PATH = "/api/v1/scan-rejections"
 COMPETITIONS_PATH = "/api/v1/competitions"
+HEALTH_PATH = "/healthz"
 WEIGHTS_PATH = "/api/v1/weights"
 #: The pre-v1 address. Still live, and still the only one an
 #: un-migrated backend has -- see `fetch_weights`.
@@ -220,6 +221,48 @@ def fetch_competitions(
         {"include_archived": "true" if include_archived else ""},
     )
     return _parse(ListEnvelope[Competition], raw, COMPETITIONS_PATH)
+
+
+def fetch_netuid(base_url: str) -> int:
+    """Which subnet this backend watches, from its own liveness probe.
+
+    For a self-hosted backend this is the **only** honest answer to "which chain
+    is this workspace on". `openroboto init` used to answer it from a static
+    template instead, which is how asking a testnet backend for the season
+    produced a mainnet workspace around it.
+
+    ⚠️ `/healthz` is deliberately **not** enveloped (backend ADR 02 §3.3: probes
+    stay bare JSON so orchestrators can read fixed field paths), so this is the
+    one endpoint here that is parsed by hand rather than by the protocol package.
+
+    Raises:
+        BackendError: unreachable, or it does not say. **Never returns a guess** --
+            a netuid invented here is the one number that decides which chain
+            burns the fee.
+    """
+    try:
+        raw = _get(base_url, HEALTH_PATH)
+    except BackendError as exc:
+        raise BackendError(
+            f"{base_url} answered the competition list but not {HEALTH_PATH}, so "
+            f"it cannot say which subnet it watches -- and that is what decides "
+            f"where your fee is burned. Nothing was written.\n"
+            f"  {exc.args[0] if exc.args else exc}",
+            code=exc.code,
+            retryable=exc.retryable,
+            request_id=exc.request_id,
+        ) from exc
+
+    body = _decode(raw, HEALTH_PATH)
+    netuid = body.get("netuid") if isinstance(body, dict) else None
+    if not isinstance(netuid, int) or isinstance(netuid, bool) or netuid <= 0:
+        raise BackendError(
+            f"{base_url}{HEALTH_PATH} reports netuid {netuid!r}, which is not a "
+            f"subnet number.\n"
+            f"  → upgrade that backend, or point --backend-url at one that "
+            f"answers the probe"
+        )
+    return netuid
 
 
 class RosterEntry(Contract):

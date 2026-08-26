@@ -31,16 +31,18 @@ from __future__ import annotations
 import argparse
 import difflib
 import shutil
+from dataclasses import dataclass
 from importlib.resources import files
 from pathlib import Path
+from string import Template
 from typing import Any
 
 import yaml
 from openroboto_protocol.schemas import Competition
 
 from openroboto import adapters
-from openroboto.backend_api import BackendError, fetch_competitions
-from openroboto.config import ConfigError, Settings
+from openroboto.backend_api import BackendError, fetch_competitions, fetch_netuid
+from openroboto.config import ConfigError, Settings, environments
 from openroboto.console import fail, hint, say
 
 STRATEGIES = ("simple", "example")
@@ -125,20 +127,23 @@ def run(args: argparse.Namespace) -> int:
 
     target = Path(args.directory)
     try:
-        live = _pick(_competitions(_backend_url(args, target)))
+        backend_url = _backend_url(args, target)
+        live = _pick(_competitions(backend_url))
         adapters.resolve(live.adapter)
         strategy = _strategy(args.strategy, live)
+        if args.refresh:
+            return _refresh(target / CONFIG_TEMPLATE["miner"], live, backend_url)
+        subnet = _subnet_of(backend_url)
     except (BackendError, ConfigError) as exc:
         fail(str(exc))
         return 1
 
-    if args.refresh:
-        return _refresh(target / CONFIG_TEMPLATE["miner"], live)
-
     # Everything is built in memory before anything reaches the disk: a failure
     # above this line leaves the target directory exactly as it was found.
     contents = {
-        CONFIG_TEMPLATE["miner"]: write_section(_template("miner.yaml"), live),
+        CONFIG_TEMPLATE["miner"]: write_section(
+            _config_text(subnet), live, subnet.backend_url
+        ),
         "train_strategy.py": _template(f"{strategy}/train_strategy.py"),
         "README.md": _template(README_TEMPLATE["miner"]),
         # Inside the package it is called `gitignore` (no leading dot): dotfiles
@@ -156,6 +161,22 @@ def run(args: argparse.Namespace) -> int:
 
     say("")
     say(f"Competition: {live.label} ({live.track}/{live.seq} · cid={live.id})")
+    say(
+        f"Subnet:      netuid {subnet.netuid} on {subnet.network or '(not set)'} "
+        f"({subnet.environment} · {subnet.backend_url})"
+    )
+    if not subnet.network:
+        # The backend states its netuid and nothing states its chain, so this is
+        # the one field `init` cannot fill in. Left silent it defaults to
+        # nothing, `require_for_chain()` refuses at `burn`, and the miner has to
+        # work out which of two identically-numbered subnets they are on then.
+        hint(
+            f"⚠️  {subnet.backend_url} says it watches netuid {subnet.netuid}, but a "
+            f"netuid does not say which chain it is on.\n"
+            f"    Set subnet.network in miner.yaml (`test` for a testnet backend, "
+            f"`finney` for a mainnet one) — every on-chain command refuses until "
+            f"you do."
+        )
     say("Next steps (the workspace README.md has the full walkthrough):")
     say(
         "  1. Fill in huggingface.token / username and subnet.hotkey_ss58 in miner.yaml"
@@ -190,6 +211,80 @@ def _backend_url(args: argparse.Namespace, target: Path) -> str:
     return settings.backend_url
 
 
+@dataclass(frozen=True)
+class Subnet:
+    """Which chain a workspace talks to -- **decided by the backend that served
+    its competition**, never by the shipped template.
+
+    That distinction is the whole point of this type. `init` used to write a
+    static mainnet block around whatever season it had just fetched, so
+    `--backend-url <a testnet backend>` produced a workspace whose
+    `competition:` came from testnet and whose `environment` / `netuid` /
+    `backend.url` said mainnet. Every field agreed with every other one; the
+    only thing that disagreed was reality, and the first command to notice
+    would have been the one that pays.
+    """
+
+    environment: str
+    #: `""` = the backend did not say, and nothing else may answer for it. The
+    #: config carries the empty value through, and `require_for_chain()` refuses.
+    network: str
+    netuid: int
+    #: Normalised: what goes into `backend.url` and into `competition.source`,
+    #: so the two are compared without a trailing slash telling them apart.
+    backend_url: str
+
+
+def _subnet_of(backend_url: str) -> Subnet:
+    """Resolve the backend address into the chain settings to write down.
+
+    A host this client knows (`api.openroboto.ai`, `api-dev.openroboto.ai`) is
+    described by `config/environments.py`, which is also what `check_coherent()`
+    enforces later -- taking the values from anywhere else would be two sources
+    for one fact.
+
+    Any other host is somebody's own backend, so **it is asked** which subnet it
+    watches instead of being assumed onto ours. Unreachable there is a refusal,
+    exactly as it is for the competition list: `init` writes nothing rather than
+    a workspace whose netuid is a guess.
+    """
+    env = environments.find(backend_url)
+    if env is not None:
+        return Subnet(
+            environment=env.name,
+            network=env.network or "",
+            netuid=env.netuid or 0,
+            backend_url=env.backend_url,
+        )
+    return Subnet(
+        environment=environments.LOCAL.name,
+        # Not derived from the netuid: netuid 313 exists on both chains, and the
+        # one that costs money is the one nobody chose deliberately.
+        network="",
+        netuid=fetch_netuid(backend_url),
+        backend_url=backend_url.rstrip("/"),
+    )
+
+
+def _config_text(subnet: Subnet) -> str:
+    """The `miner.yaml` template with this subnet's values filled in.
+
+    `string.Template` and not a YAML round trip, for the same reason
+    `write_section` does text surgery: every comment in that file is there to
+    stop a specific expensive mistake, and `safe_dump` deletes all of them.
+    """
+    return Template(_template(CONFIG_TEMPLATE["miner"])).substitute(
+        environment=subnet.environment,
+        # `""` rather than an empty value: YAML reads a bare `network:` back as
+        # null, and "the backend did not say" has to survive the round trip as
+        # something `Settings` can hold.
+        network=subnet.network or '""',
+        netuid=subnet.netuid,
+        control_json=f"{subnet.backend_url}/control.json",
+        backend_url=subnet.backend_url,
+    )
+
+
 def _competitions(backend_url: str) -> list[Competition]:
     """Ask which competitions are open. Unreachable = stop, never a default."""
     rows = list(fetch_competitions(backend_url).data)
@@ -216,7 +311,18 @@ def _pick(rows: list[Competition]) -> Competition:
         say(f"  {number}. {row.label} ({row.track}/{row.seq} · cid={row.id})")
     say("")
     while True:
-        answer = input(f"Which one? [1-{len(rows)}] ").strip()
+        try:
+            answer = input(f"Which one? [1-{len(rows)}] ").strip()
+        except EOFError as exc:
+            # No terminal to ask (CI, a wrapper, `< /dev/null`). Unanswered is
+            # unanswered -- but a stack trace here reads like a broken client,
+            # and the miner cannot tell it apart from one.
+            raise ConfigError(
+                f"{len(rows)} competitions are open and nothing answered which "
+                f"one to set up, so no workspace was written.\n"
+                f"  → run this from a terminal, or pipe the number in: "
+                f"`echo 1 | openroboto init …`"
+            ) from exc
         if answer.isdigit() and 1 <= int(answer) <= len(rows):
             return rows[int(answer) - 1]
         hint(f"Type a number between 1 and {len(rows)}.")
@@ -242,20 +348,28 @@ def _strategy(explicit: str, live: Competition) -> str:
     return wanted
 
 
-def render_section(live: Competition) -> str:
+def render_section(live: Competition, source: str) -> str:
     """The `competition:` block for `miner.yaml`, as YAML text.
 
     `params` goes in **verbatim**. It is this season's spec (fee, base model,
     image, camera list) and it changes every season; picking fields out of it
     here would mean a CLI release before a season could add a key.
+
+    `source` is the backend this row came from. It is not a column of the row --
+    no backend can tell you which backend you were talking to -- and it is
+    written down because it is the one fact `check_coherent()` cannot derive
+    from the rest of the file: `(track, seq)` matches across environments (both
+    sides seed the same tracks), so a season fetched from one backend sits
+    unremarkably in a config that pays on another's chain.
     """
     row = live.model_dump(mode="json")
     section: dict[str, Any] = {key: row[key] for key in SECTION_KEYS}
+    section["source"] = source
     section["params"] = row["params"]
     return yaml.safe_dump({SECTION: section}, sort_keys=False, allow_unicode=True)
 
 
-def write_section(config_text: str, live: Competition) -> str:
+def write_section(config_text: str, live: Competition, source: str) -> str:
     """Replace the `competition:` block; leave every other byte alone.
 
     Text surgery rather than a YAML round trip, and that is the whole point:
@@ -282,15 +396,21 @@ def write_section(config_text: str, live: Competition) -> str:
     end = start + 1
     while end < len(lines) and lines[end][:1] in (" ", "\t"):
         end += 1
-    return "".join(lines[:start]) + render_section(live) + "".join(lines[end:])
+    return "".join(lines[:start]) + render_section(live, source) + "".join(lines[end:])
 
 
-def _refresh(config_path: Path, live: Competition) -> int:
+def _refresh(config_path: Path, live: Competition, source: str) -> int:
     """Rewrite one section of a config the miner already owns.
 
     The backup and the diff are not a nicety: overwriting `miner.yaml` is the
     only part of this command that cannot be undone, so `miner.yaml.bak` **is**
     the rollback path.
+
+    🔴 **This command rewrites the competition section and nothing else** -- that
+    is its contract, and it is also why the season and the config have to be
+    checked against each other *here*. A refresh from a different backend than
+    the file talks to cannot be repaired by writing: the chain settings around
+    the new season are the old ones, by design. So it is refused instead.
     """
     try:
         before = config_path.read_text(encoding="utf-8")
@@ -303,9 +423,17 @@ def _refresh(config_path: Path, live: Competition) -> int:
         return 1
 
     try:
-        after = write_section(before, live)
+        conflicts = _conflicts(config_path, source)
+        after = write_section(before, live, source)
     except ConfigError as exc:
         fail(str(exc))
+        return 1
+
+    if conflicts:
+        fail(
+            "This config does not match the backend the competition came from, "
+            "so nothing was rewritten:\n  - " + "\n  - ".join(conflicts)
+        )
         return 1
 
     if before == after:
@@ -324,6 +452,24 @@ def _refresh(config_path: Path, live: Competition) -> int:
     say(f"✅ {config_path} — competition section updated ({live.label})")
     say(f"   the previous version is kept at {backup}")
     return 0
+
+
+def _conflicts(config_path: Path, source: str) -> list[str]:
+    """How this config disagrees with the backend the season came from.
+
+    The same rule the chain commands run (`Settings.require_for_chain()`), given
+    the same extra fact -- one implementation, so a refresh cannot pass a check
+    that `burn` would then fail, or the other way round.
+    """
+    settings = Settings.load(str(config_path))
+    return environments.check_coherent(
+        environment=settings.environment,
+        network=settings.network,
+        netuid=settings.netuid,
+        control_json_url=settings.control_json_url,
+        backend_url=settings.backend_url,
+        competition_source=source,
+    )
 
 
 def _write_validator(target: Path, force: bool) -> int:

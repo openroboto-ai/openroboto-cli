@@ -213,6 +213,7 @@ def check_settings(settings: Settings) -> list[CheckResult]:
         netuid=settings.netuid,
         control_json_url=settings.control_json_url,
         backend_url=settings.backend_url,
+        competition_source=settings.competition_source,
     )
     results = [
         CheckResult(
