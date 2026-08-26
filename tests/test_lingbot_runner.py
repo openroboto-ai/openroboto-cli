@@ -234,7 +234,13 @@ def test_the_flash_attn_wheel_matches_the_torch_and_python_pins() -> None:
         f"{torch_pin.group(1)}: {wheel.group(0)}"
     )
 
-    python_pin = re.search(r"uv venv --python python(\d)\.(\d+)", dockerfile)
+    # Both spellings mean the same request. `--python python3.11` asks uv to find
+    # an interpreter *named* that on PATH; `--python 3.11` asks for the version
+    # and, with `--python-preference only-managed`, makes uv download it. The
+    # Dockerfile moved to the second one because apt's python3.11 on ubuntu 22.04
+    # is 3.11.0~rc1 and segfaults Triton -- so this regex has to accept it, or the
+    # check that guards the ABI goes quiet exactly when the ABI moved.
+    python_pin = re.search(r"uv venv [^\n]*--python (?:python)?(\d)\.(\d+)", dockerfile)
     assert python_pin, "the venv interpreter is not pinned"
     assert wheel.group(1) == f"cp{python_pin.group(1)}{python_pin.group(2)}", (
         f"the wheel is built for {wheel.group(1)}, the venv is "
