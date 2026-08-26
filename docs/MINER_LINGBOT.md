@@ -79,7 +79,7 @@ your `state/round_N.json` — none of it is touched.
 | Files you submit | weights + `assets/physical-intelligence/libero/norm_stats.json` | weights (sharded) + `config.json` + `model.safetensors.index.json`. **No `norm_stats`** — nothing looks for it |
 | Who downloads the base model | the CLI's training container does it for you | **you do**, by hand — see §4 |
 | Gate before payment | none; `openroboto check` was voluntary | **mandatory and unskippable.** A warning also refuses |
-| Base model changed after you trained | no such mechanism | `precheck` compares `(base_repo, base_revision)` against the backend and **refuses to pay** if they differ |
+| Base model changed after you trained | no such mechanism | the season check compares `(base_repo, base_revision)` against the backend and **refuses to pay** if they differ |
 
 The last two are worth a sentence each, because they change what a mistake costs.
 `submit` now judges your HuggingFace file listing *before* it burns, and there is

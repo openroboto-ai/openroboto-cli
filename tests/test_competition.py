@@ -27,11 +27,12 @@ from openroboto import competition as competition_module
 from openroboto.commands.init import render_section
 from openroboto.competition import (
     PrecheckFailed,
+    confirm_payment,
     fee_of,
     judge,
     load_snapshot,
-    precheck,
     render_window,
+    resolve_competition,
 )
 from openroboto.config import ConfigError, Settings
 
@@ -249,6 +250,65 @@ def test_an_unpublished_address_refuses_even_though_both_sides_are_null() -> Non
     assert "has not published its collection address" in str(raised.value)
 
 
+def test_a_real_season_configured_to_burn_is_refused_although_nothing_changed() -> None:
+    """🔴 Two TAO destroyed, nobody paid, and the submission still unpaid.
+
+    The season check compares the snapshot against the live row, and here they
+    agree perfectly -- `miner.yaml` was written from this very row at `init`, so
+    a season misconfigured as `burn` matches itself and every "has it changed"
+    question answers no. The next step is `add_stake_burn`, which has **no
+    recipient**: the fee is gone, the collection address never sees a Rao, there
+    is nobody to ask for it back, and the entry is still not paid for.
+
+    So the check cannot be "did it change", it has to be the backend's own rule
+    (`app/domain/fee.py::parse_fee` refuses any kind but `transfer` when it
+    prices a real-track submission) asserted from this side, before the money.
+    """
+    live = _competition(
+        params={"fee": {"kind": "burn", "amount_tao": 2.0, "coldkey": None}}
+    )
+    with pytest.raises(PrecheckFailed) as raised:
+        judge(_snapshot(live), [live], NOW)
+    message = str(raised.value)
+    assert "real-track" in message
+    assert "`burn`" in message
+    assert "Nothing was paid" in message
+
+
+def test_a_simulation_season_that_collects_by_transfer_is_not_refused() -> None:
+    """🔴 The other direction is **not** a rule, so it is not checked.
+
+    No backend function refuses a simulation season that collects by transfer;
+    inventing the symmetry here would refuse a season the subnet is happy to
+    take, and `params.fee.kind` is competition data precisely so that a season
+    may break the pattern without a CLI release.
+    """
+    live = _competition(
+        track="sim",
+        seq=2,
+        adapter="sim_lingbot",
+        params={"fee": {"kind": "transfer", "amount_tao": 0.1, "coldkey": COLDKEY}},
+    )
+    assert judge(_snapshot(live), [live], NOW).kind == "transfer"
+
+
+def test_an_address_that_is_not_ss58_shaped_is_refused() -> None:
+    """A collection address one character short still compares equal to itself.
+
+    The pattern is the backend's `_SS58_RE`, character for character, and what
+    it catches is a placeholder or a copy that lost a character -- the fee is
+    addressed by that string and nothing else, so a wrong one puts 2 TAO where
+    nobody holds the key.
+    """
+    live = _competition(
+        params={"fee": {"kind": "transfer", "amount_tao": 2.0, "coldkey": COLDKEY[:-1]}}
+    )
+    with pytest.raises(PrecheckFailed) as raised:
+        judge(_snapshot(live), [live], NOW)
+    assert "not an SS58 address" in str(raised.value)
+    assert "Nothing was paid" in str(raised.value)
+
+
 def test_a_burn_is_not_stopped_by_the_missing_address() -> None:
     """Burning needs no address. Without this branch the simulation seasons are
     blocked by the gate written for the real one."""
@@ -319,6 +379,19 @@ def _backend(monkeypatch: pytest.MonkeyPatch, rows: list[Competition]) -> list[s
     return calls
 
 
+def _gate(settings: Settings, snapshot: Any, now: Any) -> Any:
+    """Both halves of the gate, in the order `submit` runs them.
+
+    They are two functions because gates that need the live row -- the layout
+    rules, the entry list -- run *between* them, and none of those may run after
+    the prompt. Nothing runs between them here: what this file is about is the
+    two halves themselves.
+    """
+    verdict = resolve_competition(settings, snapshot, now)
+    confirm_payment(verdict)
+    return verdict
+
+
 def _answer(monkeypatch: pytest.MonkeyPatch, reply: str, tty: bool = True) -> None:
     monkeypatch.setattr(competition_module.sys.stdin, "isatty", lambda: tty)
     monkeypatch.setattr("builtins.input", lambda *a: reply)
@@ -333,7 +406,7 @@ def test_passing_says_which_season_how_long_and_how_much(
     _backend(monkeypatch, [live])
     _answer(monkeypatch, "y")
 
-    verdict = precheck(Settings(), _snapshot(live), NOW)
+    verdict = _gate(Settings(), _snapshot(live), NOW)
 
     printed = capsys.readouterr().out
     assert "xArm 6 第一届" in printed  # which season
@@ -357,7 +430,7 @@ def test_an_unreachable_backend_refuses_to_pay(
     monkeypatch.setattr(competition_module, "fetch_competitions", _fetch)
 
     with pytest.raises(PrecheckFailed) as raised:
-        precheck(Settings(), _snapshot(_competition()), NOW)
+        _gate(Settings(), _snapshot(_competition()), NOW)
     assert "Nothing was paid" in str(raised.value)
 
 
@@ -368,7 +441,7 @@ def test_a_non_interactive_shell_is_a_no(monkeypatch: pytest.MonkeyPatch) -> Non
     _answer(monkeypatch, "y", tty=False)
 
     with pytest.raises(PrecheckFailed):
-        precheck(Settings(), _snapshot(live), NOW)
+        _gate(Settings(), _snapshot(live), NOW)
 
 
 @pytest.mark.parametrize("reply", ["", "n", "no", "Y no wait"])
@@ -378,7 +451,7 @@ def test_anything_but_yes_is_a_no(monkeypatch: pytest.MonkeyPatch, reply: str) -
     _answer(monkeypatch, reply)
 
     with pytest.raises(PrecheckFailed):
-        precheck(Settings(), _snapshot(live), NOW)
+        _gate(Settings(), _snapshot(live), NOW)
 
 
 def test_a_terminal_that_goes_away_mid_question_is_not_a_yes(
@@ -397,7 +470,7 @@ def test_a_terminal_that_goes_away_mid_question_is_not_a_yes(
     monkeypatch.setattr("builtins.input", _closed)
 
     with pytest.raises(PrecheckFailed):
-        precheck(Settings(), _snapshot(live), NOW)
+        _gate(Settings(), _snapshot(live), NOW)
 
 
 def test_a_malformed_snapshot_cannot_escape_as_a_different_exception(
@@ -415,7 +488,7 @@ def test_a_malformed_snapshot_cannot_escape_as_a_different_exception(
     assert snapshot is not None
 
     with pytest.raises(PrecheckFailed):
-        precheck(settings, snapshot, NOW)
+        _gate(settings, snapshot, NOW)
 
 
 def test_the_fee_never_comes_from_the_subnet_wide_rate(
@@ -429,7 +502,7 @@ def test_the_fee_never_comes_from_the_subnet_wide_rate(
 
     settings = Settings()
     settings.burn_rate_tao = 0.1
-    assert precheck(settings, _snapshot(live), NOW).amount_tao == 2.0
+    assert _gate(settings, _snapshot(live), NOW).amount_tao == 2.0
 
 
 def test_an_unreachable_backend_says_so_instead_of_exiting_silently(
@@ -455,7 +528,7 @@ def test_an_unreachable_backend_says_so_instead_of_exiting_silently(
     live = _competition()
 
     with pytest.raises(PrecheckFailed):
-        precheck(Settings(), _snapshot(live), NOW)
+        _gate(Settings(), _snapshot(live), NOW)
 
     err = capsys.readouterr().err
     assert err.strip(), "refused to pay and said nothing at all"
@@ -480,6 +553,6 @@ def test_declining_at_the_prompt_confirms_that_nothing_was_paid(
     _answer(monkeypatch, "n")
 
     with pytest.raises(PrecheckFailed):
-        precheck(Settings(), _snapshot(live), NOW)
+        _gate(Settings(), _snapshot(live), NOW)
 
     assert "nothing was paid" in capsys.readouterr().err.lower()

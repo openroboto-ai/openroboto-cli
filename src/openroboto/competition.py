@@ -31,12 +31,14 @@ address.
 
 from __future__ import annotations
 
+import re
 import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Final, NoReturn
 
+from openroboto_protocol.commitment import Track
 from openroboto_protocol.schemas import Competition
 
 from openroboto.backend_api import BackendError, fetch_competitions
@@ -56,6 +58,22 @@ TRANSFER: Final = "transfer"
 FEE_KINDS: Final = (BURN, TRANSFER)
 
 REFRESH_HINT: Final = "  → `openroboto init --refresh` rewrites it from the backend"
+
+#: The **shape** of an SS58 address (substrate prefix 42), character for
+#: character the backend's `app/domain/fee.py::_SS58_RE`: base58 alphabet minus
+#: `0OIl`, first character always `5`, length exactly 48.
+#:
+#: Copied rather than imported because the protocol package publishes no such
+#: pattern, and this side needs it *before* the money moves while that side only
+#: reaches it while filing the payment. The two must stay identical: a season the
+#: backend refuses to parse cannot take a submission, so an address this accepts
+#: and that one rejects is a fee paid into a season that will never file it.
+#:
+#: ⚠️ Shape, not validity -- checking the checksum needs base58 and a key of the
+#: SDK's, and this module is pure. What it catches is a placeholder or an address
+#: that lost a character on the way into the season's config, which is exactly
+#: how 2 TAO reaches a stranger irreversibly.
+_SS58_RE: Final = re.compile(r"\A5[1-9A-HJ-NP-Za-km-z]{47}\Z")
 
 #: Printed in full, never truncated: a miner who wants to check the address
 #: against the announcement has to be able to read all of it.
@@ -319,6 +337,36 @@ def judge(
 
     live_fee = fee_of(live.params, where=f"the backend's {_name(live)}")
 
+    # 🔴 One direction only: **the real track has to be a transfer**. This is not
+    # a track → kind table (the module header says why there must not be one); it
+    # is this side's copy of the backend's own rule, `app/domain/fee.py::parse_fee`
+    # refusing any `kind` but `transfer` when it prices a real-track submission.
+    #
+    # The comparison the season check makes -- snapshot against live row -- cannot
+    # see this one at all: `miner.yaml` was copied from the same row at `init`, so
+    # a season misconfigured as `burn` matches itself and the check passes. What
+    # follows is `add_stake_burn`, which has **no recipient**: the fee is
+    # destroyed, nobody is paid, the submission still counts as unpaid, and there
+    # is nothing to refund because there is nobody who received it.
+    #
+    # The other direction (`sim` ⇒ `burn`) is deliberately **not** checked. It is
+    # not a rule anywhere -- no backend function refuses a simulation season that
+    # collects by transfer -- so writing it here would be inventing one, and the
+    # first season that breaks the pattern would be refused by the CLI while the
+    # backend was happy to take it.
+    if live.track == Track.REAL and live_fee.kind != TRANSFER:
+        raise PrecheckFailed(
+            f"{_name(live)} is a real-track season but its entry fee is "
+            f"configured as `{live_fee.kind}`, which the backend does not accept "
+            f"for the real track.\n"
+            f"  Refusing to pay: a burn is destroyed rather than sent, so paying "
+            f"this way would spend {live_fee.amount_tao} TAO that no one "
+            f"receives, irreversibly, and leave the submission unpaid anyway.\n"
+            f"  Nothing was paid. This is a mistake in the season's own "
+            f"configuration, not in your workspace -- report it to the subnet "
+            f"operators; `openroboto init --refresh` cannot fix it."
+        )
+
     # 🔴 Existence before equality. See the docstring.
     if live_fee.kind == TRANSFER and live_fee.coldkey is None:
         raise PrecheckFailed(
@@ -330,6 +378,19 @@ def judge(
             f"the submission is even made.\n"
             f"  → wait for the address to be announced, then "
             f"`openroboto init --refresh`"
+        )
+
+    if live_fee.kind == TRANSFER and not _SS58_RE.match(live_fee.coldkey or ""):
+        raise PrecheckFailed(
+            f"{_name(live)}'s collection address is not an SS58 address:\n"
+            f"  {live_fee.coldkey!r}\n"
+            f"  Refusing to pay: a transfer is addressed by that string alone, so "
+            f"sending {live_fee.amount_tao} TAO at a placeholder -- or at an "
+            f"address that lost a character somewhere -- puts it where nobody "
+            f"holds the key, irreversibly.\n"
+            f"  Nothing was paid. Report it to the subnet operators; this is the "
+            f"season's own configuration, and `openroboto init --refresh` copies "
+            f"it rather than fixing it."
         )
 
     mine = snapshot.fee()
@@ -363,12 +424,24 @@ def judge(
     return Verdict(live=live, fee=live_fee, window=window)
 
 
-def precheck(settings: Settings, snapshot: Snapshot, now: datetime) -> Verdict:
-    """The gate `submit` runs before it pays. Raises `PrecheckFailed`.
+def resolve_competition(
+    settings: Settings, snapshot: Snapshot, now: datetime
+) -> Verdict:
+    """Ask the backend which season this is, and judge it. **Prints no verdict
+    and asks nothing** -- see `confirm_payment` for the other half.
 
     Being unable to reach the backend is a **refusal**, not a warning: without
     it there is no way to say which season the money is going to, and money
     moving on an assumption is the failure this whole module exists to prevent.
+
+    🔴 **The two halves are separate because gates run between them.** The
+    layout gate has to judge the repository by *this season's* rule book, and
+    the rule book is on the live row -- `miner.yaml` holds the copy taken at
+    `init`, and a season that has since changed its base model is judged here by
+    the old rules and by admission by the new ones, after the fee. It therefore
+    cannot run before this. It equally must not run after the prompt: asking
+    someone to confirm a payment that the next gate is about to refuse teaches
+    them to answer the prompt without reading it.
     """
     try:
         live_rows = fetch_competitions(settings.backend_url).data
@@ -379,7 +452,7 @@ def precheck(settings: Settings, snapshot: Snapshot, now: datetime) -> Verdict:
         )
 
     try:
-        verdict = judge(snapshot, live_rows, now)
+        return judge(snapshot, live_rows, now)
     except (PrecheckFailed, ConfigError) as exc:
         # A malformed snapshot lands here too (`ConfigError` out of `fee_of`).
         # It is the same event as far as the miner is concerned -- the fee was
@@ -388,6 +461,15 @@ def precheck(settings: Settings, snapshot: Snapshot, now: datetime) -> Verdict:
         fail(f"Competition check failed; **nothing was paid**.\n   {exc}")
         raise PrecheckFailed(str(exc)) from exc
 
+
+def confirm_payment(verdict: Verdict) -> None:
+    """Say who is being paid and ask for a yes. Raises `PrecheckFailed`.
+
+    🔴 **The last thing that happens before the money moves.** Every gate that
+    can still refuse this submission has already run by the time this is called;
+    what is on screen when the question is asked is the whole of what the miner
+    is agreeing to.
+    """
     _announce(verdict)
     if not _confirmed():
         # `_confirmed()` already explained the not-a-tty and closed-stdin cases.
@@ -395,7 +477,6 @@ def precheck(settings: Settings, snapshot: Snapshot, now: datetime) -> Verdict:
         # path that spends money the miner is owed the confirmation that it did
         # not.
         _refuse("Cancelled at the confirmation prompt; nothing was paid.")
-    return verdict
 
 
 def _announce(verdict: Verdict) -> None:

@@ -297,6 +297,18 @@ class RosterEntry(Contract):
     payment_status: str = ""
     hf_access_status: str = ""
     invalid_reason: str | None = None
+    #: Whether this row still occupies the `(hotkey, competition, hf_commit)`
+    #: slot -- i.e. whether submitting that commit again would be skipped.
+    #:
+    #: 🔴 **Required, deliberately, on the one model in this file that has
+    #: defaults for everything else.** It is a conclusion the backend computes
+    #: (`submission_writes.counts_as_submitted`), and it is what `submit` asks
+    #: before it pays; a default here would answer "the slot is free" on behalf
+    #: of a backend that never said so, which is the direction that spends the
+    #: fee. A backend too old to send it therefore fails to parse -- loudly, with
+    #: `_parse`'s "the backend has not caught up yet" -- rather than being
+    #: guessed at.
+    counts_as_submitted: bool
 
 
 def fetch_roster(

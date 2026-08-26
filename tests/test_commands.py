@@ -2134,7 +2134,6 @@ def test_doctor_reads_the_pin_out_of_metadata_not_a_second_copy(
     assert doctor_command.pinned_protocol_version() == "1.2.3"
 
 
-
 def _roster_settings() -> Settings:
     return Settings.from_mapping(
         {
@@ -2158,6 +2157,7 @@ def _entry(hotkey: str, **overrides: Any) -> RosterEntry:
             "hf_repo_id": "miner/model",
             "payment_status": "paid",
             "hf_access_status": "verified",
+            "counts_as_submitted": True,
             **overrides,
         }
     )

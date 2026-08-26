@@ -105,20 +105,40 @@ def competition_settings(path: str) -> Settings:
 
 
 def resolve_layout(settings: Settings) -> Any | None:
-    """The competition's LingBot layout, or `None` for the π0.5 (openpi) rules.
+    """The rule book named by the **snapshot** in `miner.yaml`.
 
     `None` is what every config without a competition section resolves to, so
     upgrading the CLI does not change one verdict for a miner who changed
     nothing.
+
+    ⚠️ This is the offline answer, and `openroboto check` is where it belongs:
+    that command is contractually offline, and being judged by the season one
+    signed up for is exactly what it offers. **The gate in `submit` must not use
+    it** -- there the live row has already been fetched, and the snapshot is a
+    copy of it taken at `init` that a season may have moved on from since. See
+    `layout_of`.
     """
-    if (
-        adapters.format_profile(
-            settings.competition_adapter, settings.competition_base_model_family
-        )
-        == adapters.OPENPI
-    ):
+    return layout_of(
+        settings.competition_adapter,
+        settings.competition_base_model_family,
+        settings.competition_params,
+    )
+
+
+def layout_of(
+    adapter: str, base_model_family: str, params: Mapping[str, Any]
+) -> Any | None:
+    """The LingBot layout for one competition, or `None` for π0.5 (openpi).
+
+    Takes the three fields rather than a `Settings` because the same question is
+    asked of two different sources, minutes apart: the snapshot for `check`
+    (above), and the row the backend served seconds ago for the gate that runs
+    before the fee. One implementation, because a fee is paid on the second
+    answer and a rejection is filed against the first.
+    """
+    if adapters.format_profile(adapter, base_model_family) == adapters.OPENPI:
         return None
-    return lingbot_layout(settings.competition_params)
+    return lingbot_layout(params)
 
 
 def lingbot_layout(params: Mapping[str, Any]) -> Any:

@@ -3,7 +3,7 @@
 
 This is the only command that **spends money and cannot be undone**, so what it
 refuses to do matters more than what it does. The amount has exactly one source:
-the `Verdict` that `competition.precheck()` returns, which carries both the
+the `Verdict` that `competition.resolve_competition()` returns, which carries both the
 figure and the season it was quoted for, and which exists only if the backend was
 asked in this run. `perform_burn` does not run without one.
 
@@ -90,7 +90,7 @@ def perform_burn(
     """Burn once and write the tx and block into the checkpoint. Returning False
     means a self-check did not pass and nothing was spent.
 
-    `verdict` is this run's season check (`competition.precheck`) and it is
+    `verdict` is this run's season check (`competition.resolve_competition`) and it is
     required, not optional: it is the proof that the backend was asked which
     competition this fee is for, and it carries the amount that was confirmed
     together with that answer. See the module docstring for what the fee bought
@@ -108,6 +108,8 @@ def perform_burn(
     subtensor = get_subtensor(settings.network)
     try:
         wallet = open_wallet(settings)
+        if not pays_as_the_hotkeys_owner(subtensor, wallet, state):
+            return False
         receipt = execute_stake_burn(
             subtensor=subtensor,
             wallet=wallet,
@@ -161,6 +163,8 @@ def perform_transfer(
     subtensor = get_subtensor(settings.network)
     try:
         wallet = open_wallet(settings)
+        if not pays_as_the_hotkeys_owner(subtensor, wallet, state):
+            return False
         receipt = execute_transfer(
             subtensor=subtensor,
             wallet=wallet,
@@ -171,6 +175,79 @@ def perform_transfer(
         subtensor.close()
 
     _record(round_num, state, receipt)
+    return True
+
+
+def pays_as_the_hotkeys_owner(
+    subtensor: Any, wallet: Any, state: dict[str, Any]
+) -> bool:
+    """Does the chain agree that this wallet may pay for this hotkey? False =
+    do not pay.
+
+    🔴 **The most expensive check in this file, and the last one that is free.**
+    The backend does not take the miner's word for who paid: it reads the
+    extrinsic's signer off the chain and compares it against the chain's own
+    `hotkey → owner coldkey` mapping for the hotkey in the commitment
+    (`verification/transfer.py` step 6, `verification/burn.py` check 1). A
+    mismatch is `fee_payer_not_owner`, which is `rejected` -- final, no retry,
+    and the fee has already left the wallet. On the real track that is 2 TAO
+    into the season's collection address, which nothing brings back.
+
+    The comparison is made here from exactly the two values that comparison
+    reads, and the same way round:
+
+    - the hotkey is the one the commitment will carry (`state["hotkey_ss58"]`,
+      which `_ready_to_spend` has already refused to proceed without), **not**
+      the wallet's own hotkey. A workspace configured with someone else's
+      hotkey announces under that hotkey, and it is that hotkey's owner the
+      backend looks up;
+    - an **empty** owner is a mismatch too. Empty means the chain holds no such
+      mapping -- an unregistered hotkey, or one typed with a character wrong --
+      and treating "no answer" as a pass is what lets anyone pay a fee against
+      anyone else's hotkey. The backend reads it exactly this way and says so.
+
+    Both ways of paying are guarded, not just the transfer: the burn's signer is
+    the coldkey as well, so `judge_burn` puts it through the same lookup and a
+    burned fee is *more* irrecoverable than a transferred one, not less.
+    """
+    hotkey = str(state.get("hotkey_ss58", ""))
+    try:
+        # An attribute access that reads coldkeypub.txt off the disk, raising
+        # `KeyFileError` when it is not there (measured in `doctor`). The type
+        # comes from the SDK and is not ours to depend on, so the refusal is
+        # written against any failure to read it -- an address we could not read
+        # is one we cannot compare, and this is not the gate to guess at.
+        payer = str(getattr(wallet.coldkeypub, "ss58_address", "") or "")
+    except Exception as exc:
+        fail(
+            f"Could not read this wallet's coldkey address, so there is no way "
+            f"to tell whether it is allowed to pay for {hotkey[:12]}... "
+            f"**Nothing was paid, nothing was sent on chain.**\n"
+            f"   {exc}\n"
+            f"   → run `openroboto doctor`, which checks the wallet files, then "
+            f"`openroboto submit` again -- your upload is kept"
+        )
+        return False
+
+    owner = str(subtensor.get_hotkey_owner(hotkey) or "")
+    if owner != payer:
+        fail(
+            f"This wallet is not the owner of the hotkey this submission "
+            f"announces under, so the subnet would reject the submission and "
+            f"keep the fee. **Nothing was paid, nothing was sent on chain.**\n"
+            f"   hotkey:            {hotkey}\n"
+            f"   owned on chain by: {owner or '(no owner registered on chain)'}\n"
+            f"   would pay from:    {payer}\n"
+            f"   The backend looks the owner up on chain and compares it with "
+            f"whoever signed the payment (`fee_payer_not_owner`); that rejection "
+            f"is final and the fee is not refunded, which is why this stops "
+            f"before it.\n"
+            f"   → point miner.yaml at the wallet that owns this hotkey, or fix "
+            f"`subnet.hotkey_ss58` to the hotkey this wallet owns "
+            f"(`btcli wallet overview` lists both), then run `openroboto submit` "
+            f"again -- your upload is kept and is not pushed a second time"
+        )
+        return False
     return True
 
 

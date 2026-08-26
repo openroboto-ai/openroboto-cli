@@ -473,6 +473,7 @@ def test_the_roster_reads_payment_status_not_burn_status(
         "payment_status": "paid",
         "hf_access_status": "verified",
         "invalid_reason": None,
+        "counts_as_submitted": True,
     }
     seen = _capture(monkeypatch, _list_envelope([row]))
 

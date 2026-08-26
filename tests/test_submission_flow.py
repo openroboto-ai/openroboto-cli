@@ -39,6 +39,10 @@ from openroboto.round_state import (
 
 HOTKEY = "5" + "M" * 47
 COMMIT = "a" * 40
+#: The coldkey that owns `HOTKEY` on the fake chain, and the one the fake wallet
+#: pays from. The backend compares those two before it accepts a fee, so every
+#: payment fake here has to be able to answer both halves of that comparison.
+OWNER_COLDKEY = "5Gw3s7q4QLkSWwknsiPtjujPv3XM4Trxi5d4PgKMMk3gfGTE"
 
 
 def _settings() -> Settings:
@@ -67,6 +71,15 @@ class _FakeSubtensor:
     def get_block_hash(self, block: int) -> str:
         return "0x" + "c" * 64
 
+    def get_hotkey_owner(self, hotkey_ss58: str) -> str:
+        """A chain on which this workspace's wallet does own its hotkey.
+
+        The interesting case is the other one, and it has its own test: an owner
+        that does not match is `fee_payer_not_owner`, which is a rejection with
+        the fee already spent.
+        """
+        return OWNER_COLDKEY
+
     def close(self) -> None:
         self.closed = True
 
@@ -74,6 +87,9 @@ class _FakeSubtensor:
 class _FakeWallet:
     class hotkey:
         ss58_address = HOTKEY
+
+    class coldkeypub:
+        ss58_address = OWNER_COLDKEY
 
 
 # ─── burn ────────────────────────────────────────────────────
@@ -586,12 +602,42 @@ def _real_season_settings() -> Settings:
     )
 
 
+def _live_row(**overrides: Any) -> Competition:
+    """The row the backend serves for the LingBot simulation season.
+
+    A real `Competition` rather than a namespace, because the gates now read it
+    for more than its label: the layout gate picks this repository's rule book
+    off `adapter` / `base_model_family` / `params`, and a stand-in that answers
+    those with whatever the test happened to set would be checking the fake.
+    """
+    row: dict[str, Any] = {
+        "id": 2,
+        "track": "sim",
+        "seq": 2,
+        "label": "LingBot-VLA 2.0",
+        "adapter": "sim_lingbot",
+        "status": "active",
+        "params": {"fee": {"kind": "burn", "amount_tao": 0.25, "coldkey": None}},
+    }
+    return Competition.model_validate(row | overrides)
+
+
 def _real_verdict() -> Any:
-    """What `precheck` hands back for that season -- carrying the address, which
-    is the field the burn's verdict has no use for and this one cannot do
+    """What the season check hands back for that season -- carrying the address,
+    which is the field the burn's verdict has no use for and this one cannot do
     without."""
     return SimpleNamespace(
-        live=SimpleNamespace(label="xArm 6", id=3),
+        live=_live_row(
+            id=3,
+            track="real",
+            seq=1,
+            label="xArm 6",
+            adapter="real_xarm6",
+            base_model_family="openpi",
+            params={
+                "fee": {"kind": "transfer", "amount_tao": 2.0, "coldkey": FEE_COLDKEY}
+            },
+        ),
         kind="transfer",
         amount_tao=2.0,
         cid=3,
@@ -600,7 +646,7 @@ def _real_verdict() -> Any:
 
 
 def _verdict(amount_tao: float = 0.25, cid: int = 2, kind: str = "burn") -> Any:
-    """What `competition.precheck` hands back.
+    """What `competition.resolve_competition` hands back.
 
     It is the **only** evidence that the season was confirmed in this run, which
     is why `perform_burn` takes it as an argument rather than reading an amount
@@ -608,7 +654,7 @@ def _verdict(amount_tao: float = 0.25, cid: int = 2, kind: str = "burn") -> Any:
     says how much, never which competition.
     """
     return SimpleNamespace(
-        live=SimpleNamespace(label="LingBot-VLA 2.0", id=cid),
+        live=_live_row(id=cid),
         kind=kind,
         amount_tao=amount_tao,
         cid=cid,
@@ -619,26 +665,61 @@ def _verdict(amount_tao: float = 0.25, cid: int = 2, kind: str = "burn") -> Any:
 #: layout names, the index that lists them. Written as a HuggingFace listing
 #: (`type` / `path` / `size`) rather than as files on disk, because the listing
 #: is what the gate judges and what the backend judges.
+#:
+#: The shards carry `lfs.oid` because that is what HuggingFace really returns
+#: for them and it is what the fingerprint is made of; a listing without it is a
+#: repository holding no weights, which has its own case below.
 GOOD_TREE: list[dict[str, Any]] = [
     {"type": "file", "path": ".gitattributes", "size": 1797},
     {"type": "directory", "path": "unused"},
     {"type": "file", "path": "config.json", "size": 31},
     {"type": "file", "path": "model.safetensors.index.json", "size": 92_000},
-    {"type": "file", "path": "model-00001-of-00002.safetensors", "size": 6_000_000_000},
-    {"type": "file", "path": "model-00002-of-00002.safetensors", "size": 5_000_000_000},
+    {
+        "type": "file",
+        "path": "model-00001-of-00002.safetensors",
+        "size": 6_000_000_000,
+        "lfs": {"oid": "1" * 64},
+    },
+    {
+        "type": "file",
+        "path": "model-00002-of-00002.safetensors",
+        "size": 5_000_000_000,
+        "lfs": {"oid": "2" * 64},
+    },
 ]
+
+
+def _roster(*entries: Any) -> Any:
+    """One page of a season's entry list, as `fetch_roster` returns it."""
+    return SimpleNamespace(data=list(entries))
+
+
+def _entry(hf_commit: str, counts_as_submitted: bool = True) -> Any:
+    """One roster row, holding (or not holding) its dedup slot.
+
+    🔴 `counts_as_submitted` is the backend's **conclusion**, not its `status`:
+    a submission pushed aside by a later one still holds the slot while reading
+    `rejected`, and this side is deliberately not in a position to tell.
+    """
+    return SimpleNamespace(
+        hotkey=HOTKEY,
+        hf_commit=hf_commit,
+        counts_as_submitted=counts_as_submitted,
+    )
 
 
 def _submitting(
     monkeypatch: pytest.MonkeyPatch,
     settings: Settings,
     tree: list[dict[str, Any]] | None = None,
+    roster: Any = None,
 ) -> tuple[list[Any], list[Any]]:
-    """Wire `submit` up to fakes and return (precheck calls, payment calls).
+    """Wire `submit` up to fakes and return (season checks, payment calls).
 
     `tree` is the HuggingFace listing the layout gate judges; it defaults to a
     repository that passes, because these cases are about the *season* gate. The
-    layout gate has its own section further down.
+    layout gate has its own section further down, and so does the dedup gate,
+    whose `roster` defaults to an entry list this hotkey is not on.
     """
     monkeypatch.setattr(
         submit_command.Settings, "load", staticmethod(lambda path: settings)
@@ -650,11 +731,20 @@ def _submitting(
         "fetch_tree",
         lambda repo, revision, token="": GOOD_TREE if tree is None else tree,
     )
+    monkeypatch.setattr(
+        submit_command,
+        "fetch_roster",
+        lambda *a, **k: _roster() if roster is None else roster,
+    )
+    # The prompt is a conversation with a miner and has nothing to add to these
+    # cases; that it is asked **last**, after every gate that could still
+    # refuse, has its own test.
+    monkeypatch.setattr(submit_command, "confirm_payment", lambda verdict: None)
 
     checked: list[Any] = []
     paid: list[Any] = []
 
-    def _precheck(cfg: Settings, snapshot: Any, now: Any) -> Any:
+    def _resolve(cfg: Settings, snapshot: Any, now: Any) -> Any:
         checked.append(snapshot)
         return _verdict()
 
@@ -682,7 +772,7 @@ def _submitting(
         state["burn_tx_hash"] = "0x" + "f" * 64
         return True
 
-    monkeypatch.setattr(submit_command, "precheck", _precheck)
+    monkeypatch.setattr(submit_command, "resolve_competition", _resolve)
     monkeypatch.setattr(submit_command, "perform_burn", _burn)
     monkeypatch.setattr(submit_command, "perform_transfer", _transfer)
     return checked, paid
@@ -730,7 +820,7 @@ def test_a_failed_check_spends_nothing(
     def _refuse(*args: Any, **kwargs: Any) -> Any:
         raise submit_command.PrecheckFailed("the season closed")
 
-    monkeypatch.setattr(submit_command, "precheck", _refuse)
+    monkeypatch.setattr(submit_command, "resolve_competition", _refuse)
     monkeypatch.setattr(
         submit_command,
         "perform_announce",
@@ -759,7 +849,7 @@ def test_a_season_paid_by_transfer_is_not_quietly_burned_instead(
     _, paid = _submitting(monkeypatch, _season_settings())
     monkeypatch.setattr(
         submit_command,
-        "precheck",
+        "resolve_competition",
         lambda *a, **k: _verdict(amount_tao=2.0, cid=3, kind="transfer"),
     )
 
@@ -831,7 +921,7 @@ def test_the_fee_that_is_burned_is_the_one_the_verdict_carries(
     monkeypatch.chdir(tmp_path)
     settings = _season_settings()
     monkeypatch.setattr(burn_command, "get_subtensor", lambda network: _FakeSubtensor())
-    monkeypatch.setattr(burn_command, "open_wallet", lambda cfg: object())
+    monkeypatch.setattr(burn_command, "open_wallet", lambda cfg: _FakeWallet())
     burned: dict[str, Any] = {}
 
     def _burn(**kwargs: Any) -> Any:
@@ -863,7 +953,7 @@ def test_the_transfer_goes_to_the_address_the_verdict_carries(
     monkeypatch.chdir(tmp_path)
     settings = _real_season_settings()
     monkeypatch.setattr(burn_command, "get_subtensor", lambda network: _FakeSubtensor())
-    monkeypatch.setattr(burn_command, "open_wallet", lambda cfg: object())
+    monkeypatch.setattr(burn_command, "open_wallet", lambda cfg: _FakeWallet())
     sent: dict[str, Any] = {}
 
     def _transfer(**kwargs: Any) -> Any:
@@ -919,6 +1009,133 @@ def test_a_transfer_is_not_sent_when_the_payload_would_not_encode(
         )
         is False
     )
+
+
+# ─── who is allowed to pay for this hotkey ───────────────────
+#
+# The backend does not take the miner's word for who paid: it reads the signer
+# off the chain and compares it against the chain's own owner of the announced
+# hotkey. A mismatch is `fee_payer_not_owner` -- `rejected`, final, and the fee
+# has already left. On the real track that is 2 TAO gone for a submission that
+# was never entered, and the same comparison is made for a burn, where the money
+# is not merely spent but destroyed.
+
+
+class _OtherOwner(_FakeSubtensor):
+    """A chain on which some other coldkey owns this workspace's hotkey."""
+
+    def get_hotkey_owner(self, hotkey_ss58: str) -> str:
+        return FEE_COLDKEY
+
+
+class _NoOwner(_FakeSubtensor):
+    """A chain that has no owner for this hotkey at all.
+
+    🔴 The SDK returns `None`, and "no answer" must count as a mismatch: read
+    the other way, anyone could pay a fee against anyone else's hotkey. The
+    backend reads it exactly this way (`hotkey_owner` empty is a rejection).
+    """
+
+    def get_hotkey_owner(self, hotkey_ss58: str) -> None:
+        return None
+
+
+@pytest.mark.parametrize("chain", [_OtherOwner, _NoOwner])
+def test_a_wallet_that_does_not_own_the_hotkey_pays_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    chain: type[_FakeSubtensor],
+) -> None:
+    """🔴 The most expensive of the checks that are still free at this point."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(burn_command, "get_subtensor", lambda network: chain())
+    monkeypatch.setattr(burn_command, "open_wallet", lambda cfg: _FakeWallet())
+    monkeypatch.setattr(
+        burn_command,
+        "execute_transfer",
+        lambda **k: pytest.fail("2 TAO sent for a submission the subnet will reject"),
+    )
+    state = _uploaded_state()
+    state["competition_id"] = 3
+    state["model_hash"] = "9" * 64
+    save_state(30, state)
+
+    assert (
+        burn_command.perform_transfer(
+            _real_season_settings(), 30, state, verdict=_real_verdict()
+        )
+        is False
+    )
+    printed = capsys.readouterr().err
+    assert "Nothing was paid" in printed
+    assert HOTKEY in printed  # which hotkey
+    assert OWNER_COLDKEY in printed  # and who was about to pay for it
+    # the checkpoint records no payment, so the round can be redone once fixed
+    assert "burn_tx_hash" not in load_state(30)
+
+
+def test_a_burn_is_guarded_by_the_same_ownership_check(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """`judge_burn` runs the same lookup, and a burn is *more* irrecoverable
+    than a transfer: there is no recipient to ask."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(burn_command, "get_subtensor", lambda network: _OtherOwner())
+    monkeypatch.setattr(burn_command, "open_wallet", lambda cfg: _FakeWallet())
+    monkeypatch.setattr(
+        burn_command,
+        "execute_stake_burn",
+        lambda **k: pytest.fail("burned TAO for a submission the subnet will reject"),
+    )
+    save_state(31, _uploaded_state())
+
+    assert (
+        burn_command.perform_burn(
+            _season_settings(), 31, _uploaded_state(), verdict=_verdict()
+        )
+        is False
+    )
+
+
+def test_an_unreadable_coldkey_is_refused_rather_than_guessed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`wallet.coldkeypub` reads a file, and raises when the file is not there.
+
+    An address that cannot be read cannot be compared, and this is not the gate
+    to carry on past: `doctor` crashed on exactly this attribute once, which is
+    how we know it raises rather than returning None.
+    """
+    monkeypatch.chdir(tmp_path)
+
+    class _NoColdkeypub:
+        class hotkey:
+            ss58_address = HOTKEY
+
+        @property
+        def coldkeypub(self) -> Any:
+            raise RuntimeError("keyfile at /wallet/coldkeypub.txt does not exist")
+
+    monkeypatch.setattr(burn_command, "get_subtensor", lambda network: _FakeSubtensor())
+    monkeypatch.setattr(burn_command, "open_wallet", lambda cfg: _NoColdkeypub())
+    monkeypatch.setattr(
+        burn_command,
+        "execute_transfer",
+        lambda **k: pytest.fail("paid from a wallet we could not identify"),
+    )
+    state = _uploaded_state()
+    state["competition_id"] = 3
+    state["model_hash"] = "9" * 64
+    save_state(32, state)
+
+    assert (
+        burn_command.perform_transfer(
+            _real_season_settings(), 32, state, verdict=_real_verdict()
+        )
+        is False
+    )
+    assert "Nothing was paid" in capsys.readouterr().err
 
 
 def test_neither_burn_nor_submit_opens_control_json(
@@ -980,6 +1197,10 @@ def test_neither_burn_nor_submit_opens_control_json(
     monkeypatch.setattr(submit_command, "perform_upload", lambda *a, **k: None)
     monkeypatch.setattr(submit_command, "perform_announce", lambda *a, **k: True)
     monkeypatch.setattr(submit_command, "fetch_tree", lambda *a, **k: GOOD_TREE)
+    # The other request this path is supposed to make, faked one level up for
+    # the same reason as the competitions endpoint: leaving a legitimate call
+    # inside the block below would make the block unreadable.
+    monkeypatch.setattr(submit_command, "fetch_roster", lambda *a, **k: _roster())
     monkeypatch.setattr(burn_command, "get_subtensor", lambda network: _FakeSubtensor())
     monkeypatch.setattr(burn_command, "open_wallet", lambda cfg: _FakeWallet())
     burned: dict[str, Any] = {}
@@ -1047,9 +1268,16 @@ def test_a_rate_typed_into_miner_yaml_does_not_buy_a_place_in_a_season(
 # ends in `HF_STRUCTURE_INVALID` -- `rejected`, final, not refunded, and the
 # model may well have been fine.
 #
-# Every case below asserts on **call counts** of the payment and of the season
-# check, because that is the only assertion that separates "refused" from
-# "refused after paying".
+# Every case below asserts on **call counts** of the payment, because that is
+# the only assertion that separates "refused" from "refused after paying".
+#
+# The season is resolved *before* this gate and the season check is therefore
+# counted as one call, not zero: the rule book that judges the repository is on
+# the live row, and the snapshot in `miner.yaml` is a copy of that row taken at
+# `init` which the season may have moved on from since. One GET is what it costs
+# to be judged here by the same book admission will use -- the alternative was
+# passing here on last month's rules and being rejected there on this month's,
+# after the fee.
 
 
 def _refused(
@@ -1113,8 +1341,9 @@ def test_a_repository_the_rules_refuse_is_never_paid_for(
 
     assert code == 1
     assert paid == []
-    # the season was never even asked about: refusing costs no backend call
-    assert checked == []
+    # the season *was* resolved first -- that is where the rule book comes from
+    # -- and the refusal still landed before the prompt and before the money
+    assert len(checked) == 1
     printed = capsys.readouterr()
     assert "nothing was paid" in printed.err
     assert "bare_lora_adapter" in printed.out
@@ -1145,7 +1374,7 @@ def test_the_gate_judges_the_repository_not_this_round_s_directory(
 
     assert code == 1
     assert paid == []
-    assert checked == []
+    assert len(checked) == 1
     assert "leftover_upload_state" in capsys.readouterr().out
 
 
@@ -1173,7 +1402,7 @@ def test_a_nested_checkpoint_stops_the_run_and_names_the_directory(
 
     assert code == 1
     assert paid == []
-    assert checked == []
+    assert len(checked) == 1
     printed = capsys.readouterr()
     assert "nested_too_deep" in printed.out
     assert deep in printed.out  # copyable, not "your structure is invalid"
@@ -1203,7 +1432,7 @@ def test_a_listing_hf_would_not_serve_is_not_paid_through(
 
     assert code == 1
     assert paid == []
-    assert checked == []
+    assert len(checked) == 1
     printed = capsys.readouterr()
     assert "nothing was paid" in printed.err
     # named as infrastructure, not as a verdict on the model
@@ -1285,6 +1514,257 @@ def _size(entry: dict[str, Any]) -> dict[str, Any]:
     return {"size": entry["size"]}
 
 
+def test_a_repository_with_no_lfs_object_is_never_paid_for(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """🔴 A perfectly shaped repository holding no weights at all.
+
+    Every path and every byte count the layout rules ask about is right here --
+    the shards are listed, the index is listed -- and there is not one LFS object
+    behind them: the pointers were pushed and the weights were not. The
+    fingerprint of that repository is the empty string, which is a sentinel:
+    admission's sixth gate files it `MODEL_HASH_FAILED`, terminal, after the fee.
+
+    The real track already catches this in `upload`, because it has to compute
+    the fingerprint anyway to put it on chain. **The simulation track never
+    computes one** -- those repositories are public, so the backend does it
+    itself -- so until this gate the entire simulation side met the question for
+    the first time on the far side of the payment.
+    """
+    monkeypatch.chdir(tmp_path)
+    pointers_only = [
+        {key: value for key, value in entry.items() if key != "lfs"}
+        for entry in GOOD_TREE
+    ]
+    _, paid, code = _refused(monkeypatch, 27, pointers_only)
+
+    assert code == 1
+    assert paid == []
+    printed = capsys.readouterr()
+    assert "no LFS file" in printed.err
+    assert "nothing was paid" in printed.err.lower()
+    # It is not a layout verdict and must not be dressed as one: the layout is
+    # fine, which is exactly what makes this the confusing case.
+    assert "missing_weights" not in printed.out
+
+
+# ─── one model, one entry: the dedup slot, before the money ──
+#
+# The subnet counts a model once per season: the key is
+# `(hotkey, competition_id, hf_commit)`. Paying a second time for the same
+# commit buys a `skipped` -- nothing queued, nothing evaluated, nothing
+# refunded -- and every ordinary way of getting there looks like a normal run:
+# `--force` (which clears the payment and keeps the upload), a re-run after a
+# crash, or a miner submitting the same checkpoint by hand.
+#
+# 🔴 The key is per *model*, not per season. Entering the same season again with
+# a different model is normal and pays again, and none of these cases may stop
+# that.
+
+
+def test_a_commit_the_backend_already_has_is_not_paid_for_twice(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    save_state(28, _uploaded_state())
+    _, paid = _submitting(
+        monkeypatch, _season_settings(), roster=_roster(_entry(COMMIT))
+    )
+    monkeypatch.setattr(
+        submit_command,
+        "perform_announce",
+        lambda *a, **k: pytest.fail("announced a submission that was never paid for"),
+    )
+
+    args = argparse.Namespace(config="miner.yaml", round=28, output_dir="", force=False)
+    assert submit_command.run(args) == 1
+    assert paid == []
+    printed = capsys.readouterr().err
+    assert "already entered" in printed
+    assert "nothing was paid" in printed.lower()
+    # and it says what a second entry would take, because "you already submitted"
+    # reads as "so you are done" to someone holding a better checkpoint
+    assert "train again" in printed
+
+
+def test_force_pays_for_a_new_model_and_refuses_to_pay_twice_for_the_old_one(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """🔴 The hole `--force` used to be, and the reason the fix is not in the flag.
+
+    `--force` clears the payment out of the checkpoint and keeps the upload, so
+    the second run re-pays for the *same* commit -- and nothing about it looked
+    wrong: the upload was skipped because it was already there, the payment went
+    through, the run reported success, and the backend filed a `skipped`.
+    """
+    monkeypatch.chdir(tmp_path)
+    state = _uploaded_state()
+    state.update({"step": "announce", "burn_tx_hash": "0x" + "d" * 64})
+    save_state(29, state)
+    _, paid = _submitting(
+        monkeypatch, _season_settings(), roster=_roster(_entry(COMMIT))
+    )
+
+    args = argparse.Namespace(config="miner.yaml", round=29, output_dir="", force=True)
+    assert submit_command.run(args) == 1
+    assert paid == []
+
+
+def test_a_rejected_entry_does_not_block_the_same_model_from_being_fixed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """🔴 A rejection for a real reason releases the slot, and that is the design.
+
+    `counts_as_submitted` is the backend's own conclusion for exactly this
+    reason: "was pushed aside by a later submission" and "was really rejected"
+    are the same word in the `status` column, and the difference decides whether
+    the miner may pay again. Copying the rule over here would get it wrong in
+    the direction that spends.
+    """
+    monkeypatch.chdir(tmp_path)
+    save_state(33, _uploaded_state())
+    _, paid = _submitting(
+        monkeypatch,
+        _season_settings(),
+        roster=_roster(_entry(COMMIT, counts_as_submitted=False)),
+    )
+
+    args = argparse.Namespace(config="miner.yaml", round=33, output_dir="", force=False)
+    assert submit_command.run(args) == 0
+    assert paid == [0.25]
+
+
+def test_another_model_in_the_same_season_is_a_normal_second_entry(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The dedup key is per model. A season is not entered once."""
+    monkeypatch.chdir(tmp_path)
+    save_state(34, _uploaded_state())
+    _, paid = _submitting(
+        monkeypatch, _season_settings(), roster=_roster(_entry("b" * 40))
+    )
+
+    args = argparse.Namespace(config="miner.yaml", round=34, output_dir="", force=False)
+    assert submit_command.run(args) == 0
+    assert paid == [0.25]
+
+
+def test_a_backend_that_cannot_answer_the_dedup_question_is_not_paid_through(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The same answer this path gives everywhere else it cannot get one."""
+    monkeypatch.chdir(tmp_path)
+    save_state(35, _uploaded_state())
+    _, paid = _submitting(monkeypatch, _season_settings())
+    monkeypatch.setattr(
+        submit_command,
+        "fetch_roster",
+        lambda *a, **k: _raise(submit_command.BackendError("connection refused")),
+    )
+
+    args = argparse.Namespace(config="miner.yaml", round=35, output_dir="", force=False)
+    assert submit_command.run(args) == 1
+    assert paid == []
+    assert "nothing was paid" in capsys.readouterr().err.lower()
+
+
+def test_the_dedup_question_is_asked_about_this_hotkey_and_this_season(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """🔴 The season id is the **resolved** one, not the number in miner.yaml.
+
+    `id` is local to one database, and asking the wrong season's entry list
+    would answer "not submitted" about a season nobody is entering.
+    """
+    monkeypatch.chdir(tmp_path)
+    save_state(36, _uploaded_state())
+    asked: list[Any] = []
+    _submitting(monkeypatch, _season_settings())
+    monkeypatch.setattr(
+        submit_command,
+        "fetch_roster",
+        lambda url, cid, **kwargs: (
+            asked.append((cid, kwargs.get("hotkey"))) or _roster()
+        ),
+    )
+
+    args = argparse.Namespace(config="miner.yaml", round=36, output_dir="", force=False)
+    assert submit_command.run(args) == 0
+    assert asked == [(2, HOTKEY)]
+
+
+# ─── the order of the gates, and what the prompt is for ──────
+
+
+def test_the_rule_book_comes_from_the_live_row_not_from_miner_yaml(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """🔴 A season that changed its base model after `init`.
+
+    The workspace was set up for LingBot and the repository is a LingBot one;
+    the season now says `openpi`, and admission will judge it by the π0.5 rules
+    -- after the fee. Judging it here by the snapshot's rules means printing
+    "layout ok" and paying for a submission the backend has already decided
+    against, which is this gate promising something it did not do.
+    """
+    monkeypatch.chdir(tmp_path)
+    save_state(37, _uploaded_state())
+    _, paid = _submitting(monkeypatch, _season_settings())
+    monkeypatch.setattr(
+        submit_command,
+        "resolve_competition",
+        lambda *a, **k: SimpleNamespace(
+            live=_live_row(base_model_family="openpi"),
+            kind="burn",
+            amount_tao=0.25,
+            cid=2,
+        ),
+    )
+
+    args = argparse.Namespace(config="miner.yaml", round=37, output_dir="", force=False)
+    assert submit_command.run(args) == 1
+    assert paid == []
+    printed = capsys.readouterr()
+    assert "missing_weights" in printed.out  # judged by π0.5, as admission will
+    assert "π0.5" in printed.out  # and it says which book, in the refusal
+
+
+def test_nothing_is_confirmed_that_a_later_gate_would_have_refused(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """🔴 The prompt is the **last** thing before the money, not the first.
+
+    A miner asked to confirm a payment that is then refused anyway learns to
+    answer the prompt without reading it -- and that prompt is the only place
+    the season, the amount and the recipient are ever shown. So every gate that
+    can still refuse runs in front of it, which is why the season check is in
+    two halves at all.
+    """
+    monkeypatch.chdir(tmp_path)
+    order: list[str] = []
+    save_state(38, _uploaded_state())
+    _submitting(monkeypatch, _season_settings(), roster=_roster(_entry(COMMIT)))
+    monkeypatch.setattr(
+        submit_command,
+        "confirm_payment",
+        lambda verdict: order.append("asked"),
+    )
+    monkeypatch.setattr(
+        submit_command,
+        "fetch_roster",
+        lambda *a, **k: order.append("dedup") or _roster(_entry(COMMIT)),
+    )
+    monkeypatch.setattr(
+        submit_command,
+        "fetch_tree",
+        lambda *a, **k: order.append("layout") or GOOD_TREE,
+    )
+
+    args = argparse.Namespace(config="miner.yaml", round=38, output_dir="", force=False)
+    assert submit_command.run(args) == 1
+    assert order == ["layout", "dedup"]  # and never "asked"
+
+
 # ─── end to end: an unfit workspace, and the money still there ───
 
 
@@ -1337,8 +1817,17 @@ def test_an_unfit_workspace_costs_nothing_end_to_end(
             COMMIT,
         ),
     )
+    # The season really is resolved on this path -- the layout gate needs its
+    # rule book -- so it is served rather than forbidden. Everything after it
+    # is forbidden, which is the assertion.
+    monkeypatch.setattr(
+        competition_module,
+        "fetch_competitions",
+        lambda url, **kwargs: SimpleNamespace(data=[_live_row()]),
+    )
+    monkeypatch.setattr(competition_module, "_confirmed", lambda: True)
     for module, name in (
-        (competition_module, "fetch_competitions"),
+        (submit_command, "fetch_roster"),
         (burn_command, "get_subtensor"),
         (burn_command, "open_wallet"),
         (burn_command, "execute_stake_burn"),
