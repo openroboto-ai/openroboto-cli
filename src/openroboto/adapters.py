@@ -68,7 +68,20 @@ ADAPTERS: Final = {
     # miner as far as `docker run` before anything notices; worse, if they ever
     # ran `openroboto build`, an image *does* exist under this competition's name
     # with π0.5 inside it, and training then finishes quietly on the wrong base
-    # model. Say "not released" until the image is.
+    # model.
+    #
+    # ⚠️ **Writing that Dockerfile is not what flips this back to `DOCKER`.**
+    # That reading is the obvious one and it is wrong, so it is written down
+    # here rather than left to be rediscovered: LingBot's training entry point
+    # does not fit `train(cfg, episodes, policy)` -- red line #2's signature --
+    # in two places that have no workaround short of changing the interface
+    # itself. `episodes` is a list of JSON episodes and LingBot reads a LeRobot
+    # dataset *directory*; `policy` is an already-built openpi policy object and
+    # LingBot's model can only be built inside each rank, after FSDP2 sharding,
+    # so nothing can be handed across the process boundary. An image whose
+    # entry point cannot be driven by the arguments we pass it is the same
+    # silent failure as the wrong base model, one layer down. So what unblocks
+    # this line is a decision about that interface, not a Dockerfile.
     "sim_lingbot": Adapter(format_profile=LINGBOT, training=UNAVAILABLE),
     # The dataset (`xarm6-libero-seed-v1`) and the training image do not exist
     # yet, so there is nothing to install and nothing to run.
