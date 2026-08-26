@@ -31,7 +31,7 @@ from openroboto.commands import doctor as doctor_command
 from openroboto.commands import init as init_command
 from openroboto.commands import status as status_command
 from openroboto.commands import train as train_command
-from openroboto.config import ConfigError, ControlFetchError, Settings
+from openroboto.config import ConfigError, Settings
 from openroboto.huggingface import build_repo_id, commit_sha_from_url
 from openroboto.preflight import (
     check_announce_ready,
@@ -1937,7 +1937,9 @@ def test_doctor_reads_the_fee_from_the_season_not_the_subnet_rate() -> None:
                 "seq": 1,
                 "label": "xArm 6",
                 "status": "active",
-                "params": {"fee": {"kind": "transfer", "amount_tao": 2, "coldkey": "5x"}},
+                "params": {
+                    "fee": {"kind": "transfer", "amount_tao": 2, "coldkey": "5x"}
+                },
             },
             "payment": {"burn_rate_tao": 0.1},
         }

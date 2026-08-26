@@ -282,7 +282,9 @@ def check_competition(settings: Settings) -> CheckResult:
     try:
         fee = snapshot.fee()
     except ConfigError as exc:
-        return CheckResult("competition", False, str(exc), "`openroboto init --refresh`")
+        return CheckResult(
+            "competition", False, str(exc), "`openroboto init --refresh`"
+        )
     return CheckResult(
         "competition",
         True,
