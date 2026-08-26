@@ -27,23 +27,89 @@ def test_a_config_from_before_competitions_is_the_pi05_simulation() -> None:
     id, and the promise MIGRATION.md §2 makes to configs that predate all of
     this."""
     assert adapters.resolve("") is adapters.ADAPTERS[adapters.DEFAULT_ADAPTER]
-    assert adapters.resolve("").format_profile == adapters.OPENPI
+    assert adapters.format_profile("") == adapters.OPENPI
 
 
 @pytest.mark.parametrize(
-    ("adapter", "profile", "training"),
+    ("adapter", "training"),
     [
-        ("sim_openpi", adapters.OPENPI, adapters.DOCKER),
-        ("sim_lingbot", adapters.LINGBOT, adapters.DOCKER),
-        ("real_xarm6", adapters.LINGBOT, adapters.UNAVAILABLE),
+        ("sim_openpi", adapters.DOCKER),
+        ("sim_lingbot", adapters.DOCKER),
+        ("real_xarm6", adapters.UNAVAILABLE),
     ],
 )
-def test_each_known_adapter_selects_its_paths(
-    adapter: str, profile: str, training: str
+def test_each_known_adapter_selects_its_paths(adapter: str, training: str) -> None:
+    """Only `training` now. Which rule book judges a checkpoint left this table
+    on 2026-08-26: it follows the base model, and `real_xarm6` names a robot
+    arm, so this table never knew it -- it guessed, and guessed wrong."""
+    assert adapters.resolve(adapter).training == training
+
+
+@pytest.mark.parametrize(
+    ("family", "profile"),
+    [("openpi", adapters.OPENPI), ("lingbot_vla", adapters.LINGBOT)],
+)
+def test_each_base_model_selects_its_format_profile(family: str, profile: str) -> None:
+    """🔴 Keys are the backend's vocabulary verbatim; values are directory names
+    (`runner/lingbot/`), so `lingbot_vla` maps to `"lingbot"`. Shared strings,
+    separate implementations -- not one shared table."""
+    assert adapters.FORMAT_PROFILES[family] == profile
+
+
+@pytest.mark.parametrize(
+    ("adapter", "family", "profile"),
+    [
+        # 🔴 The combination that could not be expressed before: one arm, either
+        # base model, and the season row is the only thing that decides.
+        ("real_xarm6", "openpi", adapters.OPENPI),
+        ("real_xarm6", "lingbot_vla", adapters.LINGBOT),
+        # And the season row outranks the adapter name for the sim seasons too.
+        ("sim_openpi", "lingbot_vla", adapters.LINGBOT),
+        ("sim_lingbot", "openpi", adapters.OPENPI),
+    ],
+)
+def test_the_season_row_decides_the_base_model_not_the_adapter_name(
+    adapter: str, family: str, profile: str
 ) -> None:
-    resolved = adapters.resolve(adapter)
-    assert resolved.format_profile == profile
-    assert resolved.training == training
+    assert adapters.format_profile(adapter, family) == profile
+
+
+def test_the_real_track_refuses_rather_than_guessing_a_base_model() -> None:
+    """🔴 The bug this split removed, kept as a test.
+
+    `real_xarm6` used to carry `format_profile=LINGBOT` in this table -- a guess,
+    and backwards: xArm 6 is being brought up on π0.5 first. Nothing could have
+    caught it, because the base model is a property of the season and this table
+    is keyed by hardware.
+
+    A real-track `miner.yaml` with no `base_model_family` is refused. That is
+    also the honest answer today: the season's base model is `null` in the
+    database, so there is nothing to copy in yet.
+    """
+    with pytest.raises(ConfigError) as raised:
+        adapters.format_profile("real_xarm6")
+    assert "real_xarm6" in str(raised.value)
+    assert "robot arm" in str(raised.value)
+
+
+def test_an_unknown_base_model_refuses_and_does_not_fall_back() -> None:
+    """A season naming a base model this client has never heard of is an error,
+    never π0.5. Judging a checkpoint by the wrong rules reports a good upload as
+    broken -- after the fee is paid."""
+    with pytest.raises(ConfigError) as raised:
+        adapters.format_profile("sim_openpi", "pi06_next")
+    assert "pi06_next" in str(raised.value)
+
+
+def test_a_legacy_sim_workspace_still_resolves_without_the_new_key() -> None:
+    """A `miner.yaml` written before `base_model_family` existed keeps working.
+
+    Only for the two names that provably carry their base model -- the same
+    bounded backwards compatibility as `DEFAULT_ADAPTER`, and the reason
+    `real_xarm6` is not in that map.
+    """
+    assert adapters.format_profile("sim_openpi") == adapters.OPENPI
+    assert adapters.format_profile("sim_lingbot") == adapters.LINGBOT
 
 
 def test_an_unknown_adapter_refuses_and_does_not_fall_back() -> None:
@@ -60,15 +126,16 @@ def test_an_unknown_adapter_reaches_no_default_by_another_route() -> None:
     error: a future refactor that "helpfully" defaults would keep the message
     and lose the refusal."""
     with pytest.raises(ConfigError):
-        adapters.format_profile("real_xarm7")
+        adapters.resolve("real_xarm7")
 
 
 def test_every_row_of_the_table_is_a_known_path() -> None:
     """The table's own consistency. A typo in a column here dispatches to a
     branch that does not exist, and only for the one competition that uses it."""
     for name, adapter in adapters.ADAPTERS.items():
-        assert adapter.format_profile in (adapters.OPENPI, adapters.LINGBOT), name
         assert adapter.training in (adapters.DOCKER, adapters.UNAVAILABLE), name
+    for family, profile in adapters.FORMAT_PROFILES.items():
+        assert profile in (adapters.OPENPI, adapters.LINGBOT), family
 
 
 def test_no_adapter_claims_a_container_this_package_does_not_ship() -> None:
@@ -86,12 +153,11 @@ def test_no_adapter_claims_a_container_this_package_does_not_ship() -> None:
     may well already be on the machine with π0.5 inside it, and the run then
     finishes with no error at all, on the wrong base model.
     """
-    for name, adapter in adapters.ADAPTERS.items():
-        if adapter.training == adapters.DOCKER:
-            context = runner_context(adapter.format_profile)
-            assert (context / "Dockerfile").is_file(), (
-                f"{name}: no build context at {context}"
-            )
+    for family, profile in adapters.FORMAT_PROFILES.items():
+        context = runner_context(profile)
+        assert (context / "Dockerfile").is_file(), (
+            f"{family}: no build context at {context}"
+        )
 
 
 def test_the_packages_default_runner_profile_is_the_default_adapters() -> None:
@@ -100,9 +166,7 @@ def test_the_packages_default_runner_profile_is_the_default_adapters() -> None:
     one value, so they are compared here -- if they drift, a `miner.yaml` with
     no competition section builds out of a directory that does not exist."""
     assert DEFAULT_RUNNER_PROFILE == adapters.OPENPI
-    assert adapters.ADAPTERS[adapters.DEFAULT_ADAPTER].format_profile == (
-        DEFAULT_RUNNER_PROFILE
-    )
+    assert adapters.format_profile(adapters.DEFAULT_ADAPTER) == DEFAULT_RUNNER_PROFILE
 
 
 def test_an_adapter_cannot_be_edited_after_it_is_resolved() -> None:

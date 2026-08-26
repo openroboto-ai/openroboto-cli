@@ -57,9 +57,7 @@ def openpi() -> ModuleType:
 # ─── The context is a context ─────────────────────────────
 
 
-@pytest.mark.parametrize(
-    "profile", sorted({a.format_profile for a in adapters.ADAPTERS.values()})
-)
+@pytest.mark.parametrize("profile", sorted(set(adapters.FORMAT_PROFILES.values())))
 def test_every_format_profile_has_a_complete_build_context(profile: str) -> None:
     """Every file the Dockerfile COPYs has to be in the wheel.
 

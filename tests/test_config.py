@@ -598,13 +598,40 @@ def test_competition_params_must_be_a_mapping() -> None:
         Settings.from_mapping({"competition": {"adapter": "x", "params": ["nope"]}})
 
 
-def test_format_profile_of_each_known_adapter() -> None:
-    """The table itself. `real_xarm6` is judged by the LingBot rules too -- the
-    arm changes what is evaluated, not what a checkpoint looks like."""
+def test_the_config_carries_the_base_model_through_to_the_rule_book() -> None:
+    """🔴 End to end for the key this whole split added: `miner.yaml` says which
+    base model, and that is what picks the rule book -- **not** the adapter name.
+
+    The pair below is the point: same adapter, two base models, two profiles.
+    The previous version of this test asserted `real_xarm6 == LINGBOT`, which was
+    a guess baked into the table, and backwards from the plan (xArm 6 comes up on
+    π0.5 first).
+    """
+    for family, profile in (
+        ("openpi", adapters.OPENPI),
+        ("lingbot_vla", adapters.LINGBOT),
+    ):
+        cfg = Settings.from_mapping(
+            {"competition": {"adapter": "real_xarm6", "base_model_family": family}}
+        )
+        assert cfg.competition_base_model_family == family
+        assert (
+            adapters.format_profile(
+                cfg.competition_adapter, cfg.competition_base_model_family
+            )
+            == profile
+        )
+
+
+def test_a_config_with_no_base_model_falls_back_only_where_it_is_provable() -> None:
+    """The two sim adapters provably name their base model, so a `miner.yaml`
+    written before this key existed keeps working. `real_xarm6` names hardware,
+    so it is refused instead -- that is the whole reason the key exists."""
     assert adapters.format_profile("sim_openpi") == adapters.OPENPI
     assert adapters.format_profile("sim_lingbot") == adapters.LINGBOT
-    assert adapters.format_profile("real_xarm6") == adapters.LINGBOT
     assert adapters.format_profile("") == adapters.OPENPI
+    with pytest.raises(ConfigError):
+        adapters.format_profile("real_xarm6")
 
 
 def test_an_unknown_adapter_is_refused_rather_than_treated_as_simulation() -> None:
@@ -613,7 +640,7 @@ def test_an_unknown_adapter_is_refused_rather_than_treated_as_simulation() -> No
     the miner as "no model weights found" right before they decide whether to burn.
     """
     with pytest.raises(ConfigError) as excinfo:
-        adapters.format_profile("real_xarm7")
+        adapters.resolve("real_xarm7")
     message = str(excinfo.value)
     assert "real_xarm7" in message
     assert "pip install -U openroboto" in message

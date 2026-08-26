@@ -48,7 +48,7 @@ import subprocess
 from pathlib import Path
 
 from openroboto import adapters, local_runner_context, runner_context
-from openroboto.config import Settings
+from openroboto.config import ConfigError, Settings
 from openroboto.console import fail, hint, say
 from openroboto.training.container import runner_image
 
@@ -134,9 +134,46 @@ def competition_adapter(config_path: str) -> str:
     return Settings.load(config_path).competition_adapter
 
 
+def competition_base_model_family(config_path: str) -> str:
+    """Which base model this workspace's competition runs on, or `""`.
+
+    Same tolerance as `competition_adapter`: no config is not an error here.
+    `adapters.format_profile` is what turns `""` into either the π0.5 default or
+    a refusal -- that decision does not belong in a config reader.
+    """
+    if not Path(config_path).is_file():
+        return ""
+    return Settings.load(config_path).competition_base_model_family
+
+
+def packaged_context(adapter_name: str, config_path: str) -> Path | None:
+    """The build context this package ships for the workspace's base model, or
+    `None` when there is nothing honest to point at.
+
+    `None` covers both "the season has not named a base model" (a real-track
+    workspace today) and "it named one this client does not ship a context for".
+    Both mean the same thing to the caller -- there is no directory to suggest --
+    and neither may become a *default* directory: an image built out of the wrong
+    base is invisible afterwards, which is the failure `run()` refuses to cause.
+    """
+    try:
+        profile = adapters.format_profile(
+            adapter_name, competition_base_model_family(config_path)
+        )
+    except ConfigError:
+        return None
+    context = runner_context(profile)
+    return context if context.is_dir() else None
+
+
 def run(args: argparse.Namespace) -> int:
     adapter_name = competition_adapter(args.config)
     adapter = adapters.resolve(adapter_name)
+    # 🔴 The "not released yet" refusal comes **first**, and deliberately does not
+    # need to know the base model: it is a property of the competition, and its
+    # message is the more actionable of the two. Resolving the base model first
+    # would replace "watch for the announcement" with "your config does not say
+    # which base model", which is true but not what a miner can act on.
     if adapter.training == adapters.UNAVAILABLE and not args.context:
         # See the module docstring: building without a released container means
         # naming the image after this competition and filling it with whatever
@@ -148,12 +185,12 @@ def run(args: argparse.Namespace) -> int:
         # `runner/lingbot/train_runner.py`). Letting `build` succeed here would
         # hand back an image that the next command refuses to touch, which reads
         # as a broken client rather than as an unreleased competition.
-        packaged = runner_context(adapter.format_profile)
+        packaged = packaged_context(adapter_name, args.config)
         byo = (
             f"   → have a GPU and want to drive it yourself? this client already "
             f"ships an unverified build context for this base model:\n"
             f"     `openroboto build --context {packaged}`\n"
-            if packaged.is_dir()
+            if packaged is not None
             else "   → have the image definition already? `--context <directory>` "
             "builds it\n"
         )
@@ -172,7 +209,12 @@ def run(args: argparse.Namespace) -> int:
         )
         return 1
 
-    profile = adapter.format_profile
+    # 🔴 Which image to build follows the **base model**, not the adapter. This
+    # used to read `adapter.format_profile`, and for `real_xarm6` that column was
+    # a guess baked into the table -- the wrong one (xArm 6 comes up on π0.5).
+    profile = adapters.format_profile(
+        adapter_name, competition_base_model_family(args.config)
+    )
     image = args.image or runner_image(competition_image(args.config))
     context = resolve_context(args.context, profile)
     if not args.context and not local_runner_context(profile).is_dir():

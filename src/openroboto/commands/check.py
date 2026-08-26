@@ -111,7 +111,12 @@ def resolve_layout(settings: Settings) -> Any | None:
     upgrading the CLI does not change one verdict for a miner who changed
     nothing.
     """
-    if adapters.format_profile(settings.competition_adapter) == adapters.OPENPI:
+    if (
+        adapters.format_profile(
+            settings.competition_adapter, settings.competition_base_model_family
+        )
+        == adapters.OPENPI
+    ):
         return None
     return lingbot_layout(settings.competition_params)
 

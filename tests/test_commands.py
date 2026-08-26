@@ -245,6 +245,39 @@ def test_init_writes_the_competition_the_miner_picked(
     assert written.competition_adapter == "real_xarm6"
 
 
+def test_section_keys_track_the_protocol_contract() -> None:
+    """🔴 **The alarm on a deliberately blocked line.**
+
+    `base_model_family` is missing from `SECTION_KEYS` only because the pinned
+    protocol package (0.7.0) has no such field: `Contract` keeps pydantic's
+    `extra=ignore`, so `Competition` drops it on the way in and `model_dump()`
+    would not have the key. Adding it today breaks `openroboto init` outright.
+
+    So the two are tied together here instead of in a comment nobody re-reads:
+    the moment the pin moves to 0.8.0 this fails, and the fix is one line in
+    `commands/init.py`. Until then a workspace simply has no such key, and
+    `adapters.base_model_family()` resolves the two sim adapters and refuses for
+    the real track -- which is the honest answer while xArm 6's base model is
+    `null` in the database anyway.
+
+    The general property (and the reason this is not just a version assertion):
+    every column `init` copies has to exist on the model it copies from, or the
+    command dies on a `KeyError` at the one moment a miner cannot recover from
+    it -- their first ever command.
+    """
+    fields = set(Competition.model_fields)
+    assert set(init_command.SECTION_KEYS) <= fields, (
+        f"init copies columns the protocol package does not publish: "
+        f"{sorted(set(init_command.SECTION_KEYS) - fields)}"
+    )
+    if "base_model_family" in fields:
+        assert "base_model_family" in init_command.SECTION_KEYS, (
+            "the protocol pin moved: add `base_model_family` to SECTION_KEYS, "
+            "or miner.yaml will not say which base model the season runs on and "
+            "every real-track workspace stays refused"
+        )
+
+
 def test_init_keeps_the_competition_parameters_verbatim(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1143,8 +1176,11 @@ def test_build_will_not_fill_a_competitions_image_name_with_another_base(
     ⚠️ This used to use `sim_lingbot`, which moved to `DOCKER` on 2026-08-26
     once `scripts/verify_lingbot_runner.py` ran green on a card. The property
     is about `training=UNAVAILABLE`, not about LingBot -- `real_xarm6` keeps
-    the exact shape (a LINGBOT-profile competition that names an image this
-    client must not fill).
+    the exact shape (a competition that names an image this client must not fill).
+
+    ⚠️ The season here names its base model. Without that key there is nothing to
+    build even for a miner with a GPU, and the refusal drops the `--context` hint
+    -- the case below. This one is the season that *has* decided.
     """
     monkeypatch.delenv("OPENPI_RUNNER_IMAGE", raising=False)
     built: list[Any] = []
@@ -1156,6 +1192,7 @@ def test_build_will_not_fill_a_competitions_image_name_with_another_base(
         track="real",
         seq=2,
         adapter="real_xarm6",
+        base_model_family="lingbot_vla",
         params={"training": {"image": "xarm6-runner:1.0"}},
     )
     args = argparse.Namespace(
@@ -1169,6 +1206,65 @@ def test_build_will_not_fill_a_competitions_image_name_with_another_base(
     # And it says how to build it anyway, naming the context that does exist --
     # otherwise the only path left is guessing at a directory inside site-packages.
     assert "--context" in err and "runner/lingbot" in err
+
+
+def test_build_names_the_context_of_the_base_model_the_season_actually_names(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """🔴 Same arm, other base model, other context.
+
+    Before the split this was unreachable: `real_xarm6` carried `LINGBOT` in the
+    adapter table, so the hint named LingBot's context no matter what the season
+    ran on -- and the plan is to bring xArm 6 up on π0.5 first, so the baked-in
+    answer was the wrong one. Nothing could have caught it; the base model is a
+    property of the season and that table is keyed by hardware.
+    """
+    monkeypatch.delenv("OPENPI_RUNNER_IMAGE", raising=False)
+    config = _competition_config(
+        tmp_path,
+        track="real",
+        seq=2,
+        adapter="real_xarm6",
+        base_model_family="openpi",
+        params={"training": {"image": "xarm6-runner:1.0"}},
+    )
+    args = argparse.Namespace(
+        config=config, context="", image="", no_cache=False, dry_run=False
+    )
+
+    assert build_command.run(args) == 1
+    err = capsys.readouterr().err
+    assert "--context" in err
+    assert "runner/lingbot" not in err, "named LingBot's context for a π0.5 season"
+
+
+def test_build_refuses_without_naming_a_context_it_cannot_pick(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A season that has not named a base model gets the refusal **without** the
+    "build it yourself from this directory" hint.
+
+    There is no directory to name, and naming one anyway is the exact failure the
+    refusal exists to prevent: an image under this competition's name filled with
+    somebody else's base model, which nothing downstream can tell apart.
+    """
+    monkeypatch.delenv("OPENPI_RUNNER_IMAGE", raising=False)
+    config = _competition_config(
+        tmp_path,
+        track="real",
+        seq=2,
+        adapter="real_xarm6",
+        params={"training": {"image": "xarm6-runner:1.0"}},
+    )
+    args = argparse.Namespace(
+        config=config, context="", image="", no_cache=False, dry_run=False
+    )
+
+    assert build_command.run(args) == 1
+    err = capsys.readouterr().err
+    assert "has not been released yet" in err
+    assert "ships an unverified build context" not in err
+    assert "`--context <directory>` builds it" in err
 
 
 def test_build_still_builds_an_image_definition_you_brought_yourself(

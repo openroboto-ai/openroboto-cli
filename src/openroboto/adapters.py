@@ -6,15 +6,31 @@ alike: the simulation competition on π0.5 (openpi) and the one on LingBot-VLA
 `miner.yaml` -- written there by `openroboto init` from the competition the
 miner picked -- says which one this workspace mines.
 
-The **string** is shared with the backend; the implementation behind it is not
-(the backend decides admission and rounds, this decides which local tool chain
-to run).
+The **strings** are shared with the backend; the implementations behind them are
+not (the backend decides admission and rounds, this decides which local tool
+chain to run).
+
+## 🔴 Two orthogonal dimensions, two tables (2026-08-26)
+
+`adapter` used to answer both "which track" and "which base model". It never
+could: `real_xarm6` names a *robot arm*, not a model, so the real track had
+nowhere to say what it runs on and this table simply guessed `LINGBOT` for it --
+a guess that was backwards, since the plan is to bring xArm 6 up on π0.5 first.
+
+    ADAPTERS      keyed by `competition.adapter`             -> training
+    FORMAT_PROFILES  keyed by `competition.base_model_family` -> format profile
+
+Which rule book judges a checkpoint follows the **base model**; whether this
+package ships a container to train it follows the **competition** (its dataset
+and image exist or they do not). The suffixes in `sim_openpi` / `sim_lingbot`
+are historical from here on -- **do not read a base model out of an adapter
+name**. The backend column `competitions.base_model_family` is the answer, and
+it travels into `miner.yaml` with the rest of the competition row.
 
 🔴 **Values never live here.** Image names, template names, fees and addresses
 are competition data and are read from `competition.params` -- writing one into
 this table means a new release of the CLI to change a number. The columns below
-answer only "which code path", and there are two of them because two commands
-have more than one path to take; a column whose value is the same for every
+answer only "which code path"; a column whose value is the same for every
 adapter is not a dispatch, it is a constant with extra steps.
 
 ⚠️ **How the fee is paid is not one of the columns.** `burn` or `transfer`
@@ -43,14 +59,15 @@ UNAVAILABLE: Final = "unavailable"
 
 @dataclass(frozen=True)
 class Adapter:
-    """Which code path each step takes for one competition."""
+    """What one competition's *track* decides. One column, on purpose.
 
-    #: Which rule book judges a checkpoint (`openroboto check`).
-    #:
-    #: ⚠️ Not a protocol-package argument: 0.7.0 has no `profile=` parameter,
-    #: it has two parallel functions (`check_checkpoint_layout` /
-    #: `check_lingbot_layout`). This only chooses between them.
-    format_profile: str
+    `format_profile` left this class on 2026-08-26: it follows the base model,
+    which now has its own column on the competition row and its own table below.
+    A one-column dataclass rather than a plain `dict[str, str]` because the next
+    per-competition code path has somewhere to go -- collapse it if that never
+    happens.
+    """
+
     #: Whether **this package** ships a container `openroboto train` can run for
     #: this competition. Not "is there an image on this machine": an image named
     #: by `params.training.image` can sit in `docker images` with anything at all
@@ -60,7 +77,7 @@ class Adapter:
 
 
 ADAPTERS: Final = {
-    "sim_openpi": Adapter(format_profile=OPENPI),
+    "sim_openpi": Adapter(),
     # `DOCKER` since 2026-08-26, on evidence rather than arithmetic. Three
     # reasons were written here over time for holding it at `UNAVAILABLE`; all
     # three are now discharged, and they are worth a line each so nobody
@@ -95,10 +112,15 @@ ADAPTERS: Final = {
     # arithmetic -- the verification builds and exports, it does not run a
     # training step. A 24 GB card has 11.6 GiB of headroom for activations;
     # that is the number a miner reports back on, not one this run proved.
-    "sim_lingbot": Adapter(format_profile=LINGBOT),
+    "sim_lingbot": Adapter(),
     # The dataset (`xarm6-libero-seed-v1`) and the training image do not exist
     # yet, so there is nothing to install and nothing to run.
-    "real_xarm6": Adapter(format_profile=LINGBOT, training=UNAVAILABLE),
+    #
+    # ⚠️ This row used to carry `format_profile=LINGBOT`, which was a **guess** --
+    # and the wrong one: xArm 6 is being brought up on π0.5 first. Nothing here
+    # ever knew, because the base model is a property of the season and this
+    # table is keyed by hardware. It is now read off the season row instead.
+    "real_xarm6": Adapter(training=UNAVAILABLE),
 }
 """Every adapter this client knows, and what each step does for it."""
 
@@ -137,6 +159,70 @@ def resolve(adapter: str) -> Adapter:
         ) from None
 
 
-def format_profile(adapter: str) -> str:
+#: `competitions.base_model_family` -> the local format profile.
+#:
+#: 🔴 **The keys are the backend's vocabulary, verbatim**, and they are also what the
+#: evaluator's `detect_model_family()` returns -- do not spell them any other way.
+#: The *values* are this package's own: a profile string is a **directory name**
+#: (`runner/`, `runner/lingbot/`, see `openroboto.runner_context`), which is why
+#: `LINGBOT` is `"lingbot"` and not `"lingbot_vla"`. Shared strings, separate
+#: implementations, same as `ADAPTERS`.
+FORMAT_PROFILES: Final = {
+    "openpi": OPENPI,
+    "lingbot_vla": LINGBOT,
+}
+"""Every base model this client can judge a checkpoint against."""
+
+#: The two adapters whose name provably names their base model. Used **only** for a
+#: `miner.yaml` written before `base_model_family` existed -- the same backwards
+#: compatibility as `DEFAULT_ADAPTER`, and bounded the same way: these two mappings
+#: can be proven from the seeded competition rows, and there is no third.
+#:
+#: 🔴 `real_xarm6` is deliberately absent. Its name says *hardware*; guessing a base
+#: model from it is what this whole split removed, and the previous guess here was
+#: wrong. A real-track workspace with no `base_model_family` gets a refusal.
+_FAMILY_BY_LEGACY_ADAPTER: Final = {
+    "sim_openpi": "openpi",
+    "sim_lingbot": "lingbot_vla",
+}
+
+
+def base_model_family(adapter: str, family: str = "") -> str:
+    """Which base model this workspace mines, from the season snapshot.
+
+    `family` is `competition.base_model_family` out of `miner.yaml`. It is empty
+    for a config written before that key existed (or by a CLI pinned to an older
+    protocol package, which drops the field on the way in), and only then does
+    `adapter` get consulted -- for the two names that provably carry their base
+    model. An empty adapter is the pre-competition π0.5 workspace,
+    `DEFAULT_ADAPTER`.
+
+    An unknown or unresolvable base model is an **error**, never a fall back to
+    π0.5. The rules that judge a checkpoint come from the competition, and
+    applying the wrong ones tells a miner their upload is broken when it is not
+    -- or that it is fine when it is not, which they find out after paying.
+    """
+    resolved = family or _FAMILY_BY_LEGACY_ADAPTER.get(adapter or DEFAULT_ADAPTER, "")
+    if resolved in FORMAT_PROFILES:
+        return resolved
+    raise ConfigError(
+        f"miner.yaml does not say which base model competition "
+        f"`{adapter or DEFAULT_ADAPTER}` runs on"
+        + (
+            f" (it says `{resolved}`, which this client does not know)"
+            if resolved
+            else ""
+        )
+        + ".\n"
+        f"  → openroboto init --refresh   (re-reads the competition from the backend)\n"
+        f"  → pip install -U openroboto   (if it still says this afterwards)\n"
+        f"  Refusing to guess: the base model decides which rules judge your "
+        f"checkpoint, and the adapter name does not say -- `real_xarm6` names a "
+        f"robot arm. Guessing costs you the entry fee, not a retry.\n"
+        f"  This client knows: {', '.join(sorted(FORMAT_PROFILES))}."
+    )
+
+
+def format_profile(adapter: str, family: str = "") -> str:
     """Which set of layout rules this competition's checkpoints are judged by."""
-    return resolve(adapter).format_profile
+    return FORMAT_PROFILES[base_model_family(adapter, family)]
