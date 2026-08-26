@@ -1897,7 +1897,7 @@ def test_doctor_flags_every_field_needed_before_spending() -> None:
     # assert on the count and the key fields, not on the display names -- display names
     # are for humans and get translated or rewritten.
     assert "netuid" in failed and "hotkey_ss58" in failed
-    assert len(failed) == 4, f"an empty config should report 4 items, got {failed}"
+    assert len(failed) == 3, f"an empty config should report 3 items, got {failed}"
 
 
 def test_doctor_passes_on_a_complete_config() -> None:
@@ -1905,7 +1905,6 @@ def test_doctor_passes_on_a_complete_config() -> None:
         {
             "subnet": {"netuid": 80, "hotkey_ss58": "5" + "M" * 47},
             "huggingface": {"username": "someone", "token": "hf_x"},
-            "urls": {"control_json": "https://example.invalid/control.json"},
         }
     )
     assert all(result.ok for result in doctor_command.check_settings(settings))
@@ -1923,34 +1922,60 @@ def test_doctor_python_check_matches_the_supported_floor() -> None:
     assert doctor_command.check_python().ok
 
 
-def test_doctor_control_check_applies_the_rate_it_fetched(
+def test_doctor_reads_the_fee_from_the_season_not_the_subnet_rate() -> None:
+    """The season's own `params.fee`, never `settings.burn_rate_tao`.
+
+    That field is control.json's subnet-wide rate, and the subnet runs several
+    seasons at once: on `real/1` it reads 0.1 while that season charges 2 TAO.
+    A wallet holding 0.5 was ticked green here and ran out at `submit` -- after
+    the upload had already gone out.
+    """
+    settings = Settings.from_mapping(
+        {
+            "competition": {
+                "track": "real",
+                "seq": 1,
+                "label": "xArm 6",
+                "status": "active",
+                "params": {"fee": {"kind": "transfer", "amount_tao": 2, "coldkey": "5x"}},
+            },
+            "payment": {"burn_rate_tao": 0.1},
+        }
+    )
+    result = doctor_command.check_competition(settings)
+    assert result.ok
+    assert "2" in result.detail and "transfer" in result.detail
+    assert "0.1" not in result.detail
+
+
+def test_doctor_never_opens_the_network_to_say_which_season_this_is(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """`check_control` must **write the fetched rate into settings**, not just display
-    it.
+    """The season is written into `miner.yaml` by `init`, so reading it is
+    offline work. It used to be a `control.json` fetch, which made an
+    unreachable host look like a broken workspace."""
+    import urllib.request
 
-    `check_wallet` runs after it and relies on `settings.burn_rate_tao` to decide
-    whether the balance is enough. If the rate is only displayed and not applied, the
-    balance check always reports "rate unknown" -- and nobody would notice.
-    """
-    from openroboto.config.control import ControlFetch
+    def _refuse(*args: object, **kwargs: object) -> None:
+        raise AssertionError("check_competition must not open the network")
 
-    monkeypatch.setattr(
-        doctor_command,
-        "fetch_control",
-        lambda url: ControlFetch(
-            control={"payment": {"burn_rate_tao": 0.1}}, etag="etag-1"
-        ),
-    )
+    monkeypatch.setattr(urllib.request, "urlopen", _refuse)
+
     settings = Settings.from_mapping(
-        {"urls": {"control_json": "https://example.invalid/control.json"}}
+        {
+            "competition": {
+                "track": "sim",
+                "seq": 2,
+                "label": "LingBot-VLA 2.0",
+                "status": "active",
+                "params": {"fee": {"kind": "burn", "amount_tao": 0.1, "coldkey": None}},
+            },
+            "urls": {"control_json": "https://example.invalid/control.json"},
+        }
     )
-    assert settings.burn_rate_tao is None
-
-    result = doctor_command.check_control(settings)
+    result = doctor_command.check_competition(settings)
     assert result.ok
-    assert settings.burn_rate_tao == 0.1  # applied, not merely printed
-    assert "0.1" in result.detail
+    assert "sim/2" in result.detail
 
 
 def test_doctor_balance_check_does_not_crash_on_an_unknown_rate(
@@ -2106,31 +2131,6 @@ def test_doctor_reads_the_pin_out_of_metadata_not_a_second_copy(
     )
     assert doctor_command.pinned_protocol_version() == "1.2.3"
 
-
-def test_doctor_survives_an_unreachable_control_json(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A miner may run doctor on a machine with no route to the internet --
-    exactly to find out why. An unreachable control.json is reported as one
-    failed item with a readable sentence; it must not raise, and must not stop
-    the remaining checks from running.
-    """
-
-    def _unreachable(url: str) -> object:
-        raise ControlFetchError("Cannot reach https://example.invalid/control.json")
-
-    monkeypatch.setattr(doctor_command, "fetch_control", _unreachable)
-    settings = Settings.from_mapping(
-        {"urls": {"control_json": "https://example.invalid/control.json"}}
-    )
-
-    result = doctor_command.check_control(settings)
-    assert result.ok is False
-    assert "Cannot reach" in result.detail
-    assert "network" in result.fix  # tells them where to look, not just that it failed
-
-
-# ─── status: where a miner stands in the entry list ──────────
 
 
 def _roster_settings() -> Settings:

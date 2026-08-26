@@ -6,7 +6,7 @@ item states "which item is unsatisfied / what the expected value is / how to
 fix it", and an unsatisfied item exits non-zero.
 
 There are two classes:
-- required items (config / docker / image / control.json) -- an unsatisfied
+- required items (config / competition / docker / image) -- an unsatisfied
   one fails outright;
 - informational items (GPU, HF token, wallet balance) -- when bittensor is not
   installed or there is no card in the environment, they emit a hint but do
@@ -26,14 +26,7 @@ from importlib.metadata import PackageNotFoundError, requires, version
 from openroboto import adapters
 from openroboto.commands.build import competition_adapter, competition_image
 from openroboto.competition import Fee, load_snapshot
-from openroboto.config import (
-    ConfigError,
-    ControlFetchError,
-    Settings,
-    apply_control,
-    environments,
-    fetch_control,
-)
+from openroboto.config import ConfigError, Settings, environments
 from openroboto.console import say
 from openroboto.training.container import runner_image
 
@@ -86,7 +79,7 @@ def run(args: argparse.Namespace) -> int:
 
     if settings is not None:
         results.extend(check_settings(settings))
-        results.append(check_control(settings))
+        results.append(check_competition(settings))
         results.append(check_hf_token(settings))
         results.append(check_wallet(settings))
 
@@ -250,46 +243,51 @@ def check_settings(settings: Settings) -> list[CheckResult]:
             "set miner.yaml → huggingface.username / token (the token needs "
             "write access)",
         ),
-        CheckResult(
-            "control.json URL",
-            bool(settings.control_json_url),
-            settings.control_json_url or "not set",
-            "set miner.yaml → urls.control_json",
-        ),
     ]
     return results
 
 
-def check_control(settings: Settings) -> CheckResult:
-    """Whether control.json can be fetched, what this round's status is, and
-    what the rate is."""
-    if not settings.control_json_url:
+def check_competition(settings: Settings) -> CheckResult:
+    """Which season this workspace mines, and what entering it costs.
+
+    This replaced a `control.json` check on 2026-08-26. That file answered the
+    same three questions -- round, status, rate -- for a subnet that ran one
+    season at a time, and every one of its answers is now either wrong or
+    narrower than the workspace's own:
+
+    * its `round` is a single subnet-wide counter, and it reads `1` while the
+      real track's first season and the simulation track's second are both open;
+    * its `status` only ever says `active`, where a season has three
+      (`draft` / `active` / `archived`);
+    * its `burn_rate_tao` is the subnet-wide rate, and `real/1` charges 2 TAO --
+      see `_entry_fee` for the wallet that was ticked green at 0.5 TAO.
+
+    It is also the only check here that needed the network, which made an
+    unreachable host look like a broken workspace. The season snapshot is
+    written into `miner.yaml` by `init` and is what `submit` confirms against,
+    so reading it offline is both truer and cheaper.
+
+    🔴 The file itself is **not** retired: external validators still read
+    `public_key` out of it to get a rate-limit token, and that URL must not 404.
+    What went away is the miner's reason to fetch it.
+    """
+    snapshot = load_snapshot(settings)
+    if snapshot is None:
         return CheckResult(
-            "control.json", False, "URL not set", "set miner.yaml → urls.control_json"
+            "competition",
+            False,
+            "this workspace does not say which season it mines",
+            "`openroboto init --refresh` writes the competition section",
         )
     try:
-        control = fetch_control(settings.control_json_url).control or {}
-    except ControlFetchError as exc:
-        return CheckResult(
-            "control.json",
-            False,
-            str(exc),
-            "this is an infrastructure problem, not a config error — check your "
-            "network connection and the URL",
-        )
-
-    # Once fetched, **apply** it, do not merely display it. `check_wallet`
-    # runs after this and needs the real rate in settings to compare against
-    # the balance; if we displayed without applying, it could only report
-    # "rate unknown". Parsing goes through the single `apply_control`
-    # implementation; do not second-guess the shape of the payment section
-    # here.
-    apply_control(settings, control)
+        fee = snapshot.fee()
+    except ConfigError as exc:
+        return CheckResult("competition", False, str(exc), "`openroboto init --refresh`")
     return CheckResult(
-        "control.json",
+        "competition",
         True,
-        f"round={control.get('round')} status={control.get('status')} "
-        f"burn_rate={settings.burn_rate_tao} TAO",
+        f"{snapshot.name} · {snapshot.status} · "
+        f"{fee.amount_tao} TAO to enter, by {fee.kind}",
     )
 
 
