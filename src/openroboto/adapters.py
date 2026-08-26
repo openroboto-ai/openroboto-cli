@@ -51,13 +51,25 @@ class Adapter:
     #: it has two parallel functions (`check_checkpoint_layout` /
     #: `check_lingbot_layout`). This only chooses between them.
     format_profile: str
-    #: Whether `openroboto train` has a container to run for this competition.
+    #: Whether **this package** ships a container `openroboto train` can run for
+    #: this competition. Not "is there an image on this machine": an image named
+    #: by `params.training.image` can sit in `docker images` with anything at all
+    #: inside it -- see `commands/build.py`, which is why this column also decides
+    #: whether `openroboto build` has something honest to build.
     training: str = DOCKER
 
 
 ADAPTERS: Final = {
     "sim_openpi": Adapter(format_profile=OPENPI),
-    "sim_lingbot": Adapter(format_profile=LINGBOT),
+    # 🔴 `DOCKER` here would be a lie, and an expensive one. This package ships
+    # exactly one image definition (`runner/`), and it installs openpi -- there
+    # is no LingBot Dockerfile anywhere in the wheel, and `runner/train_runner.py`
+    # imports `openpi.*` unconditionally. Claiming a container exists gets the
+    # miner as far as `docker run` before anything notices; worse, if they ever
+    # ran `openroboto build`, an image *does* exist under this competition's name
+    # with π0.5 inside it, and training then finishes quietly on the wrong base
+    # model. Say "not released" until the image is.
+    "sim_lingbot": Adapter(format_profile=LINGBOT, training=UNAVAILABLE),
     # The dataset (`xarm6-libero-seed-v1`) and the training image do not exist
     # yet, so there is nothing to install and nothing to run.
     "real_xarm6": Adapter(format_profile=LINGBOT, training=UNAVAILABLE),

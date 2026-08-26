@@ -22,8 +22,8 @@ from openroboto.commands import announce as announce_command
 from openroboto.commands import burn as burn_command
 from openroboto.commands import submit as submit_command
 from openroboto.config import Settings
-from openroboto.preflight import payload_size, payload_track
-from openroboto.round_state import save_state
+from openroboto.preflight import check_announce_ready, payload_size, payload_track
+from openroboto.round_state import competition_id, load_state, save_state
 
 HOTKEY = "5" + "M" * 47
 COMMIT = "a" * 40
@@ -552,6 +552,22 @@ def _season_settings(**fee: Any) -> Settings:
     )
 
 
+def _verdict(amount_tao: float = 0.25, cid: int = 2, kind: str = "burn") -> Any:
+    """What `competition.precheck` hands back.
+
+    It is the **only** evidence that the season was confirmed in this run, which
+    is why `perform_burn` takes it as an argument rather than reading an amount
+    off `Settings`: an amount can be typed into miner.yaml by hand, and a number
+    says how much, never which competition.
+    """
+    return SimpleNamespace(
+        live=SimpleNamespace(label="LingBot-VLA 2.0", id=cid),
+        kind=kind,
+        amount_tao=amount_tao,
+        cid=cid,
+    )
+
+
 def _submitting(
     monkeypatch: pytest.MonkeyPatch, settings: Settings
 ) -> tuple[list[Any], list[Any]]:
@@ -567,15 +583,17 @@ def _submitting(
 
     def _precheck(cfg: Settings, snapshot: Any, now: Any) -> Any:
         checked.append(snapshot)
-        return SimpleNamespace(
-            live=SimpleNamespace(label="LingBot-VLA 2.0", id=2),
-            kind="burn",
-            amount_tao=0.25,
-            cid=2,
-        )
+        return _verdict()
 
-    def _burn(cfg: Settings, round_num: int, state: dict[str, Any]) -> bool:
-        paid.append(cfg.burn_rate_tao)
+    def _burn(
+        cfg: Settings,
+        round_num: int,
+        state: dict[str, Any],
+        verdict: Any = None,
+    ) -> bool:
+        # What the payment was told to pay -- `None` if it was handed no verdict
+        # at all, which is the case that must never reach the chain.
+        paid.append(None if verdict is None else verdict.amount_tao)
         state["burn_tx_hash"] = "0x" + "e" * 64
         return True
 
@@ -594,7 +612,8 @@ def test_submit_checks_the_competition_even_when_check_was_skipped(
     args = argparse.Namespace(config="miner.yaml", round=4, output_dir="", force=False)
     assert submit_command.run(args) == 0
     assert len(checked) == 1
-    # and the amount paid is the season's own, not a subnet-wide rate
+    # and the payment was handed this run's verdict, carrying the season's own
+    # fee -- not a subnet-wide rate, and not a number left lying in the config
     assert paid == [0.25]
 
 
@@ -685,7 +704,6 @@ def test_a_season_config_reads_no_control_json_when_it_burns(
     money. It is also one more request between "checked" and "paid"."""
     monkeypatch.chdir(tmp_path)
     settings = _season_settings()
-    settings.burn_rate_tao = 0.25
     monkeypatch.setattr(
         burn_command,
         "refresh_burn_rate",
@@ -702,14 +720,16 @@ def test_a_season_config_reads_no_control_json_when_it_burns(
     state["competition_id"] = 2
     save_state(9, state)
 
-    assert burn_command.perform_burn(settings, 9, state) is True
+    assert burn_command.perform_burn(settings, 9, state, verdict=_verdict(0.25)) is True
+    # the amount came from the verdict, i.e. from the row the backend served
+    assert settings.burn_rate_tao == 0.25
 
 
 def test_a_season_fee_nobody_checked_is_not_burned(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Reaching the burn with no rate means the gate never ran. Falling back to
-    control.json here would be that gate quietly becoming optional."""
+    """Reaching the burn with no verdict means the gate never ran. Falling back
+    to control.json here would be that gate quietly becoming optional."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(
         burn_command,
@@ -718,6 +738,54 @@ def test_a_season_fee_nobody_checked_is_not_burned(
     )
 
     assert burn_command.perform_burn(_season_settings(), 10, _uploaded_state()) is False
+
+
+def test_a_rate_typed_into_miner_yaml_does_not_buy_a_place_in_a_season(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """🔴 End to end, the shape of the hole this gate closes.
+
+    `miner.yaml` says you may set `payment.burn_rate_tao` by hand, and the guard
+    here used to ask "is there an amount". So a hand-filled rate -- the *right*
+    amount, even -- walked straight past the season check. What followed had no
+    error anywhere in it: nothing wrote `competition_id`, so `announce` sent a
+    payload with no `cid`, so the backend filed the submission under the season
+    it defaults to -- the archived π0.5 one. Fee spent, commitment on chain,
+    backend acknowledging it, wrong competition.
+
+    Note what the preflight says below: on this season's track the payload is
+    perfectly valid without a `cid`. Nothing downstream is going to catch this,
+    which is why refusing here is the whole defence.
+    """
+    monkeypatch.chdir(tmp_path)
+    settings = _season_settings()
+    settings.burn_rate_tao = 0.25  # typed in by hand, and the correct amount
+    monkeypatch.setattr(
+        burn_command.Settings, "load", staticmethod(lambda path: settings)
+    )
+    monkeypatch.setattr(
+        burn_command,
+        "get_subtensor",
+        lambda network: pytest.fail("connected to the chain to pay for no season"),
+    )
+    monkeypatch.setattr(
+        burn_command,
+        "refresh_burn_rate",
+        lambda *a, **k: pytest.fail("a season's fee is not control.json's business"),
+    )
+    state = _uploaded_state()
+    save_state(11, state)
+    assert check_announce_ready(state, 11, payload_track(settings)) == []
+
+    args = argparse.Namespace(config="miner.yaml", round=11)
+    assert burn_command.run(args) == 1
+
+    printed = capsys.readouterr()
+    assert "nothing was burned" in printed.err.lower()
+    assert "burn_rate_tao" in printed.err  # names the thing that did not count
+    # Nothing about a season reached the checkpoint, so `announce` would have put
+    # a payload with no `cid` on chain -- the wrong-season filing, in one read.
+    assert competition_id(load_state(11)) is None
 
 
 # ─── the two keys 0.7.0 adds: cid and m ──────────────────────
@@ -988,7 +1056,14 @@ def test_a_real_track_burn_spends_nothing_when_a_field_is_missing(
 
     state = _uploaded_state()
     state.update(missing)
-    assert burn_command.perform_burn(_competition_settings(), 1, state) is False
+    # The season *was* confirmed this run -- this is the field gate behind it,
+    # which does not take the caller's word for what reached the checkpoint.
+    assert (
+        burn_command.perform_burn(
+            _competition_settings(), 1, state, verdict=_verdict(0.1, cid=CID)
+        )
+        is False
+    )
     assert expected in capsys.readouterr().out
 
 

@@ -23,6 +23,8 @@ import sys
 from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError, requires, version
 
+from openroboto import adapters
+from openroboto.commands.build import competition_adapter, competition_image
 from openroboto.config import (
     ConfigError,
     ControlFetchError,
@@ -89,7 +91,9 @@ def run(args: argparse.Namespace) -> int:
 
     results.append(check_docker())
     results.append(check_gpu())
-    results.append(check_image())
+    # The competition decides which image `train` runs, so a config that did not
+    # parse means checking the historical default rather than guessing one.
+    results.append(check_image(args.config if settings is not None else ""))
 
     for result in results:
         say(result.render())
@@ -332,8 +336,35 @@ def check_gpu() -> CheckResult:
     return CheckResult("GPU", True, detail)
 
 
-def check_image() -> CheckResult:
-    image = runner_image()
+def check_image(config_path: str = "") -> CheckResult:
+    """Is the image `openroboto train` would run actually here?
+
+    Two things this used to get wrong, both silent:
+
+    1. it looked up `runner_image()` with no competition, i.e. the π0.5 default,
+       while `train` runs the image `params.training.image` names. Doctor
+       reported on an image nothing was going to use;
+    2. for a competition this client has no container for, an image under that
+       name can still be sitting in `docker images` -- built by an older release
+       out of the openpi context, or by hand. "ready" is the one thing that must
+       not be said about it: the name came from the competition and the contents
+       came from somewhere else, and this is the last place that can say so.
+
+    An empty `config_path` (no config, or one that failed to parse) checks what
+    it always did.
+    """
+    try:
+        adapter = adapters.resolve(competition_adapter(config_path))
+    except ConfigError as exc:
+        return CheckResult(
+            "training image",
+            False,
+            str(exc).splitlines()[0],
+            "pip install -U openroboto",
+            required=False,
+        )
+    image = runner_image(competition_image(config_path))
+
     if not shutil.which("docker"):
         return CheckResult(
             "training image",
@@ -343,6 +374,25 @@ def check_image() -> CheckResult:
             required=False,
         )
     found = _run(["docker", "images", "-q", image])
+
+    if adapter.training == adapters.UNAVAILABLE:
+        # Not a fixable item -- `openroboto build` refuses this competition on
+        # purpose -- so it does not fail the run. It still has to be said.
+        detail = (
+            f"this client has no training image for this competition; `{image}` "
+            f"is on this machine but was not built from anything that ships here"
+            if found
+            else "this client has no training image for this competition yet"
+        )
+        return CheckResult(
+            "training image",
+            False,
+            detail,
+            "`openroboto train` will not run it; train your own way, then "
+            "`openroboto check` and `openroboto submit`",
+            required=False,
+        )
+
     if not found:
         return CheckResult(
             "training image", False, f"{image} not found", "openroboto build"

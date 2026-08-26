@@ -985,14 +985,69 @@ def test_build_uses_the_image_this_competition_names(
     monkeypatch.delenv("OPENPI_RUNNER_IMAGE", raising=False)
     config = _competition_config(
         tmp_path,
-        track="real",
-        seq=1,
-        adapter="real_xarm6",
-        params={"training": {"image": "lingbot-runner:1.2"}},
+        track="sim",
+        seq=3,
+        adapter="sim_openpi",
+        params={"training": {"image": "openpi-runner:1.4"}},
     )
     args = argparse.Namespace(
         config=config, context="", image="", no_cache=False, dry_run=True
     )
+    assert build_command.run(args) == 0
+    assert "openpi-runner:1.4" in capsys.readouterr().out
+
+
+def test_build_will_not_fill_a_competitions_image_name_with_another_base(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """🔴 The name comes from the competition, the contents come from the only
+    context that ships here, and it installs π0.5. Building the two together
+    produces `lingbot-runner:1.2` with openpi inside -- after which `docker
+    images` lists it, `doctor` calls it ready and `train` runs it, with no step
+    anywhere able to tell the name and the contents apart.
+    """
+    monkeypatch.delenv("OPENPI_RUNNER_IMAGE", raising=False)
+    built: list[Any] = []
+    monkeypatch.setattr(
+        build_command.subprocess, "run", lambda *a, **k: built.append(a)
+    )
+    config = _competition_config(
+        tmp_path,
+        track="sim",
+        seq=2,
+        adapter="sim_lingbot",
+        params={"training": {"image": "lingbot-runner:1.2"}},
+    )
+    args = argparse.Namespace(
+        config=config, context="", image="", no_cache=False, dry_run=False
+    )
+
+    assert build_command.run(args) == 1
+    assert built == []
+    assert "no training image in this client" in capsys.readouterr().err
+
+
+def test_build_still_builds_an_image_definition_you_brought_yourself(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`--context` is an explicit act, which is the whole difference: the miner
+    chose the contents instead of defaulting into the only ones on hand."""
+    monkeypatch.delenv("OPENPI_RUNNER_IMAGE", raising=False)
+    config = _competition_config(
+        tmp_path,
+        track="sim",
+        seq=2,
+        adapter="sim_lingbot",
+        params={"training": {"image": "lingbot-runner:1.2"}},
+    )
+    args = argparse.Namespace(
+        config=config,
+        context=str(tmp_path / "my-lingbot-runner"),
+        image="",
+        no_cache=False,
+        dry_run=True,
+    )
+
     assert build_command.run(args) == 0
     assert "lingbot-runner:1.2" in capsys.readouterr().out
 
@@ -1044,11 +1099,19 @@ def test_a_config_from_before_competitions_builds_what_it_always_did(
     assert DEFAULT_IMAGE in capsys.readouterr().out
 
 
+@pytest.mark.parametrize("adapter", ["real_xarm6", "sim_lingbot"])
 def test_train_refuses_a_competition_whose_training_is_not_released(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, adapter: str
 ) -> None:
     """🔴 Not a no-op: an empty output directory is something `openroboto check`
-    would then deliver a verdict about."""
+    would then deliver a verdict about.
+
+    `sim_lingbot` is here because its dataset does exist and its image does not,
+    so the refusal cannot key off "is this competition released at all". The
+    failure it prevents is the quiet one: with an image built by an earlier
+    release sitting under this competition's name, `docker run` succeeds and
+    trains on π0.5.
+    """
     called: list[Any] = []
     monkeypatch.setattr(
         train_command, "train_round", lambda **kwargs: called.append(kwargs)
@@ -1059,7 +1122,7 @@ def test_train_refuses_a_competition_whose_training_is_not_released(
         lambda *a, **k: pytest.fail("train went to the network before refusing"),
     )
     config = _competition_config(
-        tmp_path, track="real", seq=1, adapter="real_xarm6", params={}
+        tmp_path, track="real", seq=1, adapter=adapter, params={}
     )
     args = argparse.Namespace(
         config=config, output_dir=str(tmp_path / "out"), strategy=""
@@ -1079,12 +1142,12 @@ def test_train_runs_the_same_image_build_built(
     config = _competition_config(
         tmp_path,
         track="sim",
-        seq=2,
-        adapter="sim_lingbot",
-        params={"training": {"image": "lingbot-runner:1.2"}},
+        seq=3,
+        adapter="sim_openpi",
+        params={"training": {"image": "openpi-runner:1.4"}},
     )
-    assert build_command.competition_image(config) == "lingbot-runner:1.2"
-    assert runner_image(build_command.competition_image(config)) == "lingbot-runner:1.2"
+    assert build_command.competition_image(config) == "openpi-runner:1.4"
+    assert runner_image(build_command.competition_image(config)) == "openpi-runner:1.4"
 
 
 # ─── round_state ─────────────────────────────────────────────
@@ -1396,6 +1459,68 @@ def test_doctor_balance_check_does_not_crash_on_an_unknown_rate(
     result = doctor_command.check_wallet(settings)
     assert result.ok is False
     assert "unknown" in result.detail.lower()
+
+
+def test_doctor_reports_on_the_image_train_would_actually_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """It used to look up the π0.5 default no matter what the competition named,
+    so the line said `robot-train-openpi:latest ready` about an image `train`
+    was never going to touch."""
+    monkeypatch.delenv("OPENPI_RUNNER_IMAGE", raising=False)
+    monkeypatch.setattr(doctor_command.shutil, "which", lambda name: "/usr/bin/docker")
+    monkeypatch.setattr(doctor_command, "_run", lambda command: "sha256:abc")
+    config = _competition_config(
+        tmp_path,
+        track="sim",
+        seq=3,
+        adapter="sim_openpi",
+        params={"training": {"image": "openpi-runner:1.4"}},
+    )
+
+    result = doctor_command.check_image(config)
+    assert result.ok
+    assert "openpi-runner:1.4" in result.detail
+
+
+def test_doctor_does_not_call_a_foreign_image_ready(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """🔴 The competition names the image, this client cannot build it, and yet
+    something with that name is on the machine -- an earlier release built it out
+    of the openpi context. "ready" is the one word that must not appear: it is
+    the last place the name and the contents can be told apart.
+    """
+    monkeypatch.delenv("OPENPI_RUNNER_IMAGE", raising=False)
+    monkeypatch.setattr(doctor_command.shutil, "which", lambda name: "/usr/bin/docker")
+    monkeypatch.setattr(doctor_command, "_run", lambda command: "sha256:abc")
+    config = _competition_config(
+        tmp_path,
+        track="sim",
+        seq=2,
+        adapter="sim_lingbot",
+        params={"training": {"image": "lingbot-runner:1.2"}},
+    )
+
+    result = doctor_command.check_image(config)
+    assert result.ok is False
+    assert "ready" not in result.detail
+    assert "lingbot-runner:1.2" in result.detail
+    # ...and it does not fail the whole run: `openroboto build` refuses this
+    # competition on purpose, so there is nothing here for the miner to fix.
+    assert result.required is False
+
+
+def test_doctor_without_a_config_checks_what_it_always_did(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("OPENPI_RUNNER_IMAGE", raising=False)
+    monkeypatch.setattr(doctor_command.shutil, "which", lambda name: "/usr/bin/docker")
+    monkeypatch.setattr(doctor_command, "_run", lambda command: "sha256:abc")
+
+    result = doctor_command.check_image()
+    assert result.ok
+    assert DEFAULT_IMAGE in result.detail
 
 
 def test_doctor_protocol_check_passes_on_the_pinned_version() -> None:

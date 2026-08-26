@@ -76,7 +76,7 @@ Real-machine setup, systemd, custom strategies: [docs/MINER_DEPLOY.md](docs/MINE
 |---|---|
 | `openroboto init [DIR] [-s simple\|example] [--validator]` | Create a working workspace: config, a training strategy to edit, a README with the exact next commands, and a `.gitignore` that keeps your wallet password out of git |
 | `openroboto doctor` | Environment check: Python, config, `control.json`, Docker, GPU, image, HF token, wallet balance |
-| `openroboto build` | Build the training image from the build context shipped inside the package (no clone, no network) |
+| `openroboto build` | Build the training image from the build context shipped inside the package (no clone, no network). Refuses for a competition this client has no image for, rather than filling that competition's image name with the π0.5 one |
 | `openroboto train [-s script.py]` | Run one round; your strategy script is mounted into the container |
 | `openroboto check [PATH]` | Verify checkpoint layout with the rules the evaluator uses — **no GPU, no network, no second repository** |
 | `openroboto upload / burn / announce` | The three submission steps, individually — for recovery, not routine use |
@@ -157,6 +157,13 @@ openroboto train     # starts it for you, data and strategy mounted in
 The training image definition ships **inside the package**. There is nothing to
 clone, nothing to keep in sync, and no network needed to build it. You do need
 Docker on the host.
+
+⚠️ There is exactly **one** image definition in the package and it installs
+openpi (π0.5). Competitions on another base model have no image here yet, and
+`build` / `train` say so and stop instead of running the π0.5 one under that
+competition's name — train those your own way, then come back for `openroboto
+check` and `openroboto submit`, which both work on a checkpoint this CLI did
+not produce.
 
 ### Running the CLI in a container too (optional, needs a clone)
 

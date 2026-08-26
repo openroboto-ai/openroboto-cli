@@ -34,7 +34,7 @@ def test_a_config_from_before_competitions_is_the_pi05_simulation() -> None:
     ("adapter", "profile", "training"),
     [
         ("sim_openpi", adapters.OPENPI, adapters.DOCKER),
-        ("sim_lingbot", adapters.LINGBOT, adapters.DOCKER),
+        ("sim_lingbot", adapters.LINGBOT, adapters.UNAVAILABLE),
         ("real_xarm6", adapters.LINGBOT, adapters.UNAVAILABLE),
     ],
 )
@@ -69,6 +69,22 @@ def test_every_row_of_the_table_is_a_known_path() -> None:
     for name, adapter in adapters.ADAPTERS.items():
         assert adapter.format_profile in (adapters.OPENPI, adapters.LINGBOT), name
         assert adapter.training in (adapters.DOCKER, adapters.UNAVAILABLE), name
+
+
+def test_no_adapter_claims_a_container_this_package_does_not_ship() -> None:
+    """🔴 `training=DOCKER` is a claim about `runner/`, and that directory holds
+    exactly one Dockerfile, which installs openpi -- `runner/train_runner.py`
+    imports `openpi.*` with nothing to fall back on. An adapter judged by another
+    rule book claiming DOCKER is that claim made falsely.
+
+    "docker will fail anyway" is not the backstop it sounds like: the image name
+    comes from `params.training.image`, so an image under that competition's name
+    may well already be on the machine with π0.5 inside it, and the run then
+    finishes with no error at all, on the wrong base model.
+    """
+    for name, adapter in adapters.ADAPTERS.items():
+        if adapter.training == adapters.DOCKER:
+            assert adapter.format_profile == adapters.OPENPI, name
 
 
 def test_an_adapter_cannot_be_edited_after_it_is_resolved() -> None:

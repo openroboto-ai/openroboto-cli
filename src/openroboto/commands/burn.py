@@ -5,6 +5,21 @@ This is the only command that **spends money and cannot be undone**, so the
 order is fixed: first refresh control.json to get this round's rate → then run
 the pre-chain self-check → and only then send the transaction. If the
 self-check does not pass, not a single cent is burned.
+
+## What the season gate is, and what it is not
+
+A workspace that mines a specific competition may only burn with a `Verdict` in
+hand -- the object `competition.precheck()` returns, which exists **only** if
+the backend was asked, in this run, which season this fee is for.
+
+🔴 It is not "is there an amount": `payment.burn_rate_tao` can be filled in by
+hand, and reading an amount out of the config satisfies "there is a number" while
+answering nothing about *which competition* is being paid. That gap was payable:
+a hand-filled rate skipped the season check, so no `competition_id` reached the
+checkpoint, so `announce` sent a payload with no `cid`, so the backend filed the
+submission under the archived π0.5 season -- the fee spent, the commitment on
+chain, the backend acknowledging it, all of it landing on the wrong competition
+without one error printed anywhere.
 """
 
 from __future__ import annotations
@@ -14,7 +29,7 @@ import logging
 from typing import Any
 
 from openroboto.chain import get_subtensor, open_wallet
-from openroboto.competition import load_snapshot
+from openroboto.competition import Verdict, load_snapshot
 from openroboto.config import Settings, refresh_burn_rate
 from openroboto.console import fail, say
 from openroboto.payment import execute_stake_burn
@@ -49,18 +64,28 @@ def run(args: argparse.Namespace) -> int:
     return 0
 
 
-def perform_burn(settings: Settings, round_num: int, state: dict[str, Any]) -> bool:
+def perform_burn(
+    settings: Settings,
+    round_num: int,
+    state: dict[str, Any],
+    verdict: Verdict | None = None,
+) -> bool:
     """Burn once and write the tx and block into the checkpoint. Returning
-    False means the self-check did not pass and nothing was spent."""
+    False means the self-check did not pass and nothing was spent.
+
+    `verdict` is this run's season check (`competition.precheck`). A workspace
+    with a competition section **must** supply one; see the module docstring for
+    what the fee bought when it did not.
+    """
     settings.require_for_chain()
     if load_snapshot(settings) is None:
         refresh_burn_rate(settings, logger)
-    elif settings.burn_rate_tao is None:
-        # With a competition section, the rate comes from that season's own
-        # `params.fee`, established by the pre-payment check in `submit`.
-        # control.json's rate is subnet-wide and is not a substitute: two
-        # sources for one number, with no rule for which wins when they differ.
-        # Reaching here means nothing checked it, so nothing is burned.
+    elif verdict is None:
+        # With a competition section, the amount *and the season it pays for*
+        # both come from the row the backend served a moment ago. control.json's
+        # rate is subnet-wide and `payment.burn_rate_tao` is whatever was typed
+        # into miner.yaml; neither says which competition. Reaching here means
+        # nothing checked, so nothing is burned.
         fail(
             "This workspace mines a specific competition, and that competition's"
             " fee is confirmed against the backend in the moment before it is"
@@ -68,9 +93,17 @@ def perform_burn(settings: Settings, round_num: int, state: dict[str, Any]) -> b
             "   → run `openroboto submit`; it uploads, confirms the competition"
             " and pays in one go\n"
             "   → `openroboto burn` on its own is for configs from before there"
-            " was more than one competition"
+            " was more than one competition\n"
+            "   Setting `payment.burn_rate_tao` by hand does not stand in for the"
+            " check: it supplies an amount, not a season. Paid that way the"
+            " submission carries no competition id and the backend files it under"
+            " whichever season it defaults to -- with the TAO already gone."
         )
         return False
+    else:
+        # The fee comes from the row that was just checked, and from nowhere
+        # else -- not control.json (subnet-wide), not miner.yaml (typed by hand).
+        settings.burn_rate_tao = verdict.amount_tao
 
     # If the rate could not be parsed, **stop right here**; do not guess. The
     # old code defaulted to 0.01 while production was 0.1: when the

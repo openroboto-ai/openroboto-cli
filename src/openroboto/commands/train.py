@@ -78,8 +78,14 @@ def run(args: argparse.Namespace) -> int:
         # check` would deliver a verdict about it -- a verdict about nothing.
         fail(
             f"Training support for this competition (adapter "
-            f"`{settings.competition_adapter}`) has not been released yet: "
-            f"neither its dataset nor its training image exists to install.\n"
+            f"`{settings.competition_adapter}`) has not been released yet: the "
+            f"one training image that ships with this client installs openpi "
+            f"(π0.5), which is not the base model this competition is judged "
+            f"on.\n"
+            f"   🔴 It will not quietly run that image instead. An image named "
+            f"after this competition may already be on this machine -- built by "
+            f"an older release out of the openpi context -- and training in it "
+            f"would finish with no error at all, on the wrong base model.\n"
             f"   → train it however you like, then `openroboto check` and "
             f"`openroboto submit` -- both work on a checkpoint this CLI did not "
             f"produce\n"

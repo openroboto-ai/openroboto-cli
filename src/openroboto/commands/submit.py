@@ -113,10 +113,6 @@ def run(args: argparse.Namespace) -> int:
                     f"   → pip install -U openroboto"
                 )
                 return 1
-            # The fee comes from the row that was just checked, and from
-            # nowhere else -- see `competition` for why control.json's
-            # subnet-wide rate is not a substitute.
-            settings.burn_rate_tao = verdict.amount_tao
             # The season id goes into the checkpoint, not straight into the
             # announcement, for the same reason `burn_tx_hash` does: the two
             # steps can be minutes and a crash apart, and a bare `openroboto
@@ -127,7 +123,10 @@ def run(args: argparse.Namespace) -> int:
             # moment ago -- never a number copied out of miner.yaml.
             state["competition_id"] = verdict.cid
             save_state(round_num, state)
-            if not perform_burn(settings, round_num, state):
+            # The verdict travels with the payment rather than being re-derived
+            # from `settings`: it is the proof that the season was confirmed **in
+            # this run**, and it carries the fee that was confirmed with it.
+            if not perform_burn(settings, round_num, state, verdict=verdict):
                 return 1
 
     if not perform_announce(settings, round_num, state):

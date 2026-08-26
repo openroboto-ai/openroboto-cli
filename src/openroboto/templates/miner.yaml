@@ -93,6 +93,12 @@ log_dir: logs
 # payment block. Do not set it here unless you are testing offline — a burn that
 # does not match the round's rate is rejected, and rejected burns are not refunded.
 #
+# ⚠️ On a workspace that mines a competition (the `competition:` section above)
+# burn_rate_tao is not read at all, and setting it does not let you skip
+# anything: that fee comes from the season and is confirmed against the backend
+# in the moment before it is paid. A number typed here says how much, never
+# which competition — so `openroboto burn` refuses instead of paying it.
+#
 # Typical flow:
 #   openroboto doctor      # check GPU / Docker / config before spending anything
 #   openroboto build       # build the openpi-runner image
