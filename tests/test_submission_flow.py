@@ -9,6 +9,7 @@ Chain and HF are entirely faked, so these tests need no network, wallet or GPU.
 from __future__ import annotations
 
 import argparse
+import io
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -17,13 +18,23 @@ from typing import Any
 import pytest
 from openroboto_protocol.commitment import CommitmentPayload, decode, encode
 
+from openroboto import competition as competition_module
 from openroboto.chain.commitment import SubmitResult
+from openroboto.cli import main
 from openroboto.commands import announce as announce_command
 from openroboto.commands import burn as burn_command
 from openroboto.commands import submit as submit_command
+from openroboto.commands import upload as upload_module
 from openroboto.config import Settings
+from openroboto.huggingface import UploadResult
+from openroboto.huggingface import tree as tree_module
 from openroboto.preflight import check_announce_ready, payload_size, payload_track
-from openroboto.round_state import competition_id, load_state, save_state
+from openroboto.round_state import (
+    announced_commit,
+    competition_id,
+    load_state,
+    save_state,
+)
 
 HOTKEY = "5" + "M" * 47
 COMMIT = "a" * 40
@@ -568,15 +579,41 @@ def _verdict(amount_tao: float = 0.25, cid: int = 2, kind: str = "burn") -> Any:
     )
 
 
+#: A LingBot repository the rules accept: two shards at the top, the config the
+#: layout names, the index that lists them. Written as a HuggingFace listing
+#: (`type` / `path` / `size`) rather than as files on disk, because the listing
+#: is what the gate judges and what the backend judges.
+GOOD_TREE: list[dict[str, Any]] = [
+    {"type": "file", "path": ".gitattributes", "size": 1797},
+    {"type": "directory", "path": "unused"},
+    {"type": "file", "path": "config.json", "size": 31},
+    {"type": "file", "path": "model.safetensors.index.json", "size": 92_000},
+    {"type": "file", "path": "model-00001-of-00002.safetensors", "size": 6_000_000_000},
+    {"type": "file", "path": "model-00002-of-00002.safetensors", "size": 5_000_000_000},
+]
+
+
 def _submitting(
-    monkeypatch: pytest.MonkeyPatch, settings: Settings
+    monkeypatch: pytest.MonkeyPatch,
+    settings: Settings,
+    tree: list[dict[str, Any]] | None = None,
 ) -> tuple[list[Any], list[Any]]:
-    """Wire `submit` up to fakes and return (precheck calls, payment calls)."""
+    """Wire `submit` up to fakes and return (precheck calls, payment calls).
+
+    `tree` is the HuggingFace listing the layout gate judges; it defaults to a
+    repository that passes, because these cases are about the *season* gate. The
+    layout gate has its own section further down.
+    """
     monkeypatch.setattr(
         submit_command.Settings, "load", staticmethod(lambda path: settings)
     )
     monkeypatch.setattr(submit_command, "perform_upload", lambda *a, **k: None)
     monkeypatch.setattr(submit_command, "perform_announce", lambda *a, **k: True)
+    monkeypatch.setattr(
+        submit_command,
+        "fetch_tree",
+        lambda repo, revision, token="": GOOD_TREE if tree is None else tree,
+    )
 
     checked: list[Any] = []
     paid: list[Any] = []
@@ -605,6 +642,8 @@ def _submitting(
 def test_submit_checks_the_competition_even_when_check_was_skipped(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    """Also the "the gate is not welded shut" case: a repository the rules
+    accept goes all the way through and pays."""
     monkeypatch.chdir(tmp_path)
     save_state(4, _uploaded_state())
     checked, paid = _submitting(monkeypatch, _season_settings())
@@ -786,6 +825,376 @@ def test_a_rate_typed_into_miner_yaml_does_not_buy_a_place_in_a_season(
     # Nothing about a season reached the checkpoint, so `announce` would have put
     # a payload with no `cid` on chain -- the wrong-season filing, in one read.
     assert competition_id(load_state(11)) is None
+
+
+# ─── the layout gate before the money ────────────────────────
+#
+# `openroboto check` is a command a miner may never type, and until this gate
+# existed that was the only place the layout rules ran before the fee. Everyone
+# else met them in the backend's admission, which runs *after* the payment and
+# ends in `HF_STRUCTURE_INVALID` -- `rejected`, final, not refunded, and the
+# model may well have been fine.
+#
+# Every case below asserts on **call counts** of the payment and of the season
+# check, because that is the only assertion that separates "refused" from
+# "refused after paying".
+
+
+def _refused(
+    monkeypatch: pytest.MonkeyPatch, round_num: int, tree: Any, force: bool = False
+) -> tuple[list[Any], list[Any], int]:
+    """Run `submit` over `tree` and return (season checks, payments, exit code).
+
+    `tree` may be a listing or an exception to raise instead of returning one.
+    """
+    state = _uploaded_state()
+    if force:
+        state["burn_tx_hash"] = "0x" + "d" * 64
+    save_state(round_num, state)
+    checked, paid = _submitting(monkeypatch, _season_settings())
+    if isinstance(tree, Exception):
+        monkeypatch.setattr(
+            submit_command,
+            "fetch_tree",
+            lambda *a, **k: _raise(tree),
+        )
+    else:
+        monkeypatch.setattr(submit_command, "fetch_tree", lambda *a, **k: tree)
+    monkeypatch.setattr(
+        submit_command,
+        "perform_announce",
+        lambda *a, **k: pytest.fail("announced a submission that was never paid for"),
+    )
+
+    args = argparse.Namespace(
+        config="miner.yaml", round=round_num, output_dir="", force=force
+    )
+    return checked, paid, submit_command.run(args)
+
+
+def _raise(exc: Exception) -> Any:
+    raise exc
+
+
+def test_a_repository_the_rules_refuse_is_never_paid_for(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The original sin, one layer earlier: a bare LoRA adapter.
+
+    The evaluator merges nothing and there is no `openroboto merge`, so this is
+    unscoreable and admission says so -- after the fee. Here it costs a command.
+    """
+    monkeypatch.chdir(tmp_path)
+    checked, paid, code = _refused(
+        monkeypatch,
+        20,
+        [
+            {"type": "file", "path": "config.json", "size": 31},
+            {"type": "file", "path": "adapter_config.json", "size": 500},
+            {
+                "type": "file",
+                "path": "adapter_model.safetensors",
+                "size": 400_000_000,
+            },
+        ],
+    )
+
+    assert code == 1
+    assert paid == []
+    # the season was never even asked about: refusing costs no backend call
+    assert checked == []
+    printed = capsys.readouterr()
+    assert "nothing was paid" in printed.err
+    assert "bare_lora_adapter" in printed.out
+
+
+def test_the_gate_judges_the_repository_not_this_round_s_directory(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """🔴 The reason this reads the HuggingFace listing rather than the local
+    checkpoint directory.
+
+    `build_repo_id` is `{user}/pi05-{last 12 of the hotkey}` -- **one repository
+    for the miner's whole career** -- and `upload_folder` never deletes. So the
+    repository this fee buys a verdict on is round 7 laid on top of rounds 1 to
+    6, and a `.cache/` left behind by an earlier push is `LEFTOVER_UPLOAD_STATE`
+    to admission: a terminal rejection, with the fee gone.
+
+    Everything below `.cache/` is invisible to anything that walks *this
+    round's* output directory, which is exactly what makes a local-only check a
+    guess at the verdict rather than the verdict.
+    """
+    monkeypatch.chdir(tmp_path)
+    checked, paid, code = _refused(
+        monkeypatch,
+        21,
+        [*GOOD_TREE, {"type": "file", "path": ".cache/huggingface/x", "size": 12}],
+    )
+
+    assert code == 1
+    assert paid == []
+    assert checked == []
+    assert "leftover_upload_state" in capsys.readouterr().out
+
+
+def test_a_nested_checkpoint_stops_the_run_and_names_the_directory(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The expensive half: admission **accepts** this and the evaluator then
+    finds nothing, so the fee and the queue slot are spent for no score.
+
+    The vendor's own post-trained artifact is laid out this way, so uploading
+    the training output unchanged is the normal way to arrive here -- which is
+    why the refusal has to name the directory rather than say "invalid layout".
+    """
+    monkeypatch.chdir(tmp_path)
+    deep = "checkpoints/global_step_50000/hf_ckpt"
+    checked, paid, code = _refused(
+        monkeypatch,
+        22,
+        [
+            {"type": "file", "path": f"{deep}/{entry['path']}", **_size(entry)}
+            for entry in GOOD_TREE
+            if entry["type"] == "file"
+        ],
+    )
+
+    assert code == 1
+    assert paid == []
+    assert checked == []
+    printed = capsys.readouterr()
+    assert "nested_too_deep" in printed.out
+    assert deep in printed.out  # copyable, not "your structure is invalid"
+    # and it says why a green admission verdict is still a stop
+    assert "the evaluator cannot load it" in printed.out
+
+
+def test_a_listing_hf_would_not_serve_is_not_paid_through(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """🔴 "We could not check" is not "your model is fine".
+
+    AGENTS.md §4 (infrastructure trouble is not the user's fault) governs what
+    this *says*; it does not buy a way past the fee. Paying on an answer we
+    never got is today's behaviour with an apology attached, and today's
+    behaviour lands on a terminal rejection after the money is gone.
+
+    Stopping consumes nothing -- the upload stays in the checkpoint and is
+    reused -- so the cost of being wrong here is one command, against a
+    non-refundable fee for being wrong the other way. It is also the answer the
+    season gate one step later already gives when the backend is unreachable.
+    """
+    monkeypatch.chdir(tmp_path)
+    checked, paid, code = _refused(
+        monkeypatch, 23, submit_command.TreeError("HuggingFace returned HTTP 503")
+    )
+
+    assert code == 1
+    assert paid == []
+    assert checked == []
+    printed = capsys.readouterr()
+    assert "nothing was paid" in printed.err
+    # named as infrastructure, not as a verdict on the model
+    assert "not a verdict on your model" in printed.err
+    assert "HTTP 503" in printed.err
+    # no rule ever ran, so no issue code may be printed as though one had
+    assert "missing_weights" not in printed.out
+
+
+def test_force_does_not_skip_the_layout_gate(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """`--force` means "burn again", not "burn without looking" -- and there is
+    no flag that means the second thing."""
+    monkeypatch.chdir(tmp_path)
+    _, paid, code = _refused(monkeypatch, 24, [], force=True)
+
+    assert code == 1
+    assert paid == []
+
+
+def test_the_gate_judges_the_revision_that_goes_on_chain(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A gate that judged some other revision would be theatre.
+
+    The checkpoint here holds a stale `hf_commit` alongside a URL carrying the
+    real one, which is the state `push_model` leaves when the commit came back
+    in the URL. `announce` pins the URL's commit, so this must judge that one.
+    """
+    monkeypatch.chdir(tmp_path)
+    state = _uploaded_state()
+    state["hf_url"] = f"https://huggingface.co/kyleab/pi05-abcdefghijkl/commit/{COMMIT}"
+    state["hf_commit"] = "9" * 40  # stale, and not what announce would send
+    save_state(25, state)
+    _submitting(monkeypatch, _season_settings())
+
+    asked: list[tuple[str, str]] = []
+
+    def _tree(repo: str, revision: str, token: str = "") -> Any:
+        asked.append((repo, revision))
+        return GOOD_TREE
+
+    monkeypatch.setattr(submit_command, "fetch_tree", _tree)
+
+    args = argparse.Namespace(config="miner.yaml", round=25, output_dir="", force=False)
+    assert submit_command.run(args) == 0
+    assert asked == [("kyleab/pi05-abcdefghijkl", COMMIT)]
+    assert announced_commit(load_state(25)) == COMMIT
+
+
+def test_a_round_that_already_paid_is_not_stopped_by_the_gate(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """🔴 After the fee, refusing costs more than allowing.
+
+    The money is gone and the only thing that can still make it count is the
+    commitment; a gate that fired here would turn "rejected for its layout" into
+    "paid and not even submitted". The gate belongs strictly before the payment,
+    and `--force`, which clears the burn, puts the round back in front of it.
+    """
+    monkeypatch.chdir(tmp_path)
+    state = _uploaded_state()
+    state["burn_tx_hash"] = "0x" + "d" * 64
+    state["burn_block"] = 8_888_880
+    save_state(26, state)
+    _submitting(monkeypatch, _season_settings())
+    monkeypatch.setattr(
+        submit_command,
+        "fetch_tree",
+        lambda *a, **k: pytest.fail("judged a layout whose fee is already spent"),
+    )
+
+    args = argparse.Namespace(config="miner.yaml", round=26, output_dir="", force=False)
+    assert submit_command.run(args) == 0
+
+
+def _size(entry: dict[str, Any]) -> dict[str, Any]:
+    return {"size": entry["size"]}
+
+
+# ─── end to end: an unfit workspace, and the money still there ───
+
+
+def test_an_unfit_workspace_costs_nothing_end_to_end(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """🔴 The whole command, from `openroboto submit` to the exit code.
+
+    Nothing about the gate is stubbed: a real `miner.yaml`, a real workspace, a
+    real `fetch_tree` talking to a fake `urlopen`. What is replaced is only what
+    would leave the machine or spend money -- and every one of those is replaced
+    with a call that fails the test, because "did not pay" is the assertion.
+
+    Reading the code is not enough for this one: the gate sits behind an upload,
+    a season lookup and two commands' worth of dispatch, and each of those has
+    been the thing that quietly skipped a check before.
+    """
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "miner.yaml").write_text(
+        json.dumps(
+            {
+                "subnet": {"netuid": 80, "network": "finney", "hotkey_ss58": HOTKEY},
+                "huggingface": {"username": "kyleab", "token": "hf_not_a_real_token"},
+                "competition": {
+                    "id": 2,
+                    "track": "sim",
+                    "seq": 2,
+                    "label": "LingBot-VLA 2.0",
+                    "adapter": "sim_lingbot",
+                    "params": {
+                        "fee": {"kind": "burn", "amount_tao": 0.25, "coldkey": None}
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    checkpoint = tmp_path / "checkpoint"
+    checkpoint.mkdir()
+    (checkpoint / "adapter_model.safetensors").write_bytes(b"\0" * 32)
+
+    # Everything that costs money or leaves the machine. Each one fails the test
+    # rather than returning a plausible value: a fake that quietly succeeds
+    # cannot tell "was not called" from "was called and worked".
+    monkeypatch.setattr(
+        upload_module,
+        "push_model",
+        lambda **kwargs: UploadResult(
+            f"https://huggingface.co/kyleab/pi05-{HOTKEY[-12:]}/commit/{COMMIT}",
+            COMMIT,
+        ),
+    )
+    for module, name in (
+        (competition_module, "fetch_competitions"),
+        (burn_command, "get_subtensor"),
+        (burn_command, "open_wallet"),
+        (burn_command, "execute_stake_burn"),
+        (announce_command, "get_subtensor"),
+        (announce_command, "open_wallet"),
+        (announce_command, "submit_announcement"),
+    ):
+        monkeypatch.setattr(
+            module,
+            name,
+            _forbid(f"{module.__name__}.{name}"),
+        )
+
+    served: list[str] = []
+
+    def _urlopen(request: Any, timeout: float) -> Any:
+        served.append(request.full_url)
+        return _FakeResponse(
+            json.dumps(
+                [
+                    {"type": "file", "path": "adapter_model.safetensors", "size": 32},
+                    {"type": "file", "path": "adapter_config.json", "size": 12},
+                ]
+            ).encode()
+        )
+
+    monkeypatch.setattr(tree_module, "urlopen", _urlopen)
+
+    exit_code = main(
+        [
+            "submit",
+            "--round",
+            "3",
+            "--config",
+            "miner.yaml",
+            "--output-dir",
+            "checkpoint",
+        ]
+    )
+
+    assert exit_code != 0
+    # the listing really was fetched, at the commit that would have gone on chain
+    assert served == [
+        f"https://huggingface.co/api/models/kyleab/pi05-{HOTKEY[-12:]}"
+        f"/tree/{COMMIT}?recursive=true"
+    ]
+    # nothing on chain, nothing paid, and the checkpoint records no payment
+    state = load_state(3)
+    assert "burn_tx_hash" not in state
+    assert state.get("step") == "upload"
+    printed = capsys.readouterr()
+    assert "nothing was paid and nothing was sent on chain" in printed.err
+    assert "bare_lora_adapter" in printed.out
+
+
+def _forbid(what: str) -> Any:
+    def _boom(*args: Any, **kwargs: Any) -> Any:
+        pytest.fail(f"{what} was called; the layout was refused before the fee")
+
+    return _boom
+
+
+class _FakeResponse(io.BytesIO):
+    def __enter__(self) -> _FakeResponse:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.close()
 
 
 # ─── the two keys 0.7.0 adds: cid and m ──────────────────────

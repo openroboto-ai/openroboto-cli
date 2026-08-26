@@ -41,11 +41,20 @@
 ```
 
 **Two-stage workflow**: `openroboto train` does prep + training. After it
-completes, `openroboto submit` does upload → burn → announce.
+completes, `openroboto submit` does upload → check the layout → burn → announce.
 
 Run `openroboto doctor` before the first round and `openroboto check` before
 paying — both exist so that "burned TAO, then found out the model was wrong"
 stops happening.
+
+`openroboto submit` judges the layout itself as well, between the upload and the
+payment, so skipping `openroboto check` no longer means skipping the rules. It
+reads the file listing of your HuggingFace repository — the same listing the
+subnet reads after the fee — and stops without paying if that listing would not
+earn a score. There is no flag to switch it off: past that point a rejection is
+final and the TAO is not refunded. Running `openroboto check` first is still
+worth it, because it is free, it runs *before* the multi-gigabyte upload, and it
+checks two rules that need the weight index file on your disk.
 
 **Backend auto-scans chain**: Backend runs `ChainScanner` + `ScannerLoop` (polls every 60s), discovers miner submissions, verifies burns, computes seeds, and queues for evaluation.
 

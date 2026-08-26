@@ -22,9 +22,9 @@ from openroboto.chain import (
 )
 from openroboto.config import ConfigError, Settings
 from openroboto.console import fail, say
-from openroboto.huggingface import commit_sha_from_url
 from openroboto.preflight import check_burn_window, payload_track
 from openroboto.round_state import (
+    announced_commit,
     competition_id,
     load_state,
     model_hash,
@@ -64,13 +64,10 @@ def perform_announce(settings: Settings, round_num: int, state: dict[str, Any]) 
             "No HF repo info in the checkpoint -- run `openroboto upload` first"
         )
 
-    # Take the commit SHA from the URL (what the upload returns is this very
-    # commit); when the URL carries no commit segment, fall back to the one
-    # stored in the checkpoint from `repo_info().sha`. The old code only knew
-    # about the URL and wrote `c` as an empty string when it could not get one
-    # -- without a commit the backend cannot verify the model, which amounts to
-    # burning TAO and handing in a worthless submission.
-    hf_commit = commit_sha_from_url(hf_url) or str(state.get("hf_commit", ""))
+    # The same revision the layout gate in `submit` judged before the fee was
+    # paid -- see `round_state.announced_commit` for why one function answers
+    # this for both.
+    hf_commit = announced_commit(state)
 
     subtensor = get_subtensor(settings.network)
     try:

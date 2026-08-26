@@ -38,7 +38,7 @@ from __future__ import annotations
 
 import argparse
 import json
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any
@@ -214,19 +214,56 @@ def collect_files(directory: Path) -> list[CheckpointFile]:
     ]
 
 
-def check_directory(directory: Path, *, layout: Any = None) -> FormatReport:
-    """Hand the file list to the rule book this competition uses.
+def tree_files(entries: Iterable[Mapping[str, Any]]) -> list[CheckpointFile]:
+    """The same inventory, taken from a HuggingFace repository listing.
+
+    Deliberately the same shape as the backend's `judge_lingbot_tree` reads it
+    -- `path` + `size`, directory entries dropped. What the fee buys is a
+    verdict on *the repository*, so the gate in `submit` judges the repository,
+    and it has to see exactly the byte counts and paths admission will see.
+
+    Directories are entries of their own in this listing (they are not in
+    `collect_files`, which walks a filesystem); letting one through would add a
+    zero-byte path that no rule expects.
+    """
+    return [
+        CheckpointFile(
+            path=str(entry.get("path", "")),
+            size_bytes=int(entry.get("size", 0) or 0),
+        )
+        for entry in entries
+        if entry.get("type", "file") not in ("directory", "folder")
+    ]
+
+
+def check_files(
+    files: list[CheckpointFile],
+    *,
+    layout: Any = None,
+    weight_map: Mapping[str, str] | None = None,
+) -> FormatReport:
+    """Hand a file inventory to the rule book this competition uses.
 
     Not one format rule lives in this repository: two copies of the admission
-    contract drift, and the miner is the one who pays for the difference.
+    contract drift, and the miner is the one who pays for the difference. Which
+    *inventory* is judged is the caller's business -- a local directory before
+    the upload, the repository listing before the fee.
     """
-    files = collect_files(directory)
     if layout is None:
         return check_checkpoint_layout(files)
     report: FormatReport = protocol_rule("check_lingbot_layout")(
-        files, layout, weight_map=read_weight_map(directory, layout)
+        files, layout, weight_map=weight_map
     )
     return report
+
+
+def check_directory(directory: Path, *, layout: Any = None) -> FormatReport:
+    """`check_files` over a local checkpoint directory."""
+    return check_files(
+        collect_files(directory),
+        layout=layout,
+        weight_map=None if layout is None else read_weight_map(directory, layout),
+    )
 
 
 def read_weight_map(directory: Path, layout: Any) -> Mapping[str, str] | None:
@@ -279,12 +316,12 @@ def _depth(path: Path) -> int:
     return len(path.parts)
 
 
-def weights_subdir(directory: Path) -> str | None:
-    """Where the weights actually sit, relative to `directory`.
+def weights_subdir_of(paths: Iterable[str]) -> str | None:
+    """Where the weights sit inside a checkpoint, given its relative paths.
 
     Three answers, and the miner needs all three kept apart:
     `""` they are already at the top, `"a/b"` they are in that subdirectory,
-    `None` there are no weight files anywhere under `directory` at all.
+    `None` there are no weight files anywhere in the list at all.
 
     The last one used to be `""` as well, which was harmless while the only
     caller was the nesting advice below. It is not harmless for `openroboto
@@ -294,21 +331,33 @@ def weights_subdir(directory: Path) -> str | None:
 
     The shallowest hit wins, matching the evaluator: it takes the first
     checkpoint it finds while descending.
+
+    It takes paths rather than a directory because the same question is asked
+    about a repository that is already on HuggingFace (the gate in `submit`),
+    where there is no directory to walk. One implementation, because the two
+    answers are shown to the same miner minutes apart and a disagreement between
+    them reads as the tool contradicting itself.
     """
-    roots = [
-        path.parent
-        for path in directory.rglob("*")
-        if path.is_file() and path.name.endswith((".safetensors", ".bin"))
-    ]
-    roots += [
-        path.parent
-        for path in directory.rglob(LIBERO_LAYOUT.jax_params_dir)
-        if path.is_dir()
-    ]
+    roots: list[tuple[str, ...]] = []
+    for path in paths:
+        parts = tuple(path.split("/"))
+        if parts[-1].endswith((".safetensors", ".bin")):
+            roots.append(parts[:-1])
+        if LIBERO_LAYOUT.jax_params_dir in parts[:-1]:
+            roots.append(parts[: parts.index(LIBERO_LAYOUT.jax_params_dir)])
     if not roots:
         return None
-    closest = min(roots, key=lambda path: len(path.relative_to(directory).parts))
-    return closest.relative_to(directory).as_posix().removeprefix(".")
+    roots.sort(key=len)
+    return "/".join(roots[0])
+
+
+def weights_subdir(directory: Path) -> str | None:
+    """`weights_subdir_of` over a local checkpoint directory."""
+    return weights_subdir_of(
+        path.relative_to(directory).as_posix()
+        for path in directory.rglob("*")
+        if path.is_file()
+    )
 
 
 def nesting_advice(directory: Path) -> list[str]:
@@ -336,14 +385,21 @@ def nesting_advice(directory: Path) -> list[str]:
     ]
 
 
+def rules_label(layout: Any) -> str:
+    """Which rule book judged this, in words.
+
+    Part of the verdict, not decoration: the failure this line exists to make
+    visible is a LingBot checkpoint being told it has "no model weights" by the
+    π0.5 rules, which looks like a broken upload and is really a misrouted
+    check. The gate inside `submit` prints the same words for the same reason.
+    """
+    return "π0.5 (openpi)" if layout is None else "LingBot-VLA 2.0"
+
+
 def report_result(directory: Path, report: FormatReport, *, layout: Any = None) -> int:
     """Print the verdict. Returns the exit code: 0 = fine to submit."""
     say(f"checkpoint: {directory}")
-    # Which rule book judged this is part of the verdict, not decoration: the
-    # failure this line exists to make visible is a LingBot checkpoint being told
-    # it has "no model weights" by the π0.5 rules, which looks like a broken
-    # upload and is really a misrouted check.
-    say(f"rules: {'π0.5 (openpi)' if layout is None else 'LingBot-VLA 2.0'}")
+    say(f"rules: {rules_label(layout)}")
     say(f"weights: {report.kind.value if report.kind else 'unrecognized'}")
     say(f"counted size: {report.counted_size_bytes / 1024 / 1024:.1f} MB")
 

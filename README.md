@@ -92,6 +92,16 @@ inside the training container. The bundled strategies leave that step blank on
 purpose and say so; `openroboto train` tells you what the run actually produced, and
 `openroboto check` gives the verdict **before you pay**.
 
+⚠️ **`openroboto submit` checks the layout too, and it is not optional.** Between
+the upload and the payment it reads the file listing of your HuggingFace
+repository — the same listing the subnet reads *after* the fee — and stops
+without paying anything if that listing would not earn a score. There is no flag
+to skip it, because past that point a rejection is final and the TAO is not
+refunded. If the listing cannot be fetched at all, it also stops: an answer we
+could not get is not one this will spend your money on. Run `openroboto check`
+first anyway — it is free, it runs before the multi-gigabyte upload, and it
+checks two more rules that need the weight index on your disk.
+
 ## Things that will cost you TAO if you skip them
 
 The fee is published live in `control.json`; on mainnet today it is 0.1 TAO. Never

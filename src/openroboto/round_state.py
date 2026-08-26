@@ -21,6 +21,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from openroboto.huggingface.upload import commit_sha_from_url
+
 STATE_DIR = Path("state")
 """Checkpoint directory, relative to the current working directory."""
 
@@ -73,6 +75,27 @@ def competition_id(state: dict[str, Any]) -> int | None:
     """
     value = state.get("competition_id")
     return int(value) if value else None
+
+
+def announced_commit(state: dict[str, Any]) -> str:
+    """The HF commit this round pins on chain -- `""` if there is none.
+
+    The URL wins because what the upload returns *is* that commit; the
+    `hf_commit` key is the fall back for a URL with no commit segment, which is
+    what `repo_info().sha` leaves behind. The old code knew only about the URL
+    and wrote `c` as an empty string when it could not get one -- and without a
+    commit the backend cannot verify the model, which is a fee paid for a
+    submission nobody can score.
+
+    It lives here, next to the other checkpoint readers, because **two** steps
+    need the same answer: `announce` puts it on chain, and the layout gate in
+    `submit` judges the repository *at that revision* before the fee is paid. A
+    gate that judged some other revision would be theatre, and two copies of a
+    one-line expression is exactly how that happens.
+    """
+    return commit_sha_from_url(str(state.get("hf_url", ""))) or str(
+        state.get("hf_commit", "")
+    )
 
 
 def model_hash(state: dict[str, Any]) -> str | None:
