@@ -263,6 +263,37 @@ def resolve_weights(
     return snapshot_download(repo_id=repo_id, revision=revision or None)
 
 
+
+def _yaml_number(value):
+    """`"1e-4"` -> `0.0001`. Everything else is returned untouched.
+
+    🔴 `yaml.safe_load` follows the **YAML 1.1** resolver, whose float pattern
+    requires a dot or a sign in the exponent, so a bare `1e-4` comes back as a
+    `str`. The vendor's `robotwin.yaml` writes three of its coefficients that
+    way (`router_z_loss_coeff: 1e-4`, `sequence_wise_loss_coeff: 1e-3`,
+    `lr: 1.0e-4` -- only the last one survives), and this runner reads that file
+    as *data* rather than through their argument parser, which is what would
+    otherwise have cast them.
+
+    Left uncast, the string travels onto the model config and the first
+    training step dies inside the vendor's own MoE loss with
+
+        TypeError: '>' not supported between instances of 'str' and 'int'
+
+    (`modeling_lingbot_vla_v2.py:1077`, `router_z_loss_coeff > 0`). Measured on
+    an A100, 2026-08-26. `miner.yaml`'s own `learning_rate` comment warns about
+    exactly this trap; the recipe file needed the same treatment.
+    """
+    if not isinstance(value, str):
+        return value
+    for cast in (int, float):
+        try:
+            return cast(value)
+        except ValueError:
+            continue
+    return value
+
+
 # ─── Building the policy ──────────────────────────────────
 
 
@@ -546,7 +577,11 @@ def build_policy(cfg: dict, init_device: str = "cuda"):
     overlaid = {}
     for section in ("model", "train"):
         overlaid.update(
-            {k: v for k, v in recipe.get(section, {}).items() if k in understood}
+            {
+                k: _yaml_number(v)
+                for k, v in recipe.get(section, {}).items()
+                if k in understood
+            }
         )
     if not overlaid:
         raise RuntimeError(

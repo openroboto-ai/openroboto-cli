@@ -33,16 +33,38 @@ WORKDIR /app
 # `git` is not optional here (it is in the openpi image): the LingBot training
 # code is not on PyPI, it is a repository that gets cloned below.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3.11 python3.11-dev python3.11-venv \
     git curl ca-certificates \
     build-essential pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 ENV PATH="/root/.local/bin:$PATH"
-ENV UV_SYSTEM_PYTHON=1
 
-RUN uv venv --python python3.11 /opt/venv
+# ─── The interpreter, downloaded rather than apt-installed ──
+# 🔴 `apt-get install python3.11` on ubuntu 22.04 gives **3.11.0~rc1**, a
+# release candidate — that is the only python3.11 in that distribution's
+# archive, and `python -VV` inside the image said
+# `Python 3.11.0rc1 (main, Jun 29 2026) [GCC 11.4.0]`.
+#
+# It is not a cosmetic version difference. manylinux `cp311` wheels are built
+# against the *final* 3.11 C ABI, and Triton's compiler frontend is such an
+# extension. Measured on an A100-SXM4-80GB, 2026-08-26, on the rc1 image: any
+# kernel whose body contains a nested `@triton.jit` call, a `tl.cumsum`, or a
+# `tl.histogram` over a full block **segfaults the process** inside
+# `ast_to_ttir` — while a plain load/multiply/store kernel compiles and runs.
+# Same crash on triton 3.3.1, 3.4.0 and 3.5.0, and an unlimited stack rlimit
+# does not change it, so it is the interpreter and not the pin.
+#
+# That is not a corner: LingBot's fused MoE is built out of exactly those
+# kernels (`lingbotvla/ops/group_gemm/`), so on the rc1 image the **first
+# training step dies with SIGSEGV and no traceback**, hours after the weights
+# were loaded.
+#
+# ⚠️ Do not put the apt packages back "to have a system python". A
+# release-candidate interpreter on `PATH` is the trap; there is nothing in this
+# image that needs one.
+RUN uv python install 3.11
+RUN uv venv --python-preference only-managed --python 3.11 /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 ENV PYTHONDONTWRITEBYTECODE=1
 
