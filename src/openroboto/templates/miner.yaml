@@ -1,8 +1,9 @@
 # OpenRoboto — miner configuration
 #
-# Written by `openroboto init`. Runtime parameters come from this file plus the
-# subnet's public control.json. No environment-variable fallback: what you see
-# here is what the CLI uses.
+# Written by `openroboto init`. **This file is what the CLI runs on**: your
+# credentials and your hyperparameters, plus the `competition:` section below —
+# a copy of the season you picked. No environment-variable fallback, and
+# nothing is fetched at training time.
 
 # ─── Which subnet and backend ───────────────────────────────
 # **This block was written to match the backend `openroboto init` asked**, and
@@ -42,6 +43,9 @@ subnet:
                                    # Never commit this file with a password in it.
 
 # ─── Public HTTP resources ──────────────────────────────────
+# The subnet publishes its API key here, which external validators read. Miners
+# need it for nothing: the dataset, the base model, the round and the fee all
+# come from the competition section below.
 urls:
   control_json: "$control_json"
 
@@ -52,8 +56,6 @@ urls:
 # train for one season and pay for another.
 backend:
   url: "$backend_url"
-  dataset_train: "https://api.openroboto.ai/train.json"
-  dataset_val: "https://api.openroboto.ai/val.json"
 
 # ─── Competition ────────────────────────────────────────────
 # Which competition this workspace mines. **`openroboto init` fills this in**
@@ -62,26 +64,24 @@ backend:
 # and the previous version is kept as miner.yaml.bak).
 #
 # Everything about a season lives here, so `build` / `train` / `check` never
-# have to go online: which image to build, which starting script, which
+# have to go online: which round it is, which image to build, which dataset to
+# train on, which base checkpoint to start from, which starting script, which
 # checkpoint layout your model is judged by (pi0.5 and LingBot-VLA 2.0 accept
 # completely different trees), and what the entry fee is.
-#
-# Left empty, everything is judged as the pi0.5 simulation competition, exactly
-# as it was before there was more than one competition.
 #
 # ⚠️ Do not hand-edit `params.fee`. It is confirmed against the backend in the
 # moment before you pay, and a value edited here only ever produces a refusal.
 competition:
   adapter: ""                      # sim_openpi | sim_lingbot | real_xarm6
-  params: {}                       # the season's own spec (fee, base model,
-                                   # image, format rules) as announced
+  params: {}                       # the season's own spec (fee, dataset, base
+                                   # checkpoint, image, format rules) as announced
 
 # ─── Model ──────────────────────────────────────────────────
 model:
-  vla_model_id: pi05
-  vla_checkpoint_path: ""          # empty = the training container downloads
-                                   # gs://openpi-assets/checkpoints/pi05_base itself
-                                   # into ./cache/pi05_base, reused next round
+  vla_checkpoint_path: ""          # a base checkpoint you already have on this
+                                   # machine. Empty is normal: the season names
+                                   # its own starting point, and when it does
+                                   # that one wins over this line
 
 # ─── HuggingFace ────────────────────────────────────────────
 huggingface:
@@ -93,21 +93,34 @@ custom_train_script: "train_strategy.py"   # mounted into the container as
                                            # /data/scripts/<name>, entry point
                                            # train(cfg, episodes, policy)
 
+# These five are **yours to tune** — that is the competition. They reach the
+# container as EPOCHS / BATCH_SIZE / LR / LORA_R / LORA_ALPHA and your strategy
+# script reads them out of `cfg` (cfg["epochs"], cfg["lora_r"], …).
+#
+# The values below are the ones the subnet used to hand every miner, so leaving
+# them alone trains exactly as before. Nobody is judged on them; you are judged
+# on the checkpoint they produce.
+#
+# ⚠️ Write the learning rate as 1.0e-4, not 1e-4 — YAML reads the second one as
+# text, and it would be passed through to the container as text.
+training:
+  epochs: 3
+  batch_size: 4
+  learning_rate: 1.0e-4
+  lora_r: 32
+  lora_alpha: 64
+
 # ─── Logging ────────────────────────────────────────────────
 log_level: INFO
 log_dir: logs
 
 # ─── Notes ──────────────────────────────────────────────────
 #
-# Payment (burn_rate_tao, limit_price_rao) comes from the public control.json
-# payment block. Do not set it here unless you are testing offline — a burn that
-# does not match the round's rate is rejected, and rejected burns are not refunded.
-#
-# ⚠️ On a workspace that mines a competition (the `competition:` section above)
-# burn_rate_tao is not read at all, and setting it does not let you skip
-# anything: that fee comes from the season and is confirmed against the backend
-# in the moment before it is paid. A number typed here says how much, never
-# which competition — so `openroboto burn` refuses instead of paying it.
+# There is no payment section here, and adding one changes nothing: the entry
+# fee comes from the season (`competition.params.fee`) and is confirmed against
+# the backend in the moment before it is paid. A number typed here says how
+# much, never which competition — so `openroboto burn` refuses instead of
+# paying it. Rejected burns are not refunded.
 #
 # Typical flow:
 #   openroboto doctor      # check GPU / Docker / config before spending anything

@@ -1,11 +1,28 @@
 """`openroboto train` -- run one round of training (Step 1-2 of the old
 `miner.py`).
 
-The round, the dataset and the hyperparameters all come from control.json;
-training itself runs inside the openpi-runner container (red line #2, see
-`training/container.py`). When it finishes, the checkpoint is written into
-`state/round_N.json`, and the later upload / burn / announce continue from
-there.
+Everything this command needs is already on disk when it starts: the season's
+spec in the `competition:` section of `miner.yaml` (round, status, image,
+dataset, base checkpoint) and the miner's own hyperparameters beside it.
+**Not one byte is fetched.** Training runs inside the runner container (red
+line #2, see `training/container.py`); when it finishes the checkpoint is
+written into `state/round_N.json`, and the later upload / burn / announce
+continue from there.
+
+## Why control.json is gone from here
+
+It used to be mandatory: no `urls.control_json`, no training. That file is one
+static JSON for the whole subnet, so everything it said was said once for
+everybody -- one round number, one dataset, one base checkpoint, one set of
+hyperparameters -- while the subnet has been running several competitions at
+once for a while now. Reading the round from it meant a LingBot miner training
+"round 1" on the π0.5 sample, on the π0.5 checkpoint path, and nothing on that
+path could notice.
+
+Each of those fields now comes from the place that actually varies per season
+(the competition row), except the five hyperparameters, which come from the
+miner: choosing their epoch count and LoRA rank for them was deciding the
+competition on their behalf.
 
 The output directory **is the checkpoint root**
 ------------------------------------------------
@@ -26,6 +43,7 @@ from __future__ import annotations
 
 import argparse
 import tempfile
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -33,7 +51,8 @@ from typing import Any
 from openroboto import adapters
 from openroboto.commands.build import competition_image
 from openroboto.commands.check import weights_subdir
-from openroboto.config import Settings, apply_control, fetch_control
+from openroboto.competition import REFRESH_HINT, Snapshot, load_snapshot
+from openroboto.config import Settings
 from openroboto.console import fail, say
 from openroboto.round_state import (
     DEFAULT_OUTPUT_ROOT,
@@ -93,29 +112,30 @@ def run(args: argparse.Namespace) -> int:
         )
         return 1
 
-    if not settings.control_json_url:
+    snapshot = load_snapshot(settings)
+    if snapshot is None:
         fail(
-            "urls.control_json is not set — without it there is no way to know "
-            "which round it is or which dataset to train on"
+            "This workspace does not say which competition it mines, so there "
+            "is no round to train, no dataset to train on and no base model to "
+            "start from.\n"
+            "   → `openroboto init --refresh` writes the `competition:` section "
+            "from the backend"
         )
         return 1
 
-    control = fetch_control(settings.control_json_url).control
-    if control is None:
-        fail("control.json returned 304 but there is no local cache — just retry")
-        return 1
-    apply_control(settings, control)
-
-    round_num = int(control.get("round", 0))
-    status = str(control.get("status", ""))
-    if status != ACTIVE_STATUS:
+    if snapshot.status != ACTIVE_STATUS:
         fail(
-            f"round {round_num} is `{status}`, not `active` — anything you train "
-            "now has nowhere to be submitted"
+            f"{snapshot.name} ({snapshot.label}) is `{snapshot.status}`, not "
+            f"`active` — anything you train against it has nowhere to be "
+            f"submitted.\n" + REFRESH_HINT
         )
         return 1
 
-    say(f"🦞 Round {round_num} | hotkey={settings.hotkey} | HF={settings.hf_username}")
+    round_num = snapshot.seq
+    say(
+        f"🦞 {snapshot.label} ({snapshot.name}) | hotkey={settings.hotkey} | "
+        f"HF={settings.hf_username}"
+    )
 
     state = load_state(round_num)
     output_dir = str(Path(args.output_dir) / f"round_{round_num}")
@@ -125,18 +145,35 @@ def run(args: argparse.Namespace) -> int:
         say(f"    → next: `openroboto check {state.get('round_output', output_dir)}`")
         return 0
 
-    dataset = _section(control, "dataset")
-    train_url = dataset.get("train_url") or settings.dataset_train_url
+    dataset = _dataset(snapshot)
+    train_url = str(dataset.get("train") or "")
     if not train_url:
         fail(
-            "no training set URL: neither dataset.train_url in control.json nor "
-            "urls.dataset_train in miner.yaml is set"
+            f"{snapshot.name} ({snapshot.label}) has not published a training "
+            f"set (`competition.params.training.dataset`), so there is nothing "
+            f"to train on.\n"
+            f"   Refusing rather than reaching for another season's data: a run "
+            f"on the wrong dataset finishes without an error and is only found "
+            f"out after the fee is paid.\n" + REFRESH_HINT
         )
         return 1
-    val_url = dataset.get("val_url") or settings.dataset_val_url
+    val_url = str(dataset.get("val") or "")
 
-    params = TrainParams.from_control(_section(control, "training"))
-    checkpoint = resolve_checkpoint(settings.vla_checkpoint_path)
+    params = TrainParams(
+        epochs=settings.epochs,
+        batch_size=settings.batch_size,
+        learning_rate=settings.learning_rate,
+        lora_r=settings.lora_r,
+        lora_alpha=settings.lora_alpha,
+    )
+    # The season's starting point wins over the local path, exactly as
+    # control.json's `training.vla_checkpoint_path` did before it. Empty on both
+    # sides is a real answer -- "this season does not name one" -- and it leaves
+    # the training image to use its own base, which is the only thing that knows
+    # what its base is.
+    checkpoint = resolve_checkpoint(
+        str(snapshot.training.get("checkpoint") or "") or settings.vla_checkpoint_path
+    )
     strategy = args.strategy or settings.custom_train_script
     if strategy and not Path(strategy).is_file():
         fail(
@@ -153,7 +190,7 @@ def run(args: argparse.Namespace) -> int:
             "started_at": datetime.now(UTC).isoformat(),
             "checkpoint_path": checkpoint,
             "round_output": output_dir,
-            "data_version": dataset.get("version", f"v{round_num}"),
+            "data_version": f"v{round_num}",
             "epochs": params.epochs,
             "batch_size": params.batch_size,
             "lr": params.learning_rate,
@@ -272,6 +309,12 @@ def export_advice(output_dir: Path, round_num: int) -> list[str]:
     ]
 
 
-def _section(control: dict[str, Any], name: str) -> dict[str, Any]:
-    value = control.get(name)
-    return value if isinstance(value, dict) else {}
+def _dataset(snapshot: Snapshot) -> Mapping[str, Any]:
+    """`params.training.dataset`, or `{}` when this season names none.
+
+    `null` is what the backend serves for a season whose dataset has not been
+    published, and it must stay distinguishable from a URL — `{}` here becomes
+    the refusal above, never a default address.
+    """
+    value = snapshot.training.get("dataset")
+    return value if isinstance(value, Mapping) else {}

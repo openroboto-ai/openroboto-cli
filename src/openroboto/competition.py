@@ -133,6 +133,52 @@ class Snapshot:
         return str(self.raw.get("adapter", ""))
 
     @property
+    def status(self) -> str:
+        """`draft` | `active` | `archived`, frozen at the moment `init` ran.
+
+        control.json only ever had one word here (`active`), so a workspace
+        reading this instead of that file gains two: `archived` is a season that
+        has finished, `draft` one whose spec is not published yet. Neither is
+        something to train against.
+
+        🔴 This is the **snapshot's** copy, so it answers "which season did I
+        sign up for", not "is that season still open". The live answer is bought
+        at `submit`, from the row the backend serves in the second before the
+        fee is paid (`judge()`), and nothing here replaces it.
+        """
+        return str(self.raw.get("status", ""))
+
+    @property
+    def training(self) -> Mapping[str, Any]:
+        """`params.training` — what to train **in**, **on** and **from**.
+
+        `image` (the container), `dataset` (`{train, val}`) and `checkpoint`
+        (the base weights training starts from).
+
+        🔴 `checkpoint` is not `base_repo`. `base_repo` is the **baseline** the
+        leaderboard's `delta_vs_base` is measured against; this is where the
+        miner's own run begins. They were visibly different for π0.5 --
+        `openroboto-ai/pi05-libero-pytorch` against
+        `gs://openpi-assets/checkpoints/pi05_base` -- and one field cannot mean
+        both without being wrong for one of them.
+        """
+        value = self.params.get("training")
+        return value if isinstance(value, Mapping) else {}
+
+    @property
+    def base_model_family(self) -> str:
+        """Which base model this season runs on, or `""` when the key is absent.
+
+        `""` covers two cases that behave the same here and are told apart by
+        `adapters.base_model_family()`: a `miner.yaml` written before the key
+        existed, and a backend row whose season has not decided yet (`null`).
+        Both mean "this file does not say", and neither may be guessed past --
+        the second one especially, because a `null` there is the backend
+        *refusing* to name a base model, not omitting one.
+        """
+        return str(self.raw.get("base_model_family") or "")
+
+    @property
     def params(self) -> Mapping[str, Any]:
         value = self.raw.get("params")
         return value if isinstance(value, Mapping) else {}

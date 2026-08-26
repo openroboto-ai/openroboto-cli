@@ -46,7 +46,9 @@ from openroboto.round_state import (
     resolve_round,
     save_state,
 )
+from openroboto.training import container
 from openroboto.training.container import DEFAULT_IMAGE, runner_image
+from openroboto.training.round import TrainParams
 
 BIG_ENOUGH = 11 * 1024 * 1024  # the protocol requires >= 10 MB per repo; below that it
 # is judged "only a pointer was uploaded"
@@ -1263,11 +1265,6 @@ def test_train_refuses_a_competition_whose_training_is_not_released(
     monkeypatch.setattr(
         train_command, "train_round", lambda **kwargs: called.append(kwargs)
     )
-    monkeypatch.setattr(
-        train_command,
-        "fetch_control",
-        lambda *a, **k: pytest.fail("train went to the network before refusing"),
-    )
     config = _competition_config(
         tmp_path, track="real", seq=1, adapter=adapter, params={}
     )
@@ -1278,6 +1275,289 @@ def test_train_refuses_a_competition_whose_training_is_not_released(
     assert train_command.run(args) == 1
     assert called == []
     assert not (tmp_path / "out").exists()
+
+
+# ─── train: the season on disk is the whole input ────────────
+#
+# `train` used to open control.json before anything else and take the round,
+# the status, the dataset and the hyperparameters out of it. One static file
+# for a subnet that runs several competitions at once: a LingBot miner was told
+# they were on "round 1", handed the π0.5 sample and the π0.5 checkpoint path,
+# and nothing on that path could notice.
+
+DATASET = {
+    "train": "https://example.invalid/train.json",
+    "val": "https://example.invalid/val.json",
+}
+
+#: One episode that survives `training/dataset.py::validate_episode`, so the
+#: run reaches `docker run` instead of stopping at "training set is empty".
+EPISODE = {
+    "episode_id": "e1",
+    "timestamp": "2026-08-26T00:00:00Z",
+    "observation": {"image": [], "wrist_image": [], "state": [0.0]},
+    "action": [[0.0]],
+    "language_instruction": "pick up the block",
+    "license": "MIT",
+}
+
+
+def _train_workspace(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    training: dict[str, Any] | None = None,
+    hyperparameters: dict[str, Any] | None = None,
+    **section: Any,
+) -> argparse.Namespace:
+    """A workspace mining one season, with `train`'s arguments ready.
+
+    Runs from `tmp_path`: `state/` and the base-model cache are both resolved
+    against the working directory.
+    """
+    monkeypatch.chdir(tmp_path)
+    config: dict[str, Any] = {
+        "competition": {
+            "track": "sim",
+            "seq": 7,
+            "label": "LingBot-VLA 2.0",
+            "adapter": "sim_openpi",
+            "status": "active",
+            "params": {"training": training if training is not None else {}},
+        }
+        | section
+    }
+    if hyperparameters is not None:
+        config["training"] = hyperparameters
+    (tmp_path / "miner.yaml").write_text(
+        yaml.safe_dump(config, allow_unicode=True), encoding="utf-8"
+    )
+    return argparse.Namespace(
+        config=str(tmp_path / "miner.yaml"),
+        output_dir=str(tmp_path / "out"),
+        strategy="",
+    )
+
+
+def _fake_training(
+    monkeypatch: pytest.MonkeyPatch, downloaded: list[str]
+) -> list[dict[str, Any]]:
+    """Stand in for the download and the container run; record both."""
+    ran: list[dict[str, Any]] = []
+
+    def _download(url: str, dest: str) -> str:
+        downloaded.append(url)
+        Path(dest).write_text("[]", encoding="utf-8")
+        return dest
+
+    def _train(**kwargs: Any) -> Any:
+        ran.append(kwargs)
+        return SimpleNamespace(metrics={"final_loss": 0.5}, proof={})
+
+    monkeypatch.setattr(train_command, "download_dataset", _download)
+    monkeypatch.setattr(train_command, "train_round", _train)
+    return ran
+
+
+def test_train_never_opens_control_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """🔴 The executable half of "train does not touch control.json".
+
+    Blocking `urlopen` catches the whole family at once -- a re-import of
+    `fetch_control`, a new HTTP call added later, a helper that reaches for the
+    URL "just to check the round". The dataset download is the one call that is
+    allowed out, and it is faked above precisely so that the block below is not
+    ambiguous.
+    """
+    monkeypatch.setattr(
+        "openroboto.http_client.urlopen",
+        lambda *a, **k: pytest.fail("train went to the network"),
+    )
+    downloaded: list[str] = []
+    ran = _fake_training(monkeypatch, downloaded)
+    args = _train_workspace(
+        tmp_path, monkeypatch, training={"dataset": DATASET, "image": "runner:1.4"}
+    )
+
+    assert train_command.run(args) == 0
+    assert downloaded == [DATASET["train"], DATASET["val"]]
+    assert len(ran) == 1
+    # ⚠️ The workspace **does** carry a control.json URL (the environment preset
+    # fills one in, and external validators need it to keep answering). The
+    # point is that `train` has one right there and still does not open it.
+    assert Settings.load(args.config).control_json_url
+
+
+def test_train_takes_the_round_from_the_season_not_a_subnet_wide_counter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`competitions.seq` -- the number that differs between two seasons running
+    at the same time, which is what control.json's single `round` could not."""
+    ran = _fake_training(monkeypatch, [])
+    args = _train_workspace(
+        tmp_path, monkeypatch, seq=12, training={"dataset": DATASET}
+    )
+
+    assert train_command.run(args) == 0
+    assert ran[0]["output_dir"] == str(tmp_path / "out" / "round_12")
+    assert json.loads((tmp_path / "state" / "round_12.json").read_text())["round"] == 12
+
+
+def test_train_starts_from_the_checkpoint_this_season_names(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """🔴 The starting point, not the baseline. `base_repo` is what the
+    leaderboard measures against; this is where the miner's own run begins, and
+    for π0.5 they were two different addresses."""
+    ran = _fake_training(monkeypatch, [])
+    args = _train_workspace(
+        tmp_path,
+        monkeypatch,
+        base_repo="openroboto-ai/pi05-libero-pytorch",
+        training={
+            "dataset": DATASET,
+            "checkpoint": "gs://openpi-assets/checkpoints/pi05_base",
+        },
+    )
+
+    assert train_command.run(args) == 0
+    # `gs://` is swapped for the local cache directory to mount -- the container
+    # downloads into it. That branching is unchanged.
+    assert ran[0]["checkpoint_path"] == "cache/pi05_base"
+
+
+def test_train_leaves_the_base_to_the_image_when_the_season_names_none(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """🔴 No π0.5 fallback. `resolve_checkpoint("")` used to substitute the π0.5
+    base for every competition, so a LingBot run was handed a path from another
+    base model; empty now means `CHECKPOINT_PATH` is not set at all and the
+    image uses the base it was built around."""
+    ran = _fake_training(monkeypatch, [])
+    args = _train_workspace(tmp_path, monkeypatch, training={"dataset": DATASET})
+
+    assert train_command.run(args) == 0
+    assert ran[0]["checkpoint_path"] == ""
+    assert not (tmp_path / "cache").exists()
+
+
+def test_train_refuses_a_season_that_has_published_no_dataset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`null` is a real answer and it is not "use the other season's data": the
+    run would finish clean on the wrong dataset and cost a fee to find out."""
+    ran = _fake_training(monkeypatch, [])
+    args = _train_workspace(tmp_path, monkeypatch, training={"image": "runner:1.4"})
+
+    assert train_command.run(args) == 1
+    assert ran == []
+
+
+def test_train_refuses_a_workspace_with_no_season_at_all(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """There is no round, no dataset and no base model to guess from -- and
+    guessing is what this command stopped doing."""
+    monkeypatch.chdir(tmp_path)
+    ran = _fake_training(monkeypatch, [])
+    (tmp_path / "miner.yaml").write_text("log_level: INFO\n", encoding="utf-8")
+    args = argparse.Namespace(
+        config=str(tmp_path / "miner.yaml"),
+        output_dir=str(tmp_path / "out"),
+        strategy="",
+    )
+
+    assert train_command.run(args) == 1
+    assert ran == []
+
+
+@pytest.mark.parametrize("status", ["archived", "draft"])
+def test_train_refuses_a_season_that_is_not_active(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, status: str
+) -> None:
+    """control.json only ever said `active`; a competition row has three words,
+    and the two new ones both mean "nowhere to submit this"."""
+    ran = _fake_training(monkeypatch, [])
+    args = _train_workspace(
+        tmp_path, monkeypatch, status=status, training={"dataset": DATASET}
+    )
+
+    assert train_command.run(args) == 1
+    assert ran == []
+
+
+def test_the_miners_hyperparameters_reach_the_container(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """🔴 End to end, `miner.yaml` → `docker run`, with nothing faked in between
+    but the process call itself.
+
+    The five environment variable **names** are red line #2 -- a strategy script
+    reads `cfg["epochs"]` out of them -- so this asserts the names as literally
+    as it asserts the values.
+    """
+    monkeypatch.delenv("OPENPI_RUNNER_IMAGE", raising=False)
+    monkeypatch.setattr(container, "detect_free_gpus", lambda: "")
+    monkeypatch.setattr(container, "remove_stale_container", lambda *a, **k: None)
+    commands: list[list[str]] = []
+
+    def _run(command: list[str], **kwargs: Any) -> Any:
+        commands.append(command)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(container.subprocess, "run", _run)
+    monkeypatch.setattr(
+        train_command,
+        "download_dataset",
+        lambda url, dest: (
+            Path(dest).write_text(json.dumps([EPISODE]), encoding="utf-8"),
+            dest,
+        )[1],
+    )
+    args = _train_workspace(
+        tmp_path,
+        monkeypatch,
+        training={"dataset": DATASET, "image": "runner:1.4"},
+        hyperparameters={
+            "epochs": 10,
+            "batch_size": 8,
+            "learning_rate": 5.0e-5,
+            "lora_r": 64,
+            "lora_alpha": 128,
+        },
+    )
+
+    # `final_loss` is missing from a container that printed nothing, so the run
+    # is reported as failed -- after the command has been assembled and issued,
+    # which is what this test is about.
+    train_command.run(args)
+    assert len(commands) == 1
+    assert "-e" in commands[0]
+    passed = [part for part in commands[0] if "=" in part]
+    for expected in (
+        "EPOCHS=10",
+        "BATCH_SIZE=8",
+        "LR=5e-05",
+        "LORA_R=64",
+        "LORA_ALPHA=128",
+    ):
+        assert expected in passed
+    assert commands[0][-1] == "runner:1.4"
+
+
+def test_the_defaults_reaching_the_container_are_the_old_control_json_values(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A workspace that touches nothing trains byte for byte as it did when the
+    subnet set these five for everybody."""
+    ran = _fake_training(monkeypatch, [])
+    args = _train_workspace(tmp_path, monkeypatch, training={"dataset": DATASET})
+
+    assert train_command.run(args) == 0
+    assert ran[0]["params"] == TrainParams(
+        epochs=3, batch_size=4, learning_rate=1e-4, lora_r=32, lora_alpha=64
+    )
 
 
 def test_train_runs_the_same_image_build_built(

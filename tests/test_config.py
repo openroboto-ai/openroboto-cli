@@ -7,10 +7,12 @@ import io
 import json
 import re
 import urllib.error
+from importlib.resources import files
 from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 from openroboto_protocol.constants import BURN_BLOCK_WINDOW
 
 from openroboto import adapters
@@ -81,8 +83,90 @@ def test_chain_commands_refuse_to_run_without_netuid() -> None:
     assert "netuid" in str(excinfo.value)
 
 
-def test_apply_control_only_touches_payment_and_training() -> None:
-    settings = Settings.from_mapping({"backend": {"url": "https://backend.invalid"}})
+#: The five hyperparameters control.json used to hand every miner, verbatim
+#: from the production file (`openroboto-backend/tests/fixtures/
+#: control_json_baseline.json`). They are the defaults now, so a workspace that
+#: does not touch them trains exactly as it did before the move.
+CONTROL_JSON_HYPERPARAMETERS = {
+    "epochs": 3,
+    "batch_size": 4,
+    "learning_rate": 1e-4,
+    "lora_r": 32,
+    "lora_alpha": 64,
+}
+
+
+def _hyperparameters(settings: Settings) -> dict[str, Any]:
+    return {name: getattr(settings, name) for name in CONTROL_JSON_HYPERPARAMETERS}
+
+
+def test_hyperparameter_defaults_are_what_control_json_used_to_serve() -> None:
+    assert _hyperparameters(Settings()) == CONTROL_JSON_HYPERPARAMETERS
+
+
+def test_the_shipped_template_carries_those_same_five_values() -> None:
+    """The template writes them out explicitly rather than leaving them to the
+    defaults: a miner cannot tune a knob they cannot see.
+
+    Only the `training:` block is parsed here -- the rest of the template holds
+    `$placeholders` that `init` fills in from the backend it asked.
+    """
+    template = (files("openroboto") / "templates" / "miner.yaml").read_text(
+        encoding="utf-8"
+    )
+    written = yaml.safe_load(template)["training"]
+    assert written == CONTROL_JSON_HYPERPARAMETERS
+    assert (
+        _hyperparameters(Settings.from_mapping({"training": written}))
+        == CONTROL_JSON_HYPERPARAMETERS
+    )
+
+
+def test_hyperparameters_are_the_miners_to_change(tmp_path: Path) -> None:
+    """🔴 The whole point of the move. `learning_rate` is spelled the way the
+    template spells it -- YAML 1.1 resolves `1e-4` as a string, so a parser that
+    does not cast would ship text to `docker run -e LR=...`."""
+    path = tmp_path / "miner.yaml"
+    path.write_text(
+        "training:\n"
+        "  epochs: 10\n"
+        "  batch_size: 8\n"
+        "  learning_rate: 5.0e-5\n"
+        "  lora_r: 64\n"
+        "  lora_alpha: 128\n",
+        encoding="utf-8",
+    )
+    assert _hyperparameters(Settings.load(str(path))) == {
+        "epochs": 10,
+        "batch_size": 8,
+        "learning_rate": 5e-5,
+        "lora_r": 64,
+        "lora_alpha": 128,
+    }
+
+
+def test_a_learning_rate_yaml_read_as_text_still_reaches_the_container_as_a_number(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "miner.yaml"
+    path.write_text("training:\n  learning_rate: 1e-4\n", encoding="utf-8")
+    assert Settings.load(str(path)).learning_rate == 1e-4
+
+
+def test_apply_control_only_touches_payment() -> None:
+    """Everything but `payment` is now read off the competition row instead.
+
+    The `training` block is the one that matters here: while it landed in
+    settings, a stale control.json could still decide which base checkpoint a
+    season trains from -- the exact override this move exists to remove.
+    """
+    settings = Settings.from_mapping(
+        {
+            "backend": {"url": "https://backend.invalid"},
+            "model": {"vla_checkpoint_path": "/mine/pi05_base"},
+            "training": {"epochs": 7},
+        }
+    )
     apply_control(
         settings,
         {
@@ -96,10 +180,9 @@ def test_apply_control_only_touches_payment_and_training() -> None:
     )
     assert settings.burn_rate_tao == 0.1
     assert settings.limit_price_rao == 5
-    assert settings.vla_checkpoint_path == "gs://bucket/ckpt"
-    # dataset / round / public_key do not land in settings -- they are per-round inputs,
-    # not configuration
-    assert settings.dataset_train_url == ""
+    # round / status / dataset / training / public_key change nothing.
+    assert settings.vla_checkpoint_path == "/mine/pi05_base"
+    assert settings.epochs == 7
     assert settings.backend_url == "https://backend.invalid"
 
 

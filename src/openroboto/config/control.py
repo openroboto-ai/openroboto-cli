@@ -13,8 +13,21 @@ refuses to burn (`Settings.burn_rate_tao` defaults to `None`). This module only
 refreshes and states the situation clearly; it **does not guess an amount on the
 miner's behalf** — the price of guessing wrong is non-refundable TAO.
 
-control.json **carries only payment / dataset / training / process**; it is not a
-configuration source for the backend (see openroboto-backend/docs/adr/01).
+## What is left in control.json
+
+**`public_key`, and a `payment` block on its way out.** The file was written
+when there was no competitions table, so one static JSON had to carry the whole
+round's spec; each of those fields now has a home on the competition row and is
+read from there — the round is `seq`, the status is `status`, the dataset and
+the base checkpoint are `params.training`, the fee is `params.fee`, and the five
+hyperparameters were never the subnet's to set (`miner.yaml`).
+
+`public_key` stays, and this URL must keep answering: it is the only channel an
+external validator has for the key it needs to read weights, and we cannot make
+those validators upgrade.
+
+It is not a configuration source for the backend either
+(see openroboto-backend/docs/adr/01).
 """
 
 from __future__ import annotations
@@ -34,8 +47,9 @@ class ControlFetchError(Exception):
     """control.json could not be fetched / could not be parsed.
 
     This is an **infrastructure failure**, not a miner misconfiguration. Callers
-    must treat it as one: train stops (without a round number there is nothing to
-    train), while burn / validator fall back to the local config and carry on.
+    must treat it as one: burn / validator fall back to the local config and
+    carry on, and `doctor` reports it as one failed check rather than a broken
+    setup. `train` is no longer a caller at all.
     """
 
 
@@ -99,15 +113,17 @@ def fetch_control(url: str, etag: str = "") -> ControlFetch:
 
 
 def apply_control(settings: Settings, control: dict[str, Any]) -> None:
-    """Overwrite settings with the fields control.json gets to decide for the subnet.
+    """Overwrite settings with the one section control.json still decides.
 
-    Only the `payment` and `training` sections change settings:
-    - `payment.burn_rate_tao` / `payment.limit_price_rao` — this round's rate, where
-      the subnet has the final say;
-    - `training.vla_checkpoint_path` / `training.vla_model_id` — the base model.
+    `payment.burn_rate_tao` / `payment.limit_price_rao` — the subnet-wide rate,
+    which is now only reachable through `openroboto burn` on a workspace with no
+    competition section (`commands/burn.py`), and displayed by `doctor`.
 
-    The `dataset` and `process` sections are read directly by the train command and
-    do not enter settings (they are per-round inputs, not configuration).
+    The `training` section used to land here as well
+    (`vla_checkpoint_path` / `vla_model_id`), and that is gone: the base
+    checkpoint is `params.training.checkpoint` on the competition row, and
+    `vla_model_id` had no reader at all — which base model a season runs on is
+    `base_model_family`, not a string that says `pi05` for every competition.
     """
     payment = control.get("payment") or {}
     if isinstance(payment, dict):
@@ -115,13 +131,6 @@ def apply_control(settings: Settings, control: dict[str, Any]) -> None:
             settings.burn_rate_tao = float(payment["burn_rate_tao"])
         if payment.get("limit_price_rao") is not None:
             settings.limit_price_rao = int(payment["limit_price_rao"])
-
-    training = control.get("training") or {}
-    if isinstance(training, dict):
-        if training.get("vla_checkpoint_path"):
-            settings.vla_checkpoint_path = str(training["vla_checkpoint_path"])
-        if training.get("vla_model_id"):
-            settings.vla_model_id = str(training["vla_model_id"])
 
 
 def refresh_burn_rate(settings: Settings, logger: Any) -> None:

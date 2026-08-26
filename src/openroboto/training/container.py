@@ -268,7 +268,8 @@ def run_training(
     """
     if not train_samples:
         raise TrainingError(
-            "Training set is empty -- check dataset.train_url in control.json"
+            "Training set is empty -- check this season's "
+            "`competition.params.training.dataset.train` in miner.yaml"
         )
 
     os.makedirs(output_dir, exist_ok=True)
