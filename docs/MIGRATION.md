@@ -194,11 +194,28 @@ openroboto --version          # expect: openroboto <TBD: version> (openroboto-pr
 cd my-miner
 openroboto init --refresh     # re-fetch the competition spec into miner.yaml;
                               # keeps your wallet settings and HF token
-openroboto build              # the training image changed — rebuild it
-openroboto train              # retrain from the new base
+
+# ⛔ Training: not this client's job yet. See below.
+
 openroboto check              # must pass before you pay. Free, local, no GPU
 openroboto submit
 ```
+
+> **`openroboto build` and `openroboto train` do not work for this competition,
+> and this list used to say to run them.** They **refuse**, today, with an
+> explanation — `adapters.ADAPTERS["sim_lingbot"]` carries
+> `training=UNAVAILABLE`, which both commands check before they do anything
+> (`commands/build.py::run`, `commands/train.py::run`). The refusal is
+> deliberate: the training image ships under the *name* this competition
+> publishes and is filled from the build context inside this package, and
+> pairing the two blindly gets you an image called `lingbot-runner:…` with
+> openpi inside it — `docker images` lists it, `doctor` calls it ready, training
+> finishes without a single error, and the model is trained on the wrong base.
+>
+> Until that lands: **train it however you like**, then come back. `openroboto
+> check` and `openroboto submit` both work on a checkpoint this CLI did not
+> produce. Getting the base model and everything downstream of training is
+> written up step by step in [MINER_LINGBOT.md](./MINER_LINGBOT.md).
 
 `init` lists the competitions that are open and writes the one you pick into
 `miner.yaml` — base model, training image, format rules, fee and deadline, all in one
@@ -225,30 +242,48 @@ Two things about the LingBot training scripts cost money if you find them out la
 Neither is a bug in your setup; both are defaults, and both are cheap to fix **before**
 the burn.
 
-### 1. By default the run writes no HuggingFace weights at all
+### 1. The HuggingFace export runs by default — and lands somewhere unusable
+
+> **Corrected 2026-08-26.** This section previously said the export is off by
+> default, that you must add `save_hf_weights: true` yourself, and that the
+> conversion is "asynchronous and best-effort" with failures logged to
+> `async_hf_failures.jsonl`. **All three are wrong**, read off the vendor's
+> source at `github.com/Robbyant/lingbot-vla-v2@main`:
+> `TrainingArguments.save_hf_weights` defaults to **`True`** and
+> `TrainingArguments.async_save_hf_weights` defaults to **`False`**
+> (`lingbotvla/utils/arguments.py`). The quoted
+> `if not args.train.save_hf_weights: return` is real
+> (`tasks/vla/train_lingbotvla.py`) — it is a guard on a flag that is already on.
+> The mistake was reading "absent from the config template" as "off", and it sent
+> miners to fix a switch that was never the problem. The nesting half of this
+> page, §2 below, was and is correct.
 
 The official templates set `ckpt_manager: dcp` — PyTorch **distributed checkpoint**, a
-sharded format meant for resuming training, not for loading a model. The HF-format
-export is a separate switch, `save_hf_weights`, and it appears in **neither** official
-config template; the exporter opens with
+sharded format meant for resuming training, not for loading a model
+(`configs/vla/robotwin/robotwin.yaml`, `configs/vla/real_robot/real_robot.yaml`).
+Neither template mentions `save_hf_weights`, but its default is `True`, so a run
+started from either one **does** write HuggingFace-format weights as well. You do not
+have to switch anything on.
 
-```python
-if not args.train.save_hf_weights:
-    return
+What you do have to deal with is *where* they land — `_run_hf_checkpoint` writes to
+`os.path.join(checkpoint_path, "hf_ckpt")`
+(`lingbotvla/utils/async_hf_checkpoint.py`), and `checkpoint_path` is
+`{output_dir}/checkpoints/global_step_N`. That is §2.
+
+**A failed export stops the run; it does not leave a note.** With
+`async_save_hf_weights` at its default `False`, `AsyncHFCheckpointSaver.submit()`
+takes its synchronous branch and calls the exporter with `best_effort=False`, which
+re-raises — the training command fails. `async_hf_failures.jsonl` is written on the
+*asynchronous* path, so on the default configuration "the file is absent" tells you
+nothing either way. The check that means something is the one that looks at the
+artefact:
+
+```bash
+openroboto check path/to/checkpoint   # free, local, no GPU
 ```
 
-so leaving it out means the export never runs. Put it in your training config:
-
-```yaml
-train:
-  save_hf_weights: true
-```
-
-The conversion is asynchronous and best-effort: the training loop does not wait for it
-and does not fail if it breaks. Failures are appended to `async_hf_failures.jsonl` in
-the output directory — **check that the file is absent or empty** before you upload,
-and check that the shards and `model.safetensors.index.json` are really there. A run
-that finished cleanly can still have produced no usable weights.
+It verifies the shards and `model.safetensors.index.json` are really there, and reads
+the index to confirm every shard it names exists.
 
 ### 2. The official layout is nested too deep to upload as-is
 

@@ -21,19 +21,24 @@ people editing the Dockerfile.
 ## The name and the contents have to come from the same competition
 
 The image **name** comes from the competition (`params.training.image`), the
-**contents** come from whatever context is built. The one that ships here
-installs openpi and nothing else, so for a competition on another base model
-`docker build -t lingbot-runner:1.2 <the openpi context>` produces an image
-whose name says one thing and whose contents are another -- and nothing
-downstream can tell them apart: `docker images` lists it, `doctor` calls it
-ready, `train` runs it, and the miner gets a checkpoint trained on π0.5 under a
-LingBot name. There is no error anywhere on that path.
+**contents** come from whatever context is built, and nothing downstream
+compares them: `docker build -t lingbot-runner:1.2 <the openpi context>`
+produces an image whose name says one thing and whose contents are another --
+`docker images` lists it, `doctor` calls it ready, `train` runs it, and the
+miner gets a checkpoint trained on π0.5 under a LingBot name. There is no error
+anywhere on that path.
 
-So the pairing is checked instead of assumed: a competition this package has no
-container for (`adapters.UNAVAILABLE`) is **refused** rather than built out of
-the only context on hand. `--context` remains the way to build an image
-definition you brought yourself -- an explicit act, which is the difference
-between choosing the contents and defaulting into them.
+So the context is picked by the competition's **format profile** rather than
+being whatever ships (`runner_context()`): π0.5 competitions get the openpi
+context, LingBot ones get the LingBot context. And the pairing is still checked
+rather than assumed -- a competition whose container this package has not
+released (`adapters.UNAVAILABLE`) is **refused**, even when a context for its
+base model is on hand, because `training` is a claim about `openroboto train`
+driving that image and not merely about the image existing.
+
+`--context` remains the way to build an image definition you brought yourself
+-- an explicit act, which is the difference between choosing the contents and
+defaulting into them.
 """
 
 from __future__ import annotations
@@ -42,7 +47,7 @@ import argparse
 import subprocess
 from pathlib import Path
 
-from openroboto import OPENPI_RUNNER_CONTEXT, adapters, runner_context
+from openroboto import adapters, local_runner_context, runner_context
 from openroboto.config import Settings
 from openroboto.console import fail, hint, say
 from openroboto.training.container import runner_image
@@ -57,8 +62,9 @@ def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) 
     parser.add_argument(
         "--context",
         default="",
-        help="build context; defaults to the copy inside the package, but a local "
-        f"./{OPENPI_RUNNER_CONTEXT}/ takes precedence",
+        help="build context; defaults to the copy inside the package for this "
+        "competition's base model, but a local ./<profile>-runner/ "
+        "(./openpi-runner/, ./lingbot-runner/) takes precedence",
     )
     parser.add_argument("--config", default="miner.yaml")
     parser.add_argument(
@@ -78,19 +84,24 @@ def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) 
     parser.set_defaults(handler=run)
 
 
-def resolve_context(explicit: str = "") -> str:
-    """Resolve the build context: explicit > local `./openpi-runner/` > the
+def resolve_context(explicit: str = "", profile: str = adapters.OPENPI) -> str:
+    """Resolve the build context: explicit > local `./<profile>-runner/` > the
     one inside the package.
 
-    The last tier **always exists** (it ships in the wheel), so this function
-    never returns something that cannot be reached.
+    `profile` is the competition's format profile, which is what decides *which*
+    base model the image has to contain. The default is π0.5, the answer for a
+    `miner.yaml` with no competition section.
+
+    The last tier **always exists** for a profile this package ships (it goes
+    into the wheel), so this function never returns something that cannot be
+    reached -- and `run()` refuses before calling it for one that does not.
     """
     if explicit:
         return explicit
-    local = Path(OPENPI_RUNNER_CONTEXT)
+    local = local_runner_context(profile)
     if local.is_dir():
         return str(local)
-    return str(runner_context())
+    return str(runner_context(profile))
 
 
 def build_command(image: str, context: str, no_cache: bool = False) -> list[str]:
@@ -125,33 +136,46 @@ def competition_adapter(config_path: str) -> str:
 
 def run(args: argparse.Namespace) -> int:
     adapter_name = competition_adapter(args.config)
-    if (
-        adapters.resolve(adapter_name).training == adapters.UNAVAILABLE
-        and not args.context
-    ):
-        # See the module docstring: building here would name the image after this
-        # competition and fill it with the only context that ships, which is
-        # π0.5's. Nothing after this point compares the two.
+    adapter = adapters.resolve(adapter_name)
+    if adapter.training == adapters.UNAVAILABLE and not args.context:
+        # See the module docstring: building without a released container means
+        # naming the image after this competition and filling it with whatever
+        # context is on hand. Nothing after this point compares the two.
+        #
+        # The refusal survives the LingBot context shipping. `training` says
+        # whether `openroboto train` will **drive** this image, and for LingBot
+        # that is still unproven -- nobody has run it on a GPU (see
+        # `runner/lingbot/train_runner.py`). Letting `build` succeed here would
+        # hand back an image that the next command refuses to touch, which reads
+        # as a broken client rather than as an unreleased competition.
+        packaged = runner_context(adapter.format_profile)
+        byo = (
+            f"   → have a GPU and want to drive it yourself? this client already "
+            f"ships an unverified build context for this base model:\n"
+            f"     `openroboto build --context {packaged}`\n"
+            if packaged.is_dir()
+            else "   → have the image definition already? `--context <directory>` "
+            "builds it\n"
+        )
         fail(
-            f"This competition (adapter `{adapter_name}`) has no training image "
-            f"in this client yet, so there is nothing to build.\n"
-            f"   The only image definition that ships here installs openpi "
-            f"(π0.5). Building it under this competition's name would leave you "
-            f"with an image whose name and contents disagree -- `docker images` "
-            f"would list it, `doctor` would call it ready, and training would "
-            f"finish on the wrong base model without a single error.\n"
-            f"   → have the image definition already? `--context <directory>` "
-            f"builds it -- but `openroboto train` still will not drive it until "
-            f"this client ships support, so train it your own way and come back "
-            f"for `openroboto check` / `openroboto submit`\n"
+            f"Training support for this competition (adapter `{adapter_name}`) "
+            f"has not been released yet, so `openroboto build` will not build it "
+            f"under this competition's name.\n"
+            f"   An image whose name and contents disagree is invisible: "
+            f"`docker images` lists it, `doctor` calls it ready, and training "
+            f"finishes on the wrong base model without a single error.\n"
+            f"{byo}"
+            f"     `openroboto train` still will not drive it -- train your own "
+            f"way, then come back for `openroboto check` / `openroboto submit`\n"
             f"   → otherwise watch for the announcement, then "
             f"`pip install -U openroboto`"
         )
         return 1
 
+    profile = adapter.format_profile
     image = args.image or runner_image(competition_image(args.config))
-    context = resolve_context(args.context)
-    if not args.context and not Path(OPENPI_RUNNER_CONTEXT).is_dir():
+    context = resolve_context(args.context, profile)
+    if not args.context and not local_runner_context(profile).is_dir():
         hint(f"Building from the image definition inside the package ({context})")
 
     command = build_command(image, context, args.no_cache)

@@ -1000,11 +1000,16 @@ def test_build_uses_the_image_this_competition_names(
 def test_build_will_not_fill_a_competitions_image_name_with_another_base(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """🔴 The name comes from the competition, the contents come from the only
-    context that ships here, and it installs π0.5. Building the two together
-    produces `lingbot-runner:1.2` with openpi inside -- after which `docker
-    images` lists it, `doctor` calls it ready and `train` runs it, with no step
-    anywhere able to tell the name and the contents apart.
+    """🔴 The name comes from the competition and the contents come from a
+    build context, with no step anywhere able to tell the two apart: `docker
+    images` lists whatever was built, `doctor` calls it ready and `train` runs
+    it.
+
+    A LingBot context now ships (`runner/lingbot/`), so this is no longer the
+    "only context installs π0.5" case -- and the refusal has to survive that.
+    `training` is a claim that `openroboto train` drives the image to a
+    checkpoint, and for LingBot nobody has run it on a card yet. Building
+    silently here would hand back an image the next command refuses to touch.
     """
     monkeypatch.delenv("OPENPI_RUNNER_IMAGE", raising=False)
     built: list[Any] = []
@@ -1024,7 +1029,11 @@ def test_build_will_not_fill_a_competitions_image_name_with_another_base(
 
     assert build_command.run(args) == 1
     assert built == []
-    assert "no training image in this client" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "has not been released yet" in err
+    # And it says how to build it anyway, naming the context that does exist --
+    # otherwise the only path left is guessing at a directory inside site-packages.
+    assert "--context" in err and "runner/lingbot" in err
 
 
 def test_build_still_builds_an_image_definition_you_brought_yourself(

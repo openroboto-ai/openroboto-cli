@@ -61,27 +61,35 @@ class Adapter:
 
 ADAPTERS: Final = {
     "sim_openpi": Adapter(format_profile=OPENPI),
-    # 🔴 `DOCKER` here would be a lie, and an expensive one. This package ships
-    # exactly one image definition (`runner/`), and it installs openpi -- there
-    # is no LingBot Dockerfile anywhere in the wheel, and `runner/train_runner.py`
-    # imports `openpi.*` unconditionally. Claiming a container exists gets the
-    # miner as far as `docker run` before anything notices; worse, if they ever
-    # ran `openroboto build`, an image *does* exist under this competition's name
-    # with π0.5 inside it, and training then finishes quietly on the wrong base
-    # model.
+    # 🔴 Still `UNAVAILABLE`, but for a different reason than before -- and the
+    # two previous reasons written here are both now wrong, so they are worth a
+    # line each so nobody re-derives them.
     #
-    # ⚠️ **Writing that Dockerfile is not what flips this back to `DOCKER`.**
-    # That reading is the obvious one and it is wrong, so it is written down
-    # here rather than left to be rediscovered: LingBot's training entry point
-    # does not fit `train(cfg, episodes, policy)` -- red line #2's signature --
-    # in two places that have no workaround short of changing the interface
-    # itself. `episodes` is a list of JSON episodes and LingBot reads a LeRobot
-    # dataset *directory*; `policy` is an already-built openpi policy object and
-    # LingBot's model can only be built inside each rank, after FSDP2 sharding,
-    # so nothing can be handed across the process boundary. An image whose
-    # entry point cannot be driven by the arguments we pass it is the same
-    # silent failure as the wrong base model, one layer down. So what unblocks
-    # this line is a decision about that interface, not a Dockerfile.
+    # "This package ships no LingBot Dockerfile": **fixed.**
+    # `runner/lingbot/` ships one, and `runner_context(LINGBOT)` selects it.
+    #
+    # "LingBot cannot fit `train(cfg, episodes, policy)`": **wrong.** That
+    # conclusion came from reading the vendor's own entry point, which builds
+    # the model inside each rank after `dist.init_process_group` and shards it
+    # with FSDP2 -- nothing to hand across a process boundary, and a LeRobot
+    # dataset *directory* where `episodes` is a list. But the vendor's entry
+    # point is not the only way into their code: `build_foundation_model()`
+    # runs in a single process (`get_parallel_state()` is written to work
+    # uninitialised), sharding is a separate call nobody has to make, and their
+    # unused `add_lora_to_model()` brings a 6.38 B model onto one card. The
+    # data pipeline never comes up because this runner does not use theirs.
+    # See `runner/lingbot/train_runner.py` for the four decisions in full.
+    #
+    # What is actually missing is **a run**. It was written on a machine with
+    # no NVIDIA card: `docker build` never ran, `build_foundation_model()` was
+    # never called, and "14-18 GB fits on a 24 GB card" is arithmetic. `DOCKER`
+    # is a promise that `openroboto train` drives this image to a checkpoint,
+    # and a promise made from arithmetic costs a miner a round to disprove.
+    #
+    # → `scripts/verify_lingbot_runner.py` turns each assumption into a
+    #   PASS/FAIL in about ten minutes on a box with a card. All stages green
+    #   is what this line is waiting for; then it becomes `Adapter(
+    #   format_profile=LINGBOT)` and nothing else here changes.
     "sim_lingbot": Adapter(format_profile=LINGBOT, training=UNAVAILABLE),
     # The dataset (`xarm6-libero-seed-v1`) and the training image do not exist
     # yet, so there is nothing to install and nothing to run.

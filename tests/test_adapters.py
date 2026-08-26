@@ -18,7 +18,7 @@ import re
 
 import pytest
 
-from openroboto import adapters
+from openroboto import DEFAULT_RUNNER_PROFILE, adapters, runner_context
 from openroboto.config import ConfigError
 
 
@@ -72,10 +72,14 @@ def test_every_row_of_the_table_is_a_known_path() -> None:
 
 
 def test_no_adapter_claims_a_container_this_package_does_not_ship() -> None:
-    """🔴 `training=DOCKER` is a claim about `runner/`, and that directory holds
-    exactly one Dockerfile, which installs openpi -- `runner/train_runner.py`
-    imports `openpi.*` with nothing to fall back on. An adapter judged by another
-    rule book claiming DOCKER is that claim made falsely.
+    """🔴 `training=DOCKER` is a claim that `openroboto build` has a build
+    context for **this competition's base model**, and the base model is the
+    format profile.
+
+    This used to assert `format_profile == OPENPI`, because π0.5's was the only
+    context in the wheel. Now that `runner/lingbot/` ships too, the assertion
+    that still means something is the general one -- a profile with no context
+    claiming DOCKER sends `resolve_context()` at a directory that is not there.
 
     "docker will fail anyway" is not the backstop it sounds like: the image name
     comes from `params.training.image`, so an image under that competition's name
@@ -84,7 +88,21 @@ def test_no_adapter_claims_a_container_this_package_does_not_ship() -> None:
     """
     for name, adapter in adapters.ADAPTERS.items():
         if adapter.training == adapters.DOCKER:
-            assert adapter.format_profile == adapters.OPENPI, name
+            context = runner_context(adapter.format_profile)
+            assert (context / "Dockerfile").is_file(), (
+                f"{name}: no build context at {context}"
+            )
+
+
+def test_the_packages_default_runner_profile_is_the_default_adapters() -> None:
+    """`openroboto/__init__.py` spells `"openpi"` out rather than importing it
+    (importing `adapters` from the package root is a cycle). Two spellings of
+    one value, so they are compared here -- if they drift, a `miner.yaml` with
+    no competition section builds out of a directory that does not exist."""
+    assert DEFAULT_RUNNER_PROFILE == adapters.OPENPI
+    assert adapters.ADAPTERS[adapters.DEFAULT_ADAPTER].format_profile == (
+        DEFAULT_RUNNER_PROFILE
+    )
 
 
 def test_an_adapter_cannot_be_edited_after_it_is_resolved() -> None:

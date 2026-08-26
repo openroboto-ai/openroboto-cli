@@ -29,22 +29,57 @@ The default in `scripts/deploy_miner.sh` was always the placeholder
 following the docs was bound to fail at the git clone step.
 """
 
-OPENPI_RUNNER_CONTEXT: Final = "openpi-runner"
-"""Local build-context directory name, checked first by `openroboto build`.
+DEFAULT_RUNNER_PROFILE: Final = "openpi"
+"""Which build context `runner_context()` hands back when nobody says.
 
-Only a developer override: it lets you build from an edited Dockerfile without
-reinstalling. Miners do not have this directory -- the real context ships inside
-the package, see `runner_context()`.
+The value is `adapters.OPENPI` -- spelled out rather than imported, because
+`adapters` imports from `openroboto.config`, and importing it from the package
+root is a cycle. `tests/test_adapters.py` compares the two.
+
+It is also the answer for a `miner.yaml` written before competitions existed:
+that workspace is the π0.5 competition (`adapters.DEFAULT_ADAPTER`), and the
+context it built then is the one it must keep building.
 """
 
 
-def runner_context() -> Path:
-    """Directory holding the training image's build context, inside the package.
+def local_runner_context(profile: str = DEFAULT_RUNNER_PROFILE) -> Path:
+    """Local build-context directory, checked first by `openroboto build`:
+    `./openpi-runner/`, `./lingbot-runner/`.
 
-    This ships in the wheel (~20 KB: a Dockerfile plus one stdlib-only script).
-    It used to live in `openpi-runner/` at the repository root and *not* ship,
-    with `openroboto build` falling back to docker's remote git context. That was
-    broken in two ways:
+    Only a developer override: it lets you build from an edited Dockerfile
+    without reinstalling. Miners do not have this directory -- the real context
+    ships inside the package, see `runner_context()`.
+    """
+    return Path(f"{profile}-runner")
+
+
+def runner_context(profile: str = DEFAULT_RUNNER_PROFILE) -> Path:
+    """Directory holding this competition's training image build context, inside
+    the package.
+
+    There is one context per **format profile**, not one per competition: what
+    the image has to contain is decided by the base model (`adapters.OPENPI` /
+    `adapters.LINGBOT`), and two competitions on the same base model want the
+    same image with different names. Names come from `params.training.image`;
+    contents come from here. `commands/build.py` is where the two are kept from
+    disagreeing.
+
+    Layout, and why it is lopsided:
+
+        runner/            <- openpi (π0.5), the default profile
+        runner/lingbot/    <- LingBot-VLA 2.0
+
+    π0.5's context stays exactly where it was rather than moving down to
+    `runner/openpi/`. It is in production, `docker build` on it is the path
+    every miner runs today, and a path change buys nothing here. The cost is
+    that `lingbot/` sits inside π0.5's build context and gets sent to the
+    daemon on every openpi build -- about 20 KB, and the openpi Dockerfile
+    COPYs one file by name, so nothing of LingBot's can leak into that image.
+
+    Each context ships in the wheel (~20 KB: a Dockerfile plus one stdlib-only
+    script). They used to live in `openpi-runner/` at the repository root and
+    *not* ship, with `openroboto build` falling back to docker's remote git
+    context. That was broken in two ways:
 
     1. The repository is private until launch, so the anonymous fetch that
        `docker build <git-url>` performs returned **HTTP 401** -- for every miner
@@ -58,4 +93,5 @@ def runner_context() -> Path:
     Shipping it makes both impossible: no network, no credentials, and the image
     definition is versioned with the code that drives it.
     """
-    return Path(__file__).parent / "runner"
+    packaged = Path(__file__).parent / "runner"
+    return packaged if profile == DEFAULT_RUNNER_PROFILE else packaged / profile

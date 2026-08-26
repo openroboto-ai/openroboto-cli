@@ -15,7 +15,8 @@ you find the same rule stated in two files, that is a bug — report it.
 | I want to… | Read |
 |---|---|
 | understand what this subnet rewards and how | [SUBNET_OVERVIEW.md](./SUBNET_OVERVIEW.md) |
-| get from nothing to a first submission | [MINER.md](./MINER.md) |
+| get from nothing to a first submission on the **π0.5** competition | [MINER.md](./MINER.md) |
+| do the same on the **LingBot-VLA 2.0** competition | [MINER_LINGBOT.md](./MINER_LINGBOT.md) |
 | move off `python rt.py` / `python miner.py`, or move from the π0.5 base to LingBot | [MIGRATION.md](./MIGRATION.md) |
 | set up a real machine (GPU, Docker, systemd) | [MINER_DEPLOY.md](./MINER_DEPLOY.md) |
 | know what every `miner.yaml` field does | [CONFIG.md](./CONFIG.md) |
@@ -74,6 +75,10 @@ Recorded here rather than left to be discovered by a miner losing money:
   describes a client version that is not published yet and carries `<TBD>`
   placeholders for every date. It is written down early so the announcement can quote
   it — **not** so that anyone follows it today.
+- **The LingBot competition is not open on the network yet**, so
+  [MINER_LINGBOT.md](./MINER_LINGBOT.md) marks each step that does not work today and
+  what it is waiting on. Its §5 (training) is deliberately empty until the LingBot
+  training container lands — an invented procedure there costs a week of GPU time.
 - **These guides still describe the subnet as of 2026-08-19.** The fee, round number
   and dataset URLs are published live in `control.json`; where a document names a
   number, the live file wins.

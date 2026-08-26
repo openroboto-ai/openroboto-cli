@@ -6,6 +6,12 @@
 
 > For miners participating in the RobotTrain subnet.
 
+> **Mining the LingBot-VLA 2.0 competition instead?** Read
+> [MINER_LINGBOT.md](./MINER_LINGBOT.md). Most of this page still applies —
+> the fee, the chain announcement, the repository naming, the burn→announce
+> window — but the checkpoint layout and where the base model comes from do not,
+> and following the π0.5 rules there gets your upload rejected after you pay.
+
 ## Architecture
 
 ```
