@@ -556,6 +556,49 @@ def _season_settings(**fee: Any) -> Settings:
     )
 
 
+FEE_COLDKEY = "5Feqsy76Do37q6NaKkGnu4191g2gog85rLvNdx3iVHLKugtD"
+
+
+def _real_season_settings() -> Settings:
+    """A config `init` wrote for the xArm 6 season -- the one that pays by
+    transfer. Its `base_model_family` is what picks the rule book; the adapter
+    name says `xarm6`, which is hardware and names no base model at all."""
+    return Settings.from_mapping(
+        {
+            "environment": "dev",
+            "subnet": {"netuid": 313, "network": "test", "hotkey_ss58": HOTKEY},
+            "competition": {
+                "id": 3,
+                "track": "real",
+                "seq": 1,
+                "label": "xArm 6",
+                "adapter": "real_xarm6",
+                "base_model_family": "openpi",
+                "params": {
+                    "fee": {
+                        "kind": "transfer",
+                        "amount_tao": 2.0,
+                        "coldkey": FEE_COLDKEY,
+                    }
+                },
+            },
+        }
+    )
+
+
+def _real_verdict() -> Any:
+    """What `precheck` hands back for that season -- carrying the address, which
+    is the field the burn's verdict has no use for and this one cannot do
+    without."""
+    return SimpleNamespace(
+        live=SimpleNamespace(label="xArm 6", id=3),
+        kind="transfer",
+        amount_tao=2.0,
+        cid=3,
+        fee=SimpleNamespace(kind="transfer", amount_tao=2.0, coldkey=FEE_COLDKEY),
+    )
+
+
 def _verdict(amount_tao: float = 0.25, cid: int = 2, kind: str = "burn") -> Any:
     """What `competition.precheck` hands back.
 
@@ -627,8 +670,21 @@ def _submitting(
         state["burn_tx_hash"] = "0x" + "e" * 64
         return True
 
+    def _transfer(
+        cfg: Settings,
+        round_num: int,
+        state: dict[str, Any],
+        verdict: Any = None,
+    ) -> bool:
+        # Tagged, unlike the burn: the failure this guards against is a season
+        # paid the *other* way, and an untagged amount cannot tell the two apart.
+        paid.append(("transfer", None if verdict is None else verdict.amount_tao))
+        state["burn_tx_hash"] = "0x" + "f" * 64
+        return True
+
     monkeypatch.setattr(submit_command, "precheck", _precheck)
     monkeypatch.setattr(submit_command, "perform_burn", _burn)
+    monkeypatch.setattr(submit_command, "perform_transfer", _transfer)
     return checked, paid
 
 
@@ -690,24 +746,26 @@ def test_a_season_paid_by_transfer_is_not_quietly_burned_instead(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """🔴 Burning the right amount the wrong way spends it and still leaves the
-    submission unpaid. Until transfers can be sent, this refuses."""
+    submission unpaid: `add_stake_burn` has no recipient at all, so the season's
+    collection address never sees a Rao of it and the fee is not refundable.
+
+    The branch is on `params.fee.kind` as the backend served it in this run --
+    not on the track, not on the adapter. Those are two more names for the same
+    fact, and they disagree on the first season that breaks the pattern, while
+    paying.
+    """
     monkeypatch.chdir(tmp_path)
     save_state(7, _uploaded_state())
     _, paid = _submitting(monkeypatch, _season_settings())
     monkeypatch.setattr(
         submit_command,
         "precheck",
-        lambda *a, **k: SimpleNamespace(
-            live=SimpleNamespace(label="xArm 6 第一届", id=3),
-            kind="transfer",
-            amount_tao=2.0,
-            cid=3,
-        ),
+        lambda *a, **k: _verdict(amount_tao=2.0, cid=3, kind="transfer"),
     )
 
     args = argparse.Namespace(config="miner.yaml", round=7, output_dir="", force=False)
-    assert submit_command.run(args) == 1
-    assert paid == []
+    assert submit_command.run(args) == 0
+    assert paid == [("transfer", 2.0)]
 
 
 def test_a_config_from_before_competitions_is_refused_before_it_uploads(
@@ -788,6 +846,79 @@ def test_the_fee_that_is_burned_is_the_one_the_verdict_carries(
     assert burn_command.perform_burn(settings, 9, state, verdict=_verdict(0.25)) is True
     assert burned["amount_tao"] == 0.25
     assert settings.burn_rate_tao is None
+
+
+def test_the_transfer_goes_to_the_address_the_verdict_carries(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """🔴 The destination comes from the row the backend served seconds ago, not
+    from `miner.yaml`.
+
+    `judge()` refuses a season whose address is null and refuses one whose
+    address moved since `init`; reading the snapshot here instead would turn
+    both of those into advice, on the one value where being wrong puts a
+    non-refundable fee into a stranger's account. The amount travels the same
+    way and for the same reason as the burn's.
+    """
+    monkeypatch.chdir(tmp_path)
+    settings = _real_season_settings()
+    monkeypatch.setattr(burn_command, "get_subtensor", lambda network: _FakeSubtensor())
+    monkeypatch.setattr(burn_command, "open_wallet", lambda cfg: object())
+    sent: dict[str, Any] = {}
+
+    def _transfer(**kwargs: Any) -> Any:
+        sent.update(kwargs)
+        return SimpleNamespace(tx_hash="0x" + "a" * 64, block_number=4242)
+
+    monkeypatch.setattr(burn_command, "execute_transfer", _transfer)
+    state = _uploaded_state()
+    state["competition_id"] = 3
+    # The real track puts the fingerprint on chain because the repository may be
+    # private -- without it the self-check refuses before any money moves.
+    state["model_hash"] = "9" * 64
+    save_state(21, state)
+
+    assert (
+        burn_command.perform_transfer(settings, 21, state, verdict=_real_verdict())
+        is True
+    )
+    assert sent["amount_tao"] == 2.0
+    assert sent["dest_coldkey"] == FEE_COLDKEY
+    # and the proof is in the checkpoint under the keys `announce` reads --
+    # both tracks put it on chain as `b` / `bb` (spec 10 §3.5)
+    assert load_state(21)["burn_tx_hash"] == "0x" + "a" * 64
+    assert load_state(21)["burn_block"] == 4242
+
+
+def test_a_transfer_is_not_sent_when_the_payload_would_not_encode(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The pre-spend self-check guards both ways of paying, not just the burn.
+
+    A fee that has left the wallet for a payload that turns out not to fit is
+    the exact loss this check exists to prevent, and it does not become less of
+    one because the season collects by transfer.
+    """
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        burn_command,
+        "get_subtensor",
+        lambda network: pytest.fail(
+            "opened a chain connection for an unsendable round"
+        ),
+    )
+    monkeypatch.setattr(
+        burn_command,
+        "execute_transfer",
+        lambda **k: pytest.fail("paid for a round whose payload does not encode"),
+    )
+
+    assert (
+        burn_command.perform_transfer(
+            _real_season_settings(), 22, {}, verdict=_real_verdict()
+        )
+        is False
+    )
 
 
 def test_neither_burn_nor_submit_opens_control_json(

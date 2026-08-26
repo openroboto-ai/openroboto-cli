@@ -45,7 +45,7 @@ from openroboto.chain import get_subtensor, open_wallet
 from openroboto.competition import Verdict
 from openroboto.config import Settings
 from openroboto.console import fail, say
-from openroboto.payment import execute_stake_burn
+from openroboto.payment import BurnReceipt, execute_stake_burn, execute_transfer
 from openroboto.preflight import check_announce_ready, payload_size, payload_track
 from openroboto.round_state import save_state
 
@@ -96,26 +96,13 @@ def perform_burn(
     together with that answer. See the module docstring for what the fee bought
     while it was optional.
     """
-    settings.require_for_chain()
+    if not _ready_to_spend(settings, round_num, state, doing="burning"):
+        return False
 
     # The amount stays a local. Writing it back onto `settings` would put a
     # season's figure into the field that holds the subnet-wide rate, and the
     # next reader could no longer tell which of the two they were looking at.
     amount_tao = verdict.amount_tao
-
-    # The track decides which fields the payload must carry, and this is the
-    # last look at them before the money moves.
-    reasons = check_announce_ready(state, round_num, payload_track(settings))
-    if reasons:
-        fail(f"Pre-chain self-check failed (round {round_num}); **not** burning:")
-        for reason in reasons:
-            say(f"   • {reason}")
-        return False
-    say(
-        f"✅ self-check passed | commitment payload "
-        f"{payload_size(state, round_num)}/512 bytes"
-    )
-
     say(f"🔥 About to burn {amount_tao} TAO (netuid={settings.netuid}, irreversible)")
 
     subtensor = get_subtensor(settings.network)
@@ -131,9 +118,95 @@ def perform_burn(
     finally:
         subtensor.close()
 
+    _record(round_num, state, receipt)
+    return True
+
+
+def perform_transfer(
+    settings: Settings,
+    round_num: int,
+    state: dict[str, Any],
+    verdict: Verdict,
+) -> bool:
+    """Pay a **transfer** season's fee: ordinary TAO into `params.fee.coldkey`.
+
+    The real track's counterpart to `perform_burn`, and deliberately shaped the
+    same way -- same self-check before the money moves, same two fields written
+    into the checkpoint afterwards (`b` / `bb` are shared by both tracks, spec 10
+    §3.5). Everything that differs is the extrinsic itself.
+
+    🔴 **The address comes from the verdict, never from `miner.yaml`.**
+    `judge()` has already refused a season whose `coldkey` is null and refused
+    one whose address moved since `init`; taking it from the snapshot here would
+    put those two checks back to being advisory, on the one value where being
+    wrong means the fee is irrecoverably in a stranger's account.
+
+    `coldkey` cannot be `None` at this point for the same reason -- `judge()`
+    checks existence before equality and raises. Asserting it rather than
+    defaulting keeps that guarantee where it is enforced instead of quietly
+    growing a second, weaker copy of it here.
+    """
+    if not _ready_to_spend(settings, round_num, state, doing="paying"):
+        return False
+
+    amount_tao = verdict.amount_tao
+    dest = verdict.fee.coldkey
+    assert dest is not None  # judge() refuses a season with a null address
+
+    say(
+        f"💸 About to transfer {amount_tao} TAO to {dest} "
+        f"(network={settings.network}, irreversible)"
+    )
+
+    subtensor = get_subtensor(settings.network)
+    try:
+        wallet = open_wallet(settings)
+        receipt = execute_transfer(
+            subtensor=subtensor,
+            wallet=wallet,
+            dest_coldkey=dest,
+            amount_tao=amount_tao,
+        )
+    finally:
+        subtensor.close()
+
+    _record(round_num, state, receipt)
+    return True
+
+
+def _ready_to_spend(
+    settings: Settings, round_num: int, state: dict[str, Any], *, doing: str
+) -> bool:
+    """The last look at the commitment before any money moves. Shared by both
+    ways of paying, because the thing being protected is the same either way: a
+    fee that has left the wallet and a payload that turns out not to encode.
+    """
+    settings.require_for_chain()
+
+    # The track decides which fields the payload must carry.
+    reasons = check_announce_ready(state, round_num, payload_track(settings))
+    if reasons:
+        fail(f"Pre-chain self-check failed (round {round_num}); **not** {doing}:")
+        for reason in reasons:
+            say(f"   • {reason}")
+        return False
+    say(
+        f"✅ self-check passed | commitment payload "
+        f"{payload_size(state, round_num)}/512 bytes"
+    )
+    return True
+
+
+def _record(round_num: int, state: dict[str, Any], receipt: BurnReceipt) -> None:
+    """Write the payment proof into the checkpoint.
+
+    The keys keep their `burn_` names on both tracks: they are what `announce`
+    reads and what the encoder puts on chain as `b` / `bb`, and renaming them
+    would strand every checkpoint written by an earlier release between the
+    payment and the announcement -- the one gap where the fee is already gone.
+    """
     state["burn_tx_hash"] = receipt.tx_hash
     state["burn_block"] = receipt.block_number
     state["step"] = "burn"
     state["status"] = "completed"
     save_state(round_num, state)
-    return True

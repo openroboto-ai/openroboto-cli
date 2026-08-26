@@ -34,7 +34,7 @@ from openroboto.config import ConfigError, ControlFetchError
 from openroboto.console import fail
 from openroboto.huggingface import UploadError
 from openroboto.logging import setup_logger
-from openroboto.payment import BurnError
+from openroboto.payment import BurnError, TransferError
 from openroboto.round_state import StateError
 from openroboto.training import TrainingError
 
@@ -65,6 +65,7 @@ EXPECTED_ERRORS = (
     ControlFetchError,
     StateError,
     TrainingError,
+    TransferError,
     UploadError,
 )
 """These exceptions already carry an explanation written for miners: print the

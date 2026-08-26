@@ -77,7 +77,7 @@ from typing import Any
 from openroboto_protocol.model_format import FormatIssueCode, FormatReport
 
 from openroboto.commands.announce import perform_announce
-from openroboto.commands.burn import perform_burn
+from openroboto.commands.burn import perform_burn, perform_transfer
 from openroboto.commands.check import (
     check_files,
     resolve_layout,
@@ -100,14 +100,16 @@ from openroboto.round_state import (
 
 
 def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    parser = subparsers.add_parser("submit", help="upload → burn → announce")
+    parser = subparsers.add_parser(
+        "submit", help="upload → pay the entry fee → announce"
+    )
     parser.add_argument("--config", default="miner.yaml")
     parser.add_argument("--round", type=int, default=0)
     parser.add_argument("--output-dir", default="")
     parser.add_argument(
         "--force",
         action="store_true",
-        help="ignore the completed state, burn again and re-announce",
+        help="ignore the completed state, pay the entry fee again and re-announce",
     )
     parser.set_defaults(handler=run)
 
@@ -123,12 +125,18 @@ def run(args: argparse.Namespace) -> int:
     if state.get("step") == "announce" and not args.force:
         say(
             "⏭️  this round is already submitted. Pass --force to redo it "
-            "(that burns TAO again)"
+            "(that pays the entry fee again)"
         )
         return 0
 
     if args.force:
-        say("⚡ --force: ignoring the burn in the checkpoint -- this **burns again**")
+        # "the payment", not "the burn": on the real track the same two keys hold
+        # a transfer, and a miner told they are about to burn 2 TAO looks for
+        # stake that will never exist.
+        say(
+            "⚡ --force: ignoring the payment in the checkpoint -- "
+            "this **pays the entry fee again**"
+        )
         state.pop("burn_tx_hash", None)
         state.pop("burn_block", None)
         save_state(round_num, state)
@@ -154,7 +162,7 @@ def run(args: argparse.Namespace) -> int:
         # a rejection. `--force` cleared this key above, so redoing a round does
         # go through the gate.
         say(
-            f"⏭️  already burned: tx={str(state['burn_tx_hash'])[:16]}... "
+            f"⏭️  already paid: tx={str(state['burn_tx_hash'])[:16]}... "
             f"block={state.get('burn_block')}"
         )
     elif snapshot is not None:
@@ -172,17 +180,6 @@ def run(args: argparse.Namespace) -> int:
             verdict = precheck(settings, snapshot, datetime.now(UTC))
         except PrecheckFailed:
             return 1
-        if verdict.kind != BURN:
-            # `transfer` is a real competition setting that this client
-            # cannot carry out yet. Falling through to the burn would pay
-            # the right amount in the wrong way -- irreversibly, and the
-            # submission would still not be paid for.
-            fail(
-                f"{verdict.live.label} is paid for by {verdict.kind}, which "
-                f"this version cannot send yet. **Nothing was paid.**\n"
-                f"   → pip install -U openroboto"
-            )
-            return 1
         # The season id goes into the checkpoint, not straight into the
         # announcement, for the same reason `burn_tx_hash` does: the two
         # steps can be minutes and a crash apart, and a bare `openroboto
@@ -195,8 +192,19 @@ def run(args: argparse.Namespace) -> int:
         save_state(round_num, state)
         # The verdict travels with the payment rather than being re-derived
         # from `settings`: it is the proof that the season was confirmed **in
-        # this run**, and it carries the fee that was confirmed with it.
-        if not perform_burn(settings, round_num, state, verdict=verdict):
+        # this run**, and it carries the fee that was confirmed with it --
+        # including *how* it is collected.
+        #
+        # 🔴 The branch is on `verdict.kind`, i.e. on `params.fee.kind` as the
+        # backend served it seconds ago, and not on the track or the adapter.
+        # Those are two more names for the same fact and they would disagree on
+        # the first season that breaks the pattern -- while paying. `fee_of()`
+        # has already refused any third word, so there is no default case to
+        # fall through into (falling through to the burn would pay the right
+        # amount in a way that reaches nobody, irreversibly, and leave the
+        # submission unpaid).
+        pay = perform_burn if verdict.kind == BURN else perform_transfer
+        if not pay(settings, round_num, state, verdict=verdict):
             return 1
 
     if not perform_announce(settings, round_num, state):
