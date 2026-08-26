@@ -131,16 +131,30 @@ def lingbot_layout(params: Mapping[str, Any]) -> Any:
     name: the vendor's own base checkpoint does not contain the descriptor and
     the export path never writes one, so requiring it by default would reject
     every LingBot submission including the vendor's, after the TAO was burned.
+
+    🔴 **The backend builds its layout from the same row, the same way**
+    (`app/domain/hf_layout.py::lingbot_layout`, 2026-08-26). Until that day it
+    used the package constants for all five fields and read nothing from the
+    competition, which agreed with this function only because nobody had filled
+    in `format.model_config_file` / `weights_index_file` / `cli_config_file` --
+    and those are exactly the three keys `check_lingbot_layout` reads. The first
+    competition to set one would have gone green here and been **rejected
+    terminally after payment** there. The two sides are pinned equal field by
+    field by the backend's `tests/domain/test_lingbot_layout_single_source.py`;
+    **changing the lookup here without changing it there turns that test red.**
+
+    A key present but null falls back too (`or`, not `get(key, default)`):
+    migration 0007 seeds the keys it does not know yet as SQL `NULL`, and null
+    means "this competition does not constrain it" everywhere else in `params`.
+    Handing `None` to a `str` field would be a crash rather than a fallback.
     """
     fmt = params.get("format") or {}
     layout_cls = protocol_rule("LingbotLayout")
     return layout_cls(
-        model_config_file=fmt.get(
-            "model_config_file", protocol_rule("LINGBOT_MODEL_CONFIG_FILE")
-        ),
-        weights_index_file=fmt.get(
-            "weights_index_file", protocol_rule("LINGBOT_WEIGHTS_INDEX_FILE")
-        ),
+        model_config_file=fmt.get("model_config_file")
+        or protocol_rule("LINGBOT_MODEL_CONFIG_FILE"),
+        weights_index_file=fmt.get("weights_index_file")
+        or protocol_rule("LINGBOT_WEIGHTS_INDEX_FILE"),
         camera_names=tuple(fmt.get("cameras") or ()),
         joint_field_names=tuple(fmt.get("joints") or ()),
         cli_config_file=fmt.get("cli_config_file") or None,
@@ -218,11 +232,22 @@ def check_directory(directory: Path, *, layout: Any = None) -> FormatReport:
 def read_weight_map(directory: Path, layout: Any) -> Mapping[str, str] | None:
     """Parse `model.safetensors.index.json` -- the `{tensor: shard}` map.
 
-    Reading it is what keeps this command **at least as strict as admission**:
-    without the map, the protocol package does not evaluate the missing-shard and
-    missing-tensor rules at all ("absence of evidence, not evidence of a missing
-    shard"), while the backend, which can read the same file, does. A miner would
-    then pass here, burn, and be rejected afterwards.
+    Reading it is what makes this command **stricter than admission**, and the
+    reason to want that is not the one this docstring used to give. It claimed
+    "the backend, which can read the same file, does" -- **it does not.**
+    `judge_lingbot_tree` passes `weight_map=None` and says why in so many words:
+    the backend's rule book lives in its domain layer, which performs zero I/O,
+    so the missing-shard and missing-tensor rules are not evaluated there at all
+    ("absence of evidence, not evidence of a missing shard").
+
+    So a broken index does not get you rejected after burning. It gets you
+    *admitted* after burning, and then the evaluator cannot load the model --
+    which by this module's own header is the more expensive of the two. This
+    command is the only place it can be caught before the money moves.
+
+    The direction is the safe one (stricter before payment, never looser), but
+    the sentence had to go: believing the backend already checks this is how a
+    real gap stops getting closed.
 
     It does not break the "never download the weights" rule either: the index is
     a few hundred KB of plain text sitting next to the shards, not the shards.
@@ -241,8 +266,10 @@ def read_weight_map(directory: Path, layout: Any) -> Mapping[str, str] | None:
     if not isinstance(weight_map, dict):
         say(
             f"⚠️  could not read the weight index {found[0]} — the shard and "
-            "tensor rules were not checked. The subnet's admission does read it, "
-            "so it can still reject what passes here."
+            "tensor rules were not checked. The subnet's admission does not "
+            "read it either, so nothing checks them before you pay: a shard "
+            "listed here but missing from the repo is found by the evaluator, "
+            "after the burn."
         )
         return None
     return weight_map
