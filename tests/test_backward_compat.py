@@ -1,8 +1,20 @@
-"""The four legacy commands still behave exactly as they did — to the byte.
+"""The commitment encoding still behaves exactly as it did — to the byte.
 
 This repository is installed by people who are not on our team. Break it and
 nothing tells us; the only symptom is submissions dropping. **This file is that
 "tells us".**
+
+🔴 **`burn` and `submit` left this set on 2026-08-26, deliberately.** Paying used
+to fall back to control.json's subnet-wide rate whenever `miner.yaml` had no
+competition section, and that fee bought a place in whichever season the backend
+defaults to -- non-refundably, with no error printed. Refusing outright is a
+behaviour change on a path this file existed to freeze, so the freeze is lifted
+here rather than worked around: their exit code went 0 → 1, and pinning it would
+pin a bug. See `baseline_capture.COMMANDS`, `commands/burn.py` and ADR 05.
+
+What survives that is the guarantee the file is actually for. `announce` is where
+`encode()` is called; `submit` only ever reached those bytes through
+`perform_announce`, so `payload_announce.hex` carries the claim below on its own.
 
 What it pins is one sentence:
 
@@ -64,7 +76,7 @@ BASELINE_FILES = (
 
 @pytest.fixture(scope="module")
 def today(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Capture]:
-    """Run the four commands against the tree as it is right now."""
+    """Run the pinned commands against the tree as it is right now."""
     return capture_all(tmp_path_factory.mktemp("legacy"))
 
 
@@ -126,9 +138,9 @@ def test_stdout_is_unchanged(command: str, today: dict[str, Capture]) -> None:
     """Line for line. Miners have these strings in tutorials and screenshots.
 
     Nothing is normalized away before comparing — not timestamps, not random
-    values. These four commands have no business printing either, and if one
+    values. These commands have no business printing either, and if one
     starts, that is precisely what this test is for. (Measured on 2026-08-25:
-    the four outputs contain no version number either, so the version
+    their output contains no version number either, so the version
     normalization the design sketched has no input and is not written.)
     """
     expected = (BASELINE / f"stdout_{command}.txt").read_text(encoding="utf-8")
@@ -154,7 +166,7 @@ def test_exit_codes_are_unchanged(today: dict[str, Capture]) -> None:
 def test_a_legacy_config_needs_no_new_field() -> None:
     """The fixture config is the whole claim: a miner does not edit anything.
 
-    A `competition` section appearing in it would mean the four commands above
+    A `competition` section appearing in it would mean the commands above
     were exercised on a config that had already been migrated. The check is on
     the parsed mapping, not on the file text — the file's own comments talk
     about competitions.

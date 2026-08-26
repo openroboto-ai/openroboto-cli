@@ -108,11 +108,13 @@ dataset the season names: the round is `competition.seq`, the status is
 > `--force` does not skip it. A backend it cannot reach is a refusal, not a warning:
 > without an answer there is no way to say who the money would be going to.
 
-> **Do not set `payment.burn_rate_tao` locally.** The announced fee is the only
-> correct value; a stale local override burns the wrong amount, and a wrong amount is
-> rejected with no refund. If `control.json` cannot be fetched, `openroboto burn`
-> **refuses to run** rather than falling back to a guess — there is deliberately no
-> built-in default fee.
+> **`payment.burn_rate_tao` has no effect, wherever you set it.** Not in
+> `miner.yaml` and not in `control.json`: an amount says how much, never *which
+> competition*, and a fee paid with no season attached is filed under whichever
+> season the backend defaults to — with the TAO already gone. The fee comes from
+> `competition.params.fee` and nowhere else, and a workspace with no `competition`
+> section is refused rather than charged a subnet-wide rate. There is deliberately
+> no built-in default fee.
 
 ## Weight-setting validator
 

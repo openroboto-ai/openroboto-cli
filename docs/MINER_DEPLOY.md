@@ -91,8 +91,9 @@ log_level: INFO
 > command complains about a missing `netuid`. Run `openroboto doctor` after
 > editing; it names every field that is missing or unusable.
 
-Payment fields are deliberately absent: `burn_rate_tao` and `limit_price_rao`
-come from the subnet's `control.json`, never from `miner.yaml`. See §"Notes".
+Payment fields are deliberately absent, and adding them changes nothing: the
+entry fee is the season's `competition.params.fee`, confirmed against the backend
+in the moment before it is paid. See §"Notes".
 
 ## 4. Build OpenPi Runner Docker Image
 
@@ -341,7 +342,7 @@ docker run --rm --gpus all -v /data:/data robot-train-openpi:latest nvidia-smi
 - `openroboto submit` runs the post-training pipeline (upload → burn → announce).
 - State is saved to `state/round_N.json` — re-running `openroboto submit` resumes from the last completed step and reuses an existing burn instead of paying twice.
 - Backend scanner picks up submissions within ~60 seconds.
-- Payment config (`burn_rate_tao`, `limit_price_rao`) comes from the owner's `control.json`, not `miner.yaml`. If `control.json` cannot be fetched, `burn` **refuses to run** rather than guessing an amount — a wrong amount is rejected by the backend and the TAO is not refunded.
+- The entry fee comes from the season (`competition.params.fee.amount_tao`), not from `control.json` and not from `miner.yaml`. An amount says how much, never which competition, so neither is a way to pay: `openroboto submit` confirms the fee against the backend in the moment before paying, and refuses a workspace with no `competition` section instead of guessing. A wrong amount is rejected by the backend and the TAO is not refunded.
 - Backend verifies burn tx using **strict exact match** (no `startswith` prefix matching).
 - Anti-plagiarism: backend computes LFS fingerprint (`repo_hash`) for each submission; same hash from different hotkey → rejected.
 - Seed computation failure is auto-retried (`seed_failed` status), no manual intervention needed.

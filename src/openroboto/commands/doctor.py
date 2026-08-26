@@ -25,6 +25,7 @@ from importlib.metadata import PackageNotFoundError, requires, version
 
 from openroboto import adapters
 from openroboto.commands.build import competition_adapter, competition_image
+from openroboto.competition import Fee, load_snapshot
 from openroboto.config import (
     ConfigError,
     ControlFetchError,
@@ -431,8 +432,8 @@ def check_hf_token(settings: Settings) -> CheckResult:
 
 
 def check_wallet(settings: Settings) -> CheckResult:
-    """Whether the wallet can be opened, and whether the coldkey balance is
-    enough for this round's burn.
+    """Whether the wallet can be opened, and whether the coldkey balance covers
+    this competition's entry fee (`_entry_fee`, not the subnet-wide rate).
 
     The `except Exception` here is deliberate: exceptions at the wallet layer
     come from the bittensor SDK (`KeyFileError`, substrate connection
@@ -481,27 +482,59 @@ def check_wallet(settings: Settings) -> CheckResult:
             "wallet", True, f"loaded (balance unavailable: {exc})", required=False
         )
 
-    # When the rate is unknown it cannot be compared against the balance
-    # (`None` does not compare), and we must not pretend it is enough either
-    # -- doctor is the self-check entry point before money is spent, so
-    # "cannot be determined" has to be reported truthfully as exactly that.
-    if settings.burn_rate_tao is None:
+    priced = _entry_fee(settings)
+    # An unknown fee cannot be compared against the balance (`None` does not
+    # compare), and pretending it is covered is worse than saying so -- doctor is
+    # the self-check entry point before money is spent, so "cannot be determined"
+    # is reported as exactly that.
+    if priced is None:
         return CheckResult(
             "wallet balance",
             False,
-            f"{balance:.4f} TAO (this round's rate is unknown, cannot tell "
-            f"whether it is enough)",
-            "make control.json reachable, or pin payment.burn_rate_tao in miner.yaml",
+            f"{balance:.4f} TAO (this workspace's entry fee is unknown, so "
+            f"whether that is enough cannot be told)",
+            "`openroboto init --refresh` rewrites the competition section, which "
+            "is where the fee comes from",
         )
 
-    enough = balance >= settings.burn_rate_tao
+    season, fee = priced
+    enough = balance >= fee.amount_tao
     return CheckResult(
         "wallet balance",
         enough,
-        f"{balance:.4f} TAO (this round burns {settings.burn_rate_tao} TAO)",
-        "balance too low, top up before you submit — a burn that fails halfway "
+        f"{balance:.4f} TAO ({season} costs {fee.amount_tao} TAO to enter, "
+        f"by {fee.kind})",
+        "balance too low, top up before you submit — a payment that fails halfway "
         "still has to be redone",
     )
+
+
+def _entry_fee(settings: Settings) -> tuple[str, Fee] | None:
+    """What entering this workspace's competition costs, and which one that is.
+
+    🔴 **Not `settings.burn_rate_tao`.** That is control.json's subnet-wide rate,
+    and the subnet runs several seasons at once: on `real/1` it reads 0.1 while
+    that season's own `params.fee` is 2 TAO, so a wallet holding 0.5 TAO was
+    ticked green here and ran out at `submit` -- after the upload, and with no
+    hint anywhere in the report that the two numbers were about different things.
+    The season's `params.fee` is the amount `submit` actually confirms and pays,
+    so it is the one to hold a balance against.
+
+    `None` means there is nothing to compare with, and both ways of getting there
+    are real: a workspace with no `competition:` section (which cannot pay at all
+    -- `submit` refuses it), and one whose section will not parse. Neither is
+    guessed past; `fee_of` has no defaults for the same reason.
+    """
+    snapshot = load_snapshot(settings)
+    if snapshot is None:
+        return None
+    try:
+        return snapshot.name, snapshot.fee()
+    except ConfigError:
+        # The unparseable half. Naming the broken key belongs to the command
+        # that acts on it; here the honest report is "unknown", which is what
+        # the caller prints.
+        return None
 
 
 def _coldkey_address(settings: Settings) -> str:

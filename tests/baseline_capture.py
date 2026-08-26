@@ -1,5 +1,5 @@
-"""Run the four legacy commands with the chain and HuggingFace faked, and record
-exactly what came out.
+"""Run the legacy commands that still have a legacy path, with the chain and
+HuggingFace faked, and record exactly what came out.
 
 Two callers, one implementation, and that is the point:
 
@@ -35,14 +35,27 @@ from typing import Any
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 LEGACY_CONFIG = FIXTURES / "miner_legacy.yaml"
 
-#: The four commands AGENTS.md §1 says must not change behaviour.
-COMMANDS = ("upload", "burn", "announce", "submit")
+#: The commands AGENTS.md §1 says must not change behaviour **and that a config
+#: with no competition section can still reach**.
+#:
+#: 🔴 `burn` and `submit` were here until 2026-08-26 and are not any more, which
+#: is a promise being retired rather than a fixture being tidied. Paying used to
+#: fall back to control.json's subnet-wide rate whenever `miner.yaml` had no
+#: competition section; that fee bought a place in whichever season the backend
+#: defaults to, non-refundably, and it is now refused outright (ADR 05 -- installs
+#: from before the rebuild are out of support). Their recorded exit code was 0 and
+#: is now 1, so keeping them here would pin a behaviour we deliberately changed.
+#:
+#: What the retirement does **not** cost is the encoding guarantee this whole
+#: baseline exists for: `announce` is where `encode()` is actually called, and
+#: `payload_announce.hex` pins it byte for byte on its own. `submit` only reached
+#: those bytes by way of `perform_announce`.
+COMMANDS = ("upload", "announce")
 
-#: Only `announce` and `submit` reach `encode()`. `upload` pushes to HF and
-#: `burn` sends `add_stake_burn`; neither builds a commitment payload, so a
-#: "payload baseline" for them would be the hash of an empty string -- a
-#: fixture that is green forever and guards nothing.
-COMMANDS_WITH_PAYLOAD = ("announce", "submit")
+#: Only `announce` reaches `encode()`; `upload` pushes to HuggingFace and builds
+#: no commitment payload, so a "payload baseline" for it would be the hash of an
+#: empty string -- a fixture that is green forever and guards nothing.
+COMMANDS_WITH_PAYLOAD = ("announce",)
 
 ROUND = 1
 HOTKEY = "5" + "M" * 47  # matches subnet.hotkey_ss58 in miner_legacy.yaml
@@ -96,10 +109,8 @@ def _seed_state(command: str) -> dict[str, Any]:
         "step": "upload",
         "status": "completed",
     }
-    if command in ("upload", "submit"):
+    if command == "upload":
         return {"hotkey_ss58": HOTKEY}
-    if command == "burn":
-        return uploaded
     return {**uploaded, "burn_tx_hash": BURN_TX, "burn_block": BURN_BLOCK}
 
 
@@ -107,19 +118,16 @@ def _seed_state(command: str) -> dict[str, Any]:
 def _faked_world(payloads: list[bytes]) -> Iterator[None]:
     """Chain, wallet and HuggingFace replaced by constants.
 
-    Patched on the modules that own the names rather than on `submit` -- the
-    pipeline command calls `perform_upload` / `perform_burn` /
-    `perform_announce`, and those look their own dependencies up in their own
-    module globals.
+    Patched on the modules that own the names rather than on the command being
+    run: `perform_upload` / `perform_announce` look their own dependencies up in
+    their own module globals.
     """
     from openroboto_protocol.commitment import encode
 
     from openroboto.chain.commitment import SubmitResult
     from openroboto.commands import announce as announce_module
-    from openroboto.commands import burn as burn_module
     from openroboto.commands import upload as upload_module
     from openroboto.huggingface import UploadResult
-    from openroboto.payment import BurnReceipt
 
     def fake_submit(subtensor: Any, wallet: Any, netuid: int, payload: Any) -> Any:
         payloads.append(encode(payload))
@@ -134,14 +142,6 @@ def _faked_world(payloads: list[bytes]) -> Iterator[None]:
 
     patches: list[tuple[Any, str, Any]] = [
         (upload_module, "push_model", lambda **kwargs: UploadResult(HF_URL, HF_COMMIT)),
-        (burn_module, "refresh_burn_rate", lambda *a, **k: None),
-        (burn_module, "get_subtensor", lambda network: _FakeSubtensor()),
-        (burn_module, "open_wallet", lambda settings: _FakeWallet()),
-        (
-            burn_module,
-            "execute_stake_burn",
-            lambda **kwargs: BurnReceipt(tx_hash=BURN_TX, block_number=BURN_BLOCK),
-        ),
         (announce_module, "get_subtensor", lambda network: _FakeSubtensor()),
         (announce_module, "open_wallet", lambda settings: _FakeWallet()),
         (announce_module, "submit_announcement", fake_submit),

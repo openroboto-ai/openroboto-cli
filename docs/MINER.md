@@ -115,10 +115,13 @@ The CLI pulls `control.json` via **HTTP direct link** (ETag cached), no R2 SDK
 dependency. `openroboto submit` handles the post-training pipeline, reading the
 wallet password from `miner.yaml`.
 
-The evaluation fee comes from `control.json` and from nowhere else. If it cannot
-be fetched, `burn` **refuses to run** instead of falling back to a guess — an
-amount that does not match is rejected by the backend, and the TAO is not
-refunded.
+The evaluation fee comes from the season you are entering
+(`competition.params.fee` in `miner.yaml`) and from nowhere else — not from
+`control.json`, whose `payment` block is one rate for a subnet that runs several
+seasons at once, and not from anything typed into `miner.yaml`. `openroboto
+submit` confirms it against the backend in the moment before paying; a workspace
+with no `competition` section is refused rather than charged a guess. An amount
+that does not match is rejected by the backend, and the TAO is not refunded.
 
 ## Chain Submission Format
 

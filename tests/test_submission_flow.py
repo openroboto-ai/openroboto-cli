@@ -17,6 +17,7 @@ from typing import Any
 
 import pytest
 from openroboto_protocol.commitment import CommitmentPayload, decode, encode
+from openroboto_protocol.schemas import Competition
 
 from openroboto import competition as competition_module
 from openroboto.chain.commitment import SubmitResult
@@ -41,11 +42,10 @@ COMMIT = "a" * 40
 
 
 def _settings() -> Settings:
+    """A workspace with no competition section -- what `init` wrote before
+    seasons existed, and what nothing can pay with any more."""
     return Settings.from_mapping(
-        {
-            "subnet": {"netuid": 80, "network": "finney", "hotkey_ss58": HOTKEY},
-            "payment": {"burn_rate_tao": 0.1},
-        }
+        {"subnet": {"netuid": 80, "network": "finney", "hotkey_ss58": HOTKEY}}
     )
 
 
@@ -91,9 +91,8 @@ def test_burn_spends_nothing_when_preflight_fails(
         )
 
     monkeypatch.setattr(burn_command, "get_subtensor", _explode)
-    monkeypatch.setattr(burn_command, "refresh_burn_rate", lambda *a: None)
 
-    assert burn_command.perform_burn(_settings(), 1, {}) is False
+    assert burn_command.perform_burn(_settings(), 1, {}, _verdict()) is False
 
 
 def test_burn_records_tx_and_block_in_state(
@@ -105,7 +104,6 @@ def test_burn_records_tx_and_block_in_state(
     subtensor = _FakeSubtensor()
     monkeypatch.setattr(burn_command, "get_subtensor", lambda network: subtensor)
     monkeypatch.setattr(burn_command, "open_wallet", lambda settings: _FakeWallet())
-    monkeypatch.setattr(burn_command, "refresh_burn_rate", lambda *a: None)
 
     seen: dict[str, Any] = {}
 
@@ -116,8 +114,8 @@ def test_burn_records_tx_and_block_in_state(
     monkeypatch.setattr(burn_command, "execute_stake_burn", _burn)
 
     state = _uploaded_state()
-    assert burn_command.perform_burn(_settings(), 1, state) is True
-    # the rate comes from the config / control.json, not from a literal in the code
+    assert burn_command.perform_burn(_settings(), 1, state, _verdict(0.1)) is True
+    # the amount is the verdict's, i.e. the season's own `params.fee`
     assert seen["amount_tao"] == 0.1
     assert seen["netuid"] == 80
     assert state["burn_tx_hash"].startswith("0x")
@@ -204,34 +202,41 @@ def test_announce_failure_tells_the_miner_not_to_burn_again(
     assert "do not burn again" in capsys.readouterr().err
 
 
-# ─── the rate must be known, never guessed (old default 0.01 vs 0.1 in production) ──
+# ─── the amount must come from the season, never be guessed ──────────────────
 
 
-def test_burn_refuses_when_the_rate_is_unknown(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """control.json cannot be fetched -> not one cent is burned.
+def test_the_payment_cannot_be_called_without_a_confirmed_season() -> None:
+    """🔴 The gate is the **signature**, which is why it is asserted on directly.
 
-    The old code kept burning with the default 0.01 while the production rate is 0.1:
-    the miner burns ten times too little, the backend rejects on the amount check, and
-    **the TAO is not refunded**. So there must be no fallback amount here.
+    `verdict` used to default to `None`, and every caller that forgot it fell
+    through to a subnet-wide rate: control.json's, or whatever had been typed
+    into `payment.burn_rate_tao`. Either one is an amount with no season attached
+    to it, and a fee paid that way is filed under whichever season the backend
+    defaults to -- non-refundably. Give this parameter a default again and that
+    hole reopens with no test failing anywhere else, because the failure is a
+    call that *type-checks*.
     """
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(burn_command, "refresh_burn_rate", lambda *a: None)
+    import inspect
 
-    def _explode(*args: Any, **kwargs: Any) -> None:
-        raise AssertionError(
-            "connected to the chain with an unknown rate -- this is exactly the path "
-            "that burns TAO for nothing"
-        )
+    verdict = inspect.signature(burn_command.perform_burn).parameters["verdict"]
+    assert verdict.default is inspect.Parameter.empty
 
-    monkeypatch.setattr(burn_command, "get_subtensor", _explode)
 
-    settings = Settings.from_mapping({"subnet": {"netuid": 80, "network": "finney"}})
-    assert settings.burn_rate_tao is None  # the default must not be any concrete amount
+def test_burn_on_its_own_pays_nothing_and_says_what_to_run(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`openroboto burn` cannot obtain a verdict, so it refuses rather than
+    reaching for an amount.
 
-    assert burn_command.perform_burn(settings, 1, _uploaded_state()) is False
-    assert "Could not get" in capsys.readouterr().err
+    It also cannot run `submit`'s layout gate, so a version of this command that
+    fetched its own verdict would be the pre-payment layout check with an opt-out
+    -- see the module docstring in `commands/burn.py`.
+    """
+    assert burn_command.run(argparse.Namespace(config="miner.yaml", round=1)) == 1
+
+    printed = capsys.readouterr().err
+    assert "nothing was burned" in printed.lower()
+    assert "openroboto submit" in printed
 
 
 # ─── burn validity window (backend: 50 blocks; over it means rejected, no refund) ────
@@ -517,23 +522,11 @@ def test_submit_force_clears_the_previous_burn(
     )
     save_state(3, state)
 
-    monkeypatch.setattr(
-        submit_command.Settings, "load", staticmethod(lambda path: _settings())
-    )
-    monkeypatch.setattr(submit_command, "perform_upload", lambda *a, **k: None)
-    burned: list[bool] = []
-
-    def _burn(settings: Settings, round_num: int, state: dict[str, Any]) -> bool:
-        burned.append(True)
-        state["burn_tx_hash"] = "0x" + "e" * 64
-        return True
-
-    monkeypatch.setattr(submit_command, "perform_burn", _burn)
-    monkeypatch.setattr(submit_command, "perform_announce", lambda *a, **k: True)
+    _, paid = _submitting(monkeypatch, _season_settings())
 
     args = argparse.Namespace(config="miner.yaml", round=3, output_dir="", force=True)
     assert submit_command.run(args) == 0
-    assert burned == [True]
+    assert paid == [0.25]
 
 
 # ─── the gate before the money ───────────────────────────────
@@ -717,66 +710,159 @@ def test_a_season_paid_by_transfer_is_not_quietly_burned_instead(
     assert paid == []
 
 
-def test_a_config_from_before_competitions_takes_the_old_path(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+def test_a_config_from_before_competitions_is_refused_before_it_uploads(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """No section to check against, so the check does not run at all -- and the
-    rate still comes from control.json, exactly as it did."""
+    """🔴 The reversal: this path used to pay at control.json's subnet-wide rate.
+
+    Such a workspace cannot say which season it is entering, so the fee it paid
+    was filed under whichever season the backend defaults to -- the archived π0.5
+    one -- and it is not refunded. `openroboto init` has not produced a config
+    like this since seasons existed, so refusing it costs installs from before
+    the rebuild, which are out of support (ADR 05).
+
+    The refusal lands **before the upload**: the run cannot end in a payment
+    either way, and finding that out after several gigabytes buys nothing. The
+    message has to name the command that repairs the file, because it is all the
+    miner has.
+    """
     monkeypatch.chdir(tmp_path)
     save_state(8, _uploaded_state())
-    checked, _ = _submitting(monkeypatch, _settings())
+    checked, paid = _submitting(monkeypatch, _settings())
     monkeypatch.setattr(
         submit_command,
-        "precheck",
-        lambda *a, **k: pytest.fail("an old config has no competition to check"),
+        "perform_upload",
+        lambda *a, **k: pytest.fail("pushed gigabytes for a run that cannot pay"),
     )
 
     args = argparse.Namespace(config="miner.yaml", round=8, output_dir="", force=False)
-    assert submit_command.run(args) == 0
-    assert checked == []
+    assert submit_command.run(args) == 1
+    assert (checked, paid) == ([], [])
+    assert "openroboto init --refresh" in capsys.readouterr().err
 
 
-def test_a_season_config_reads_no_control_json_when_it_burns(
+def test_a_paid_round_still_announces_without_a_competition_section(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Two sources for one number with no rule for which wins -- and this one is
-    money. It is also one more request between "checked" and "paid"."""
+    """The one exemption to the refusal above, and the reason it is worth having.
+
+    If the fee is already gone, the only thing that can still make it count is
+    the commitment. Refusing here would turn an unsupported config into a total
+    loss -- money spent, nothing on chain -- which is strictly worse than the
+    rejection it was heading for anyway.
+    """
+    monkeypatch.chdir(tmp_path)
+    state = _uploaded_state()
+    state["burn_tx_hash"] = "0x" + "e" * 64
+    state["burn_block"] = 8_888_880
+    save_state(12, state)
+    _, paid = _submitting(monkeypatch, _settings())
+
+    args = argparse.Namespace(config="miner.yaml", round=12, output_dir="", force=False)
+    assert submit_command.run(args) == 0
+    assert paid == []  # not paid a second time
+
+
+def test_the_fee_that_is_burned_is_the_one_the_verdict_carries(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The amount reaching the chain comes from the row the backend just served,
+    and it is **not** written back onto `Settings` on the way -- that field holds
+    the subnet-wide rate, and a season's figure sitting in it is a number nobody
+    downstream can attribute."""
     monkeypatch.chdir(tmp_path)
     settings = _season_settings()
-    monkeypatch.setattr(
-        burn_command,
-        "refresh_burn_rate",
-        lambda *a, **k: pytest.fail("control.json was read for a season's fee"),
-    )
     monkeypatch.setattr(burn_command, "get_subtensor", lambda network: _FakeSubtensor())
     monkeypatch.setattr(burn_command, "open_wallet", lambda cfg: object())
-    monkeypatch.setattr(
-        burn_command,
-        "execute_stake_burn",
-        lambda **kwargs: SimpleNamespace(tx_hash="0x" + "f" * 64, block_number=1),
-    )
+    burned: dict[str, Any] = {}
+
+    def _burn(**kwargs: Any) -> Any:
+        burned.update(kwargs)
+        return SimpleNamespace(tx_hash="0x" + "f" * 64, block_number=1)
+
+    monkeypatch.setattr(burn_command, "execute_stake_burn", _burn)
     state = _uploaded_state()
     state["competition_id"] = 2
     save_state(9, state)
 
     assert burn_command.perform_burn(settings, 9, state, verdict=_verdict(0.25)) is True
-    # the amount came from the verdict, i.e. from the row the backend served
-    assert settings.burn_rate_tao == 0.25
+    assert burned["amount_tao"] == 0.25
+    assert settings.burn_rate_tao is None
 
 
-def test_a_season_fee_nobody_checked_is_not_burned(
+def test_neither_burn_nor_submit_opens_control_json(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Reaching the burn with no verdict means the gate never ran. Falling back
-    to control.json here would be that gate quietly becoming optional."""
+    """🔴 The executable half of "the payment path does not read control.json".
+
+    Blocking the connection itself catches the whole family at once -- a
+    re-import of `fetch_control`, an HTTP call added later, a helper that reaches
+    for the rate "just to compare". The block goes on
+    `urllib.request.urlopen` rather than on `openroboto.http_client.urlopen`
+    because four modules bind that name into their own globals at import time,
+    so a patch aimed one layer up would leave every one of them free to call out.
+
+    ⚠️ **Not vacuous.** The workspace below really does carry a control.json URL
+    -- the environment preset fills one in and it has to keep working for
+    external validators -- so "no request" cannot be an artefact of there being
+    nothing to request. And the run really does reach the chain: the amount that
+    arrives at `execute_stake_burn` is asserted, so this cannot pass by refusing
+    early.
+
+    The competitions endpoint is faked one level up rather than blocked: it is
+    the one request this path is *supposed* to make, and leaving it ambiguous
+    would make the block below unreadable.
+    """
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(
-        burn_command,
-        "execute_stake_burn",
-        lambda **kwargs: pytest.fail("burned a fee that was never confirmed"),
+        "urllib.request.urlopen",
+        lambda *a, **k: pytest.fail("the payment path opened an HTTP connection"),
     )
 
-    assert burn_command.perform_burn(_season_settings(), 10, _uploaded_state()) is False
+    settings = _season_settings()
+    settings.control_json_url = "https://example.invalid/control.json"
+    assert settings.control_json_url  # there is a file here, and nobody opens it
+
+    # `openroboto burn` on its own: refuses, without consulting anything first.
+    assert burn_command.run(argparse.Namespace(config="miner.yaml", round=1)) == 1
+
+    live = Competition.model_validate(
+        {
+            "id": 2,
+            "track": "sim",
+            "seq": 2,
+            "label": "LingBot-VLA 2.0",
+            "adapter": "sim_lingbot",
+            "status": "active",
+            "params": {"fee": {"kind": "burn", "amount_tao": 0.25, "coldkey": None}},
+        }
+    )
+    monkeypatch.setattr(
+        competition_module,
+        "fetch_competitions",
+        lambda url: SimpleNamespace(data=[live]),
+    )
+    monkeypatch.setattr(competition_module, "_confirmed", lambda: True)
+    monkeypatch.setattr(
+        submit_command.Settings, "load", staticmethod(lambda path: settings)
+    )
+    monkeypatch.setattr(submit_command, "perform_upload", lambda *a, **k: None)
+    monkeypatch.setattr(submit_command, "perform_announce", lambda *a, **k: True)
+    monkeypatch.setattr(submit_command, "fetch_tree", lambda *a, **k: GOOD_TREE)
+    monkeypatch.setattr(burn_command, "get_subtensor", lambda network: _FakeSubtensor())
+    monkeypatch.setattr(burn_command, "open_wallet", lambda cfg: _FakeWallet())
+    burned: dict[str, Any] = {}
+
+    def _burn(**kwargs: Any) -> Any:
+        burned.update(kwargs)
+        return SimpleNamespace(tx_hash="0x" + "f" * 64, block_number=1)
+
+    monkeypatch.setattr(burn_command, "execute_stake_burn", _burn)
+    save_state(21, _uploaded_state())
+
+    args = argparse.Namespace(config="miner.yaml", round=21, output_dir="", force=False)
+    assert submit_command.run(args) == 0
+    assert burned["amount_tao"] == 0.25  # it really did get as far as paying
 
 
 def test_a_rate_typed_into_miner_yaml_does_not_buy_a_place_in_a_season(
@@ -806,11 +892,6 @@ def test_a_rate_typed_into_miner_yaml_does_not_buy_a_place_in_a_season(
         burn_command,
         "get_subtensor",
         lambda network: pytest.fail("connected to the chain to pay for no season"),
-    )
-    monkeypatch.setattr(
-        burn_command,
-        "refresh_burn_rate",
-        lambda *a, **k: pytest.fail("a season's fee is not control.json's business"),
     )
     state = _uploaded_state()
     save_state(11, state)
@@ -1215,7 +1296,6 @@ def _competition_settings(track: str = "real") -> Settings:
     return Settings.from_mapping(
         {
             "subnet": {"netuid": 80, "network": "finney", "hotkey_ss58": HOTKEY},
-            "payment": {"burn_rate_tao": 0.1},
             "competition": {
                 "track": track,
                 "seq": 1,
@@ -1453,7 +1533,6 @@ def test_a_real_track_burn_spends_nothing_when_a_field_is_missing(
     do next, which the protocol package has no business knowing.
     """
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(burn_command, "refresh_burn_rate", lambda *a: None)
 
     def _explode(*args: Any, **kwargs: Any) -> None:
         raise AssertionError(
@@ -1476,15 +1555,19 @@ def test_a_real_track_burn_spends_nothing_when_a_field_is_missing(
     assert expected in capsys.readouterr().out
 
 
-def test_a_legacy_burn_is_not_asked_for_the_new_fields(
+def test_a_simulation_burn_is_not_asked_for_the_real_track_fields(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """The same self-check, on a config with no competition section, still
-    passes with neither `cid` nor `m` anywhere in the checkpoint."""
+    """The other side of the gate above: on the simulation track the same
+    self-check passes with neither `cid` nor `m` in the checkpoint.
+
+    Without this, "refuse when a field is missing" could be satisfied by
+    demanding those fields of everyone, which would stop the seasons that do not
+    have them from paying at all.
+    """
     monkeypatch.chdir(tmp_path)
     from openroboto.payment import BurnReceipt
 
-    monkeypatch.setattr(burn_command, "refresh_burn_rate", lambda *a: None)
     monkeypatch.setattr(burn_command, "get_subtensor", lambda network: _FakeSubtensor())
     monkeypatch.setattr(burn_command, "open_wallet", lambda settings: _FakeWallet())
     monkeypatch.setattr(
@@ -1493,7 +1576,12 @@ def test_a_legacy_burn_is_not_asked_for_the_new_fields(
         lambda **kwargs: BurnReceipt(tx_hash="0x" + "d" * 64, block_number=8_888_880),
     )
 
-    assert burn_command.perform_burn(_settings(), 1, _uploaded_state()) is True
+    assert (
+        burn_command.perform_burn(
+            _competition_settings("sim"), 1, _uploaded_state(), _verdict(0.1)
+        )
+        is True
+    )
 
 
 # ─── model_hash reaches the checkpoint from HF, after the push ───

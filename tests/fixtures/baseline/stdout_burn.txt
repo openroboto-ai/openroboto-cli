@@ -1,4 +1,0 @@
-✅ self-check passed | commitment payload 294/512 bytes
-🔥 About to burn 0.1 TAO (netuid=80, irreversible)
-✅ burn done | tx=0xdddddddddddddd... block=8888880
-   → Next, run `openroboto announce` (**required** -- without it nobody can see this burn)

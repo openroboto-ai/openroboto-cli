@@ -41,9 +41,16 @@ No write credential, private task payload, held-out mapping, wallet material, in
 ## Client behavior
 
 The weight-setting validator fetches the URL configured as `urls.control_json`
-(ETag-cached) and follows `public_key` when it rotates. `openroboto doctor`
-fetches it as a reachability check, and `openroboto burn` still reads
-`payment.burn_rate_tao` on the one path that has no competition section.
+(ETag-cached) and follows `public_key` when it rotates -- **that key is the whole
+of what this client reads out of the file**. `openroboto doctor` also fetches it
+as a reachability check.
+
+🔴 **No payment path reads it any more** (2026-08-26). `openroboto burn` used to
+fall back to `payment.burn_rate_tao` when `miner.yaml` had no competition
+section; that rate is subnet-wide, the subnet runs several seasons at once, and
+a fee paid without a season attached is filed under whichever season the backend
+defaults to -- non-refundably. Such a workspace is now refused with an
+instruction to re-run `openroboto init`.
 
 🔴 **The URL must keep answering.** External validators run code we cannot make
 them upgrade, and without that key they cannot read the weights they set.
@@ -95,8 +102,9 @@ validators parse buys nothing and risks breaking a client we cannot see.
 Every URL and credential above is a placeholder. The sample contains only
 miner-visible and validator-visible fields.
 
-> **The fee is 0.1 TAO on mainnet today, but never hard-code it.** Read
-> `payment.burn_rate_tao` from the live file. `openroboto burn` refuses to run when
-> it cannot fetch this file rather than falling back to a guess — a wrong amount is
-> rejected by the backend and the TAO is not refunded.
+> **The `payment` block above has no reader left in this client.** The fee is
+> the entering season's `competition.params.fee.amount_tao`, confirmed against
+> the backend in the second before it is paid. It is still published because
+> other clients parse it, and taking keys out of a document we do not control the
+> readers of buys nothing.
 

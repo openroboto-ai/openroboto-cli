@@ -1,6 +1,0 @@
-🦞 submit | round=1
-✅ self-check passed | commitment payload 294/512 bytes
-🔥 About to burn 0.1 TAO (netuid=80, irreversible)
-📡 committing on chain | round=1 repo=legacyminer/pi05-MMMMMMMMMMMM block=8888888
-✅ commitment on chain | ref=8888888-2 fee=0.000000 TAO
-✅ submitted. Run `openroboto status` to see whether the backend accepted it

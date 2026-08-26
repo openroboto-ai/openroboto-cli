@@ -24,19 +24,10 @@ one.** A flag like that keeps today's hole and renames it: whoever uses it burns
 exactly the TAO this exists to save. If the gate refuses a model that was fine,
 the gate is what gets fixed.
 
-⚠️ **A config from before competitions existed does not reach it**, and that is
-not the byte-compatibility promise talking. What this gate offers is "the rules
-that judge you after the fee ran before it", and for those miners we cannot
-offer it: their submissions are judged by the backend's *own* π0.5 reader
-(`app/domain/hf_layout.py::judge_hf_tree` with its own `_MODEL_PATTERNS` /
-`_REQUIRED_ASSETS`), not by the protocol package, so anything decided here would
-be a guess at another implementation's verdict -- and a wrong guess refuses a
-paying miner on a path `tests/test_backward_compat.py` pins byte for byte. The
-LingBot seasons are the ones where both sides really do call
-`check_lingbot_layout`, which is what makes the promise keepable there. Closing
-the gap means the backend adopting the package's π0.5 rules; until then
-`openroboto check` is what those miners have, and `init --refresh` moves them
-onto a live season that this gate does cover.
+⚠️ A config from before competitions existed does not reach it either, but for a
+blunter reason than it used to have: **it does not reach the payment at all**.
+`_no_season` refuses the run before the upload. There is no longer a path through
+this command that spends money without a season attached to it.
 
 🔴 **It judges the repository listing, not the local directory.** The fee buys
 a verdict on `hf_repo_id` at the commit that goes on chain, and that is not the
@@ -62,12 +53,15 @@ how long that season has left. Their last `init` may have picked a competition
 that has since ended while a new one opened, and on their terminal those two
 situations look exactly the same.
 
-It sits in this orchestration and not inside `execute_stake_burn` on purpose.
-`openroboto burn` is a single-step command miners already script, its behaviour
-is fixed (AGENTS.md §1), and a config from before competitions existed has
-nothing to check anyway -- pushing the gate down there turns it into a pile of
-"skip when…" branches instead of one gate on the path the documentation
-teaches.
+It sits in this orchestration and not inside `execute_stake_burn` on purpose: the
+check ends in a y/N prompt and prints who is being paid, which is a conversation
+with the miner, not something to run from inside the extrinsic layer. What
+`perform_burn` does hold is the *consequence* -- it will not spend without the
+`Verdict` this produced -- so the gate cannot be walked around by calling the
+lower layer directly. `openroboto burn` on its own refuses for the same reason
+(`commands/burn.py`): it could ask the backend, but it could not run the layout
+gate above, and a command that pays after only half the checks is this hole with
+a different name on it.
 
 **There is no `--skip-precheck`, and `--force` does not skip it either.** An
 escape hatch on this gate would be used, and afterwards we could not even show
@@ -139,6 +133,17 @@ def run(args: argparse.Namespace) -> int:
         state.pop("burn_block", None)
         save_state(round_num, state)
 
+    snapshot = load_snapshot(settings)
+    if snapshot is None and not state.get("burn_tx_hash"):
+        # Before the upload, not after it: this run cannot end in a payment, and
+        # finding that out on the far side of several gigabytes is a cost with
+        # nothing to show for it. A round that has **already** burned is exempt
+        # and falls through to the announcement below -- see the comment there;
+        # refusing a paid submission its commitment is the one outcome worse
+        # than a wasted push.
+        _no_season(args.config)
+        return 1
+
     perform_upload(settings, round_num, output_dir, state, reuse_existing=True)
 
     if state.get("burn_tx_hash"):
@@ -152,55 +157,81 @@ def run(args: argparse.Namespace) -> int:
             f"⏭️  already burned: tx={str(state['burn_tx_hash'])[:16]}... "
             f"block={state.get('burn_block')}"
         )
-    else:
-        snapshot = load_snapshot(settings)
-        if snapshot is None:
-            # A config from before competitions existed. Nothing to check
-            # against, and the old path is left byte for byte as it was.
-            if not perform_burn(settings, round_num, state):
-                return 1
-        else:
-            # Before the season check, not after: that one ends in a y/N prompt,
-            # and asking someone to confirm a payment we are about to refuse
-            # anyway teaches them to answer the prompt without reading it.
-            if not layout_is_payable(settings, state):
-                return 1
-            try:
-                verdict = precheck(settings, snapshot, datetime.now(UTC))
-            except PrecheckFailed:
-                return 1
-            if verdict.kind != BURN:
-                # `transfer` is a real competition setting that this client
-                # cannot carry out yet. Falling through to the burn would pay
-                # the right amount in the wrong way -- irreversibly, and the
-                # submission would still not be paid for.
-                fail(
-                    f"{verdict.live.label} is paid for by {verdict.kind}, which "
-                    f"this version cannot send yet. **Nothing was paid.**\n"
-                    f"   → pip install -U openroboto"
-                )
-                return 1
-            # The season id goes into the checkpoint, not straight into the
-            # announcement, for the same reason `burn_tx_hash` does: the two
-            # steps can be minutes and a crash apart, and a bare `openroboto
-            # announce` afterwards has to put the *same* `cid` on chain that the
-            # fee was just paid under. It is written before the payment so that
-            # the pre-spend self-check sizes the payload this round will really
-            # send, and it is the resolved id from the row the backend served a
-            # moment ago -- never a number copied out of miner.yaml.
-            state["competition_id"] = verdict.cid
-            save_state(round_num, state)
-            # The verdict travels with the payment rather than being re-derived
-            # from `settings`: it is the proof that the season was confirmed **in
-            # this run**, and it carries the fee that was confirmed with it.
-            if not perform_burn(settings, round_num, state, verdict=verdict):
-                return 1
+    elif snapshot is not None:
+        # `snapshot is None` is already impossible here -- the guard above
+        # refused every unpaid run without one. It is spelled out rather than
+        # asserted so that if the guard is ever moved, this falls through to the
+        # announcement (which refuses an unpaid round) instead of paying.
+        #
+        # Before the season check, not after: that one ends in a y/N prompt,
+        # and asking someone to confirm a payment we are about to refuse
+        # anyway teaches them to answer the prompt without reading it.
+        if not layout_is_payable(settings, state):
+            return 1
+        try:
+            verdict = precheck(settings, snapshot, datetime.now(UTC))
+        except PrecheckFailed:
+            return 1
+        if verdict.kind != BURN:
+            # `transfer` is a real competition setting that this client
+            # cannot carry out yet. Falling through to the burn would pay
+            # the right amount in the wrong way -- irreversibly, and the
+            # submission would still not be paid for.
+            fail(
+                f"{verdict.live.label} is paid for by {verdict.kind}, which "
+                f"this version cannot send yet. **Nothing was paid.**\n"
+                f"   → pip install -U openroboto"
+            )
+            return 1
+        # The season id goes into the checkpoint, not straight into the
+        # announcement, for the same reason `burn_tx_hash` does: the two
+        # steps can be minutes and a crash apart, and a bare `openroboto
+        # announce` afterwards has to put the *same* `cid` on chain that the
+        # fee was just paid under. It is written before the payment so that
+        # the pre-spend self-check sizes the payload this round will really
+        # send, and it is the resolved id from the row the backend served a
+        # moment ago -- never a number copied out of miner.yaml.
+        state["competition_id"] = verdict.cid
+        save_state(round_num, state)
+        # The verdict travels with the payment rather than being re-derived
+        # from `settings`: it is the proof that the season was confirmed **in
+        # this run**, and it carries the fee that was confirmed with it.
+        if not perform_burn(settings, round_num, state, verdict=verdict):
+            return 1
 
     if not perform_announce(settings, round_num, state):
         return 1
 
     say("✅ submitted. Run `openroboto status` to see whether the backend accepted it")
     return 0
+
+
+def _no_season(config_path: str) -> None:
+    """This workspace does not say which competition it mines, so it cannot pay.
+
+    The fee, the collection address and the season the submission is filed under
+    all come from the `competition:` section, and there is no longer a
+    subnet-wide rate standing behind it: `control.json`'s `payment` block served
+    one number to a subnet that runs several seasons at once, and paying it
+    bought a place in whichever season the backend defaults to (`commands/burn.py`
+    has the full account). Refusing is the outcome that costs nothing.
+
+    ⚠️ The miner reading this has only this message to go on, so it names the
+    command that repairs the file rather than describing the defect.
+    """
+    fail(
+        f"{config_path} does not say which competition this workspace mines "
+        f"(no `competition:` section), so there is no entry fee to pay and no "
+        f"season to submit to. **Nothing was uploaded, paid or sent on chain.**\n"
+        f"   → `openroboto init --refresh` writes that section from the backend "
+        f"and leaves the rest of {config_path} byte for byte as it is (the "
+        f"previous version is kept as {config_path}.bak)\n"
+        f"   → or `openroboto init <directory>` for a fresh workspace, then copy "
+        f"your wallet and HuggingFace settings across\n"
+        f"   Configs written before the subnet ran more than one competition are "
+        f"no longer supported: a fee paid with no season attached is filed under "
+        f"whichever season the backend defaults to, and it is not refunded."
+    )
 
 
 def layout_is_payable(settings: Settings, state: dict[str, Any]) -> bool:

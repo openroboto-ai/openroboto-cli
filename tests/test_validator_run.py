@@ -300,12 +300,22 @@ def test_a_rotated_public_key_is_picked_up_without_a_restart(
         "get_metagraph",
         lambda netuid, network, sub=None: type("MG", (), {"hotkeys": ["a"]})(),
     )
-    monkeypatch.setattr(validator, "apply_control", lambda settings, control: None)
     monkeypatch.setattr(
         validator,
         "fetch_control",
         lambda url, etag: type(
-            "Fetched", (), {"etag": "e1", "control": {"public_key": "rotated-key"}}
+            "Fetched",
+            (),
+            {
+                "etag": "e1",
+                "control": {
+                    "public_key": "rotated-key",
+                    # Production still publishes this block, and it is not this
+                    # process's business: a validator never burns anything. The
+                    # loop used to apply it to `Settings` on every cycle.
+                    "payment": {"burn_rate_tao": 0.1, "limit_price_rao": 5},
+                },
+            },
         )(),
     )
 
@@ -314,6 +324,11 @@ def test_a_rotated_public_key_is_picked_up_without_a_restart(
 
     assert seen_keys == ["rotated-key"], "the loop kept using the stale key"
     assert "public_key in control.json has been updated" in caplog.text
+    # `public_key` is the whole of what this loop takes from that file. The
+    # payment block above went nowhere, which is the point: a validator that
+    # carries a burn rate around is one refactor away from acting on it.
+    assert cfg.burn_rate_tao is None
+    assert cfg.limit_price_rao == 0
 
 
 def test_without_once_the_loop_keeps_going(monkeypatch: pytest.MonkeyPatch) -> None:

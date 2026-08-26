@@ -3,7 +3,9 @@
 # Regenerate `tests/fixtures/baseline/` from an older commit.
 #
 # The baseline is a **contract, not a temporary file**: it is the recorded
-# behaviour of the four legacy commands, taken from a tree that predates the
+# behaviour of the legacy commands that still have a legacy path (see
+# `baseline_capture.COMMANDS` for the two that no longer do), taken from a
+# tree that predates the
 # competition work and — this is the load-bearing half — from an environment
 # where `openroboto-protocol` is still **0.6.0**.
 #

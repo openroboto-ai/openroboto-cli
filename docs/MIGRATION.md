@@ -99,10 +99,12 @@ Two things to know:
    If your file looks like that, run `openroboto init` into a scratch directory and
    copy your values into the nested layout.
 
-2. **`payment.burn_rate_tao` is optional and normally should be absent.** The fee comes
-   from the subnet's `control.json`. If you hard-coded it, delete it — a stale local
-   value is how you burn the wrong amount, and a wrong amount is rejected with no
-   refund.
+2. **`payment.burn_rate_tao` does nothing; delete it.** The fee is the entering
+   season's `competition.params.fee.amount_tao`, confirmed against the backend in
+   the moment before it is paid. A number here says how much, never which
+   competition, so it is not a way to pay — `openroboto submit` refuses a
+   workspace that has no `competition` section instead of charging it a
+   subnet-wide rate. Run `openroboto init --refresh` to write that section.
 
 Run this after any edit:
 
