@@ -118,8 +118,6 @@ import json
 import logging
 import os
 import sys
-import time
-from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -160,17 +158,29 @@ MOE_IMPLEMENTATION = "fused"
 fused kernels turn out to need something FSDP2 sets up, `"eager"` is the
 documented alternative (`build_foundation_model` validates the pair)."""
 
-LORA_TARGET_MODULES = "q,k,v,o,ffn.0,ffn.2"
-"""`add_lora_to_model`'s own default, repeated here so it is visible and one
-edit away.
+LORA_TARGET_MODULES = "q_proj,k_proj,v_proj,o_proj"
+"""The attention projections, read off this checkpoint's own tensor names.
 
-⚠️ Unverified against this architecture. peft matches these as name suffixes;
-when nothing matches it raises rather than silently training zero parameters,
-and `build_policy()` checks the trainable count on top of that.
+🔴 **Not** `add_lora_to_model`'s signature default of `"q,k,v,o,ffn.0,ffn.2"`.
+Those names belong to some other architecture; on an A100 (2026-08-26) peft
+answered
+
+    ValueError: Target modules {'o', 'v', 'k', 'ffn.0', 'ffn.2', 'q'} not
+    found in the base model.
+
+which is the loud failure this docstring used to promise, arriving on cue. The
+vendor never calls `add_lora_to_model` anywhere, so its default has never been
+matched against anything.
+
+Derived from `model.safetensors.index.json`, counting leaf module names across
+all 1708 tensors: `q_proj` 108, `k_proj` 108, `v_proj` 108, `o_proj` 72.
+(`gate_proj` / `up_proj` / `down_proj`, 108 each, are the MLP half — left out
+so the adapter stays small; adding them is a knob, not a fix.)
 """
 
 
 # ─── Config from env ──────────────────────────────────────
+
 
 def get_config() -> dict:
     """Read training config from environment variables.
@@ -202,7 +212,10 @@ def get_config() -> dict:
 
 # ─── Where the weights come from ──────────────────────────
 
-def resolve_weights(repo_id: str, revision: str, checkpoint_path: str, local_name: str) -> str:
+
+def resolve_weights(
+    repo_id: str, revision: str, checkpoint_path: str, local_name: str
+) -> str:
     """A local directory for `repo_id`: the mounted checkpoint if it is there,
     otherwise a download.
 
@@ -220,7 +233,9 @@ def resolve_weights(repo_id: str, revision: str, checkpoint_path: str, local_nam
     see: without a `-v` for the cache it lands in the container's writable
     layer and is re-fetched next round.
     """
-    if os.path.isdir(checkpoint_path) and local_name == os.path.basename(checkpoint_path.rstrip("/")):
+    if os.path.isdir(checkpoint_path) and local_name == os.path.basename(
+        checkpoint_path.rstrip("/")
+    ):
         return checkpoint_path
 
     sibling = os.path.join(os.path.dirname(checkpoint_path.rstrip("/")), local_name)
@@ -230,11 +245,16 @@ def resolve_weights(repo_id: str, revision: str, checkpoint_path: str, local_nam
 
     from huggingface_hub import snapshot_download
 
-    logger.info("⬇️  %s@%s: not mounted, downloading (this is tens of GB)", repo_id, revision[:12] if revision else "main")
+    logger.info(
+        "⬇️  %s@%s: not mounted, downloading (this is tens of GB)",
+        repo_id,
+        revision[:12] if revision else "main",
+    )
     return snapshot_download(repo_id=repo_id, revision=revision or None)
 
 
 # ─── Building the policy ──────────────────────────────────
+
 
 def build_policy(cfg: dict, init_device: str = "cuda"):
     """Build the LingBot base model, freeze it, inject LoRA, return it.
@@ -277,6 +297,7 @@ def build_policy(cfg: dict, init_device: str = "cuda"):
             "structure without weights."
         )
 
+    import lingbotvla
     import torch
     from lingbotvla.models import build_foundation_model, build_processor
     from lingbotvla.models.config_registry import get_config_registry
@@ -284,7 +305,10 @@ def build_policy(cfg: dict, init_device: str = "cuda"):
     from lingbotvla.utils.lora_utils import add_lora_to_model, freeze_parameters
 
     base_weights = resolve_weights(
-        BASE_MODEL_REPO, BASE_MODEL_REVISION, cfg["checkpoint_path"], "lingbot-vla-v2-6b"
+        BASE_MODEL_REPO,
+        BASE_MODEL_REVISION,
+        cfg["checkpoint_path"],
+        "lingbot-vla-v2-6b",
     )
     processor_path = resolve_weights(
         PROCESSOR_REPO, "", cfg["checkpoint_path"], "Qwen3-VL-4B-Instruct"
@@ -304,14 +328,119 @@ def build_policy(cfg: dict, init_device: str = "cuda"):
         config_path="",
         model_path=base_weights,
         tokenizer_path=processor_path,
-        # Both `true` in the vendor's robotwin.yaml and both `False` by
-        # dataclass default. They change the architecture, so the defaults would
-        # build something the v2 weights do not fit.
-        post_training=True,
+        # `adanorm_time` is `true` in the vendor's robotwin.yaml and `False` by
+        # dataclass default. It does change the architecture (AdaNorm gamma /
+        # beta / gate parameters exist only when it is on), so the default
+        # would build something the v2 weights do not fit.
         adanorm_time=True,
+        # 🔴 `post_training=False`, against robotwin.yaml, which sets it `true`.
+        # Read the next 40 lines before changing it back.
+        #
+        # Symptom with `post_training=True` (A100, 2026-08-26, stage 5):
+        #
+        #     KeyError: Unexpected key
+        #     'model.current_video_align_head.projector.layers.0.1.0.bias'
+        #     found in state dict during Post-Training. This is not allowed!!!
+        #
+        # Root cause: this checkpoint carries four auxiliary distillation heads
+        # -- `depth_align_head`, `future_depth_align_head`,
+        # `current_video_align_head`, `future_video_align_head`, 19 tensors each
+        # plus one `*_align_embs` -- and we do not build them.
+        # `modeling_lingbot_vla_v2.py:478-487` builds them only when
+        # `config.align_params != {}`, and ours is empty. 80 of the
+        # checkpoint's 1708 tensors therefore have nowhere to land, and
+        # `module_utils.py:272` turns that into a KeyError when post_training
+        # is on.
+        #
+        # ⚠️ The obvious reading of this flag -- "post_training changes the
+        # architecture, turning it off will silently misplace weights" -- is
+        # wrong, and it is worth writing down why, because it is the reason
+        # this looked unsafe. `post_training` reaches exactly four places:
+        #
+        #   1. `loader.py:221` `map_ckpt_key`: `if key.startswith('expert_visual.')
+        #      and not post_training: return "model.qwenvl_with_expert." + key`.
+        #      🔴 This is the only line in the vendor tree where the flag can
+        #      change *where a weight lands*, and it is dead for this
+        #      checkpoint: all 1708 tensor names start with `model.`, zero
+        #      start with `expert_visual.` (counted from
+        #      `model.safetensors.index.json`). With no `expert_visual.` keys
+        #      the function returns `key` unchanged either way.
+        #   2. `module_utils.py:272`: extra checkpoint key -> raise (on) vs log
+        #      and drop (off). This is the one we are turning off on purpose.
+        #   3. `module_utils.py:285`: `assert len(parameter_names) == 0` --
+        #      every *model* parameter must have been filled. This one is worth
+        #      keeping, so it is re-implemented below rather than lost.
+        #   4. `optimizer.py:153`: a 10x learning-rate gain on parameters whose
+        #      name contains "depth". No depth parameters exist without the
+        #      align heads, and this runner does not build the optimizer.
+        #
+        # `configuration_lingbot_vla.py:115` stores it on the config, and
+        # `grep -rn post_training lingbotvla/models/vla/` finds no other hit --
+        # the modeling code never reads it back. So it is a checkpoint-loading
+        # strictness flag, not an architecture switch.
+        #
+        # Rejected alternative: pass `align_params` so the four heads get built.
+        # It is not just "miners download two more models". The heads change
+        # the *forward* contract: `modeling_lingbot_vla_v2.py:846` calls
+        # `self.depth_emb_forward(outputs_embeds, depth_targets, img_masks,
+        # future_depth_targets)` on every step whenever `align_params != {}`,
+        # and those targets are produced by two frozen teacher networks that
+        # `build_depth_model` (`vision_models/module_utils.py:71-88`) loads from
+        # `moge_path` / `morgbd_path`. Turning the heads on to satisfy a weight
+        # loader would oblige every miner batch to carry depth and future-video
+        # targets it has no way to produce. Loading auxiliary weights we will
+        # never train is the smaller lie than pretending to train them.
+        post_training=False,
         moe_implementation=MOE_IMPLEMENTATION,
     )
-    train_args = TrainingArguments()
+    # 🔴 torchrun's three variables must be in the environment before this line.
+    # `TrainingArguments.__post_init__` reads them back to back with no default
+    # and no guard (`lingbotvla/utils/arguments.py`):
+    #
+    #     self.local_rank  = int(os.getenv("LOCAL_RANK"))
+    #     self.global_rank = int(os.getenv("RANK"))
+    #     self.world_size  = int(os.getenv("WORLD_SIZE"))
+    #
+    # Outside torchrun each is `int(None)` -> TypeError. Their own entrypoint is
+    # always launched under torchrun, so a single-process build is a path they
+    # do not have; a GPU run on 2026-08-26 walked into them one at a time.
+    #
+    # 🔴 `WORLD_SIZE` is "1", not "0": the next statement in that same
+    # `__post_init__` divides by
+    # `pipeline_parallel_size * ulysses_parallel_size * context_parallel_size *
+    # tensor_parallel_size` and checks the remainder, so a zero world would trade
+    # this TypeError for a modulo on nothing.
+    #
+    # `setdefault`, not assignment: under torchrun these are already set and
+    # correct, and this runner has no business overriding them.
+    for name, value in (("LOCAL_RANK", "0"), ("RANK", "0"), ("WORLD_SIZE", "1")):
+        os.environ.setdefault(name, value)
+
+    # 🔴 `output_dir` has no default -- it is the one required field on the
+    # vendor's `TrainingArguments` (`lingbotvla/utils/arguments.py`, the first
+    # `field()` in the class, declared with `metadata` but no `default`).
+    # Calling `TrainingArguments()` raises TypeError, which is how a GPU run on
+    # 2026-08-26 found this line: stages 4 and 5 both died here before a single
+    # weight was read.
+    #
+    # We pass the container's own output mount rather than inventing a path.
+    # Nothing in `build_foundation_model` writes to it -- the value only rides
+    # along in `config_kwargs` -- but a wrong path here would be a checkpoint
+    # written somewhere the miner never looks.
+    # 🔴 `num_train_epochs` is required in practice even though it is typed
+    # `Optional[int]`: the same `__post_init__` raises
+    # `"At least one of num_train_epochs and max_steps must be specified"`
+    # when both are None, and both default to None.
+    #
+    # ⚠️ Nothing in this runner trains -- the miner's strategy script owns the
+    # loop -- so this value never drives an epoch count here. It is passed
+    # because the object refuses to exist without it, and it is passed
+    # `cfg["epochs"]` rather than a literal so that a miner reading `EPOCHS=3`
+    # in `docker run` and a miner reading this file see the same number.
+    train_args = TrainingArguments(
+        output_dir=cfg["output_dir"],
+        num_train_epochs=cfg["epochs"],
+    )
     config_kwargs = {**vars(model_args), **vars(train_args)}
 
     # `build_foundation_model` ends with
@@ -326,9 +455,131 @@ def build_policy(cfg: dict, init_device: str = "cuda"):
         )
 
     config_cls = get_config_registry().get_config_cls_from_config_key(CONFIG_KEY)
+
+    # 🔴 The two dataclasses above cannot describe this checkpoint's
+    # architecture, and merging them is not enough. `ModelArguments` has 21
+    # fields and `TrainingArguments` 71; between them they declare **none** of
+    # `action_dim`, `max_action_dim`, `max_state_dim`, `use_moe`,
+    # `token_num_experts`, `token_moe_intermediate_size`,
+    # `token_shared_intermediate_size`, `vlm_causal`, `loss_type`,
+    # `tokenizer_max_length`, `attention_implementation` or `align_params` --
+    # grep any of them in `lingbotvla/utils/arguments.py` and you get nothing.
+    # So `{**vars(model_args), **vars(train_args)}` carries no architecture at
+    # all, and `LingbotVLAV2Config` falls back to its own signature defaults,
+    # which describe a *different, smaller* model than the released weights.
+    #
+    # Two GPU runs on 2026-08-26 show what that costs:
+    #
+    #     RuntimeError: The size of tensor a (14) must match the size of
+    #     tensor b (55) at non-singleton dimension 0
+    #
+    # -- `action_dim` defaulting to 14 against `action_in_proj.weight`'s real
+    # [768, 55] -- and, once the loader was loosened, 136 orphaned
+    # `qwen_expert...mlp.experts.*` / `.shared_expert.*` / `.gate.weight`
+    # tensors, because `use_moe` defaults to `False` and the checkpoint is a
+    # 32-expert MoE.
+    #
+    # ⚠️ The vendor's own `robotwin.yaml` puts all of these under `train:`,
+    # which their `parse_args` **cannot parse**: it ends with
+    # `parser.parse_known_args()` followed by `if remaining_args: raise
+    # ValueError(...)` (`arguments.py:953-955`), and it builds its dataclasses
+    # from declared fields only. Their shipped config and their shipped parser
+    # are from different revisions. This is the same shape as the other five
+    # fixes in this file -- nobody upstream has run this path -- except that
+    # here it means the yaml is *data*, not something their code can load, so
+    # we read it as data.
+    #
+    # Why read their file instead of transcribing the numbers here: it is the
+    # recipe that produced these weights, and every value in it that can be
+    # checked against a tensor does check out -- `action_in_proj.weight`
+    # [768, 55] and `state_proj.weight` [768, 55] against `action_dim: 55` /
+    # `max_state_dim: 55`; `mlp.experts.gate_proj` [32, 512, 768] against
+    # `token_num_experts: 32` / `token_moe_intermediate_size: 512`;
+    # `shared_expert.gate_proj` [704, 768] against
+    # `token_shared_intermediate_size: 704`. A hand-copied constant list would
+    # be one vendor bump away from being wrong in exactly the silent way this
+    # comment exists to prevent.
+    #
+    # The filter is the model config's own `__init__` signature, so only keys
+    # that describe the model survive; the yaml's training-loop half (lr,
+    # optimizer, save_steps, the fsdp2 settings) is dropped rather than
+    # smuggled onto the config object.
+    #
+    # 🔴 The signature has to be collected across the MRO, not off
+    # `config_cls.__init__`. `LingbotVLAV2Config.__init__` is `(self, **kwargs)`
+    # -- it sets ten `kwargs.setdefault(...)` lines and delegates
+    # (`configuration_lingbot_vla.py:181-195`); the ~70 real parameter names
+    # live on its parent `LingbotVLAConfig`. Reading only the leaf signature
+    # yields `{"self", "kwargs"}`, every yaml key is filtered out, the overlay
+    # becomes a no-op, and the failure resurfaces 200 lines later as the same
+    # `tensor a (14) ... tensor b (55)` this whole block exists to fix. That
+    # cost a GPU round on 2026-08-26; hence the guard below.
+    import inspect
+
+    import yaml
+
+    recipe_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(lingbotvla.__file__))),
+        "configs",
+        "vla",
+        "robotwin",
+        "robotwin.yaml",
+    )
+    with open(recipe_path, encoding="utf-8") as handle:
+        recipe = yaml.safe_load(handle)
+    understood = {
+        name
+        for klass in config_cls.__mro__
+        for name, param in inspect.signature(klass.__init__).parameters.items()
+        if param.kind in (param.POSITIONAL_OR_KEYWORD, param.KEYWORD_ONLY)
+    } - {"self"}
+    overlaid = {}
+    for section in ("model", "train"):
+        overlaid.update(
+            {k: v for k, v in recipe.get(section, {}).items() if k in understood}
+        )
+    if not overlaid:
+        raise RuntimeError(
+            f"{recipe_path} contributed no architecture keys to "
+            f"{CONFIG_KEY}. Either the recipe moved its `model:` / `train:` "
+            f"sections or the config signature stopped naming its parameters; "
+            f"either way the model would silently be built from defaults that "
+            f"do not match the checkpoint."
+        )
+    config_kwargs.update(overlaid)
+    logger.info(
+        "📐 %d architecture keys from %s (action_dim=%s, use_moe=%s)",
+        len(overlaid),
+        recipe_path,
+        overlaid.get("action_dim"),
+        overlaid.get("use_moe"),
+    )
+
+    # Ours wins over the recipe -- these four are values robotwin.yaml states
+    # for the vendor's own cluster run and cannot state for ours.
+    #
+    # `tokenizer_path` and `output_dir` are `/path/to/...` placeholders in that
+    # file. `post_training` is `true` there and the reasoning for `False` is on
+    # `ModelArguments` above -- it has to be repeated here because the recipe
+    # overlay would otherwise put their value back. `align_params` is the
+    # rejected alternative from that same comment: their block names the four
+    # distillation heads *and* the two teacher checkpoints that feed them, and
+    # an empty dict is what makes `modeling_lingbot_vla_v2.py:487` take the
+    # `use_depth_align = False` branch.
+    config_kwargs["tokenizer_path"] = processor_path
+    config_kwargs["post_training"] = False
+    config_kwargs["align_params"] = {}
+    config_kwargs["output_dir"] = cfg["output_dir"]
+
     config = config_cls(**config_kwargs)
 
-    logger.info("🧩 Building %s from %s (%s, %s)", CONFIG_KEY, base_weights, "bfloat16", init_device)
+    logger.info(
+        "🧩 Building %s from %s (%s, %s)",
+        CONFIG_KEY,
+        base_weights,
+        "bfloat16",
+        init_device,
+    )
     model = build_foundation_model(
         config_path="",
         config_cls=config,
@@ -350,12 +601,89 @@ def build_policy(cfg: dict, init_device: str = "cuda"):
                 f"This is what empty_init looks like from the outside."
             )
 
+        # 🔴 This is `module_utils.py:285`'s
+        # `assert len(parameter_names) == 0` brought back by hand. Setting
+        # `post_training=False` above buys us "extra checkpoint keys are
+        # tolerated" and charges us this assertion in the same statement; only
+        # the first half is wanted.
+        #
+        # Losing it silently is the expensive direction. `load_model_weights`
+        # calls `model.to_empty(device=init_device)` before it reads anything,
+        # and `to_empty` *allocates without initialising*. A parameter the
+        # checkpoint does not cover therefore keeps whatever bytes were in that
+        # GPU page. With post_training on, the assert stops it; with it off,
+        # the re-init loop underneath the assert is skipped too, so the model
+        # builds, trains, exports, and evaluates as noise -- no traceback
+        # anywhere. That is the failure this check exists to make loud.
+        #
+        # The reimplementation is exact rather than approximate: the vendor
+        # seeds `parameter_names` from `model.named_parameters()` and removes
+        # one per checkpoint key that maps into it, and `map_ckpt_key` is the
+        # identity for this checkpoint (see the `post_training` note above), so
+        # "what is left over" is precisely model parameters minus checkpoint
+        # keys. Buffers are excluded on both sides -- the vendor handles those
+        # through `buffer_dict`.
+        #
+        # Read from the shard headers rather than `model.safetensors.index.json`
+        # so a single-file checkpoint is checked on the same path as a sharded
+        # one; `safe_open` maps the header only, not the 27 GB.
+        import glob
+
+        from safetensors import safe_open
+
+        shards = sorted(glob.glob(os.path.join(base_weights, "*.safetensors")))
+        if not shards:
+            raise RuntimeError(
+                f"No *.safetensors under {base_weights}, so there is no way to "
+                f"confirm every parameter was filled. Refusing to train on "
+                f"weights that cannot be checked."
+            )
+        ckpt_keys: set[str] = set()
+        for shard in shards:
+            with safe_open(shard, framework="pt") as handle:
+                ckpt_keys.update(handle.keys())
+
+        # Before `add_lora_to_model`: the adapter's own parameters are new by
+        # definition and are not in any checkpoint.
+        param_names = {name for name, _ in model.named_parameters()}
+        missing = sorted(param_names - ckpt_keys)
+        if missing:
+            raise RuntimeError(
+                f"{len(missing)} parameters were never filled from "
+                f"{base_weights} (first: {missing[0]}). `to_empty()` left them "
+                f"uninitialised, so training would run on whatever was in that "
+                f"memory. The checkpoint and this config disagree about the "
+                f"architecture."
+            )
+        logger.info(
+            "🔎 %d parameters all filled from %d shard(s); %d checkpoint "
+            "tensors unused (the align heads we do not build)",
+            len(param_names),
+            len(shards),
+            len(ckpt_keys - param_names),
+        )
+
     freeze_parameters(model)
+    # 🔴 `lora_target_modules_support` must be passed, even though its
+    # signature default is `None`. The body does
+    # `if lora_target_module not in lora_target_modules_support` before it
+    # reaches peft (`lingbotvla/utils/lora_utils.py`), so the default makes it
+    # `"q" not in None` -> `TypeError: argument of type 'NoneType' is not
+    # iterable`. Nothing upstream calls this function -- `grep add_lora_to_model`
+    # across the vendor repo finds only the definition -- so that default has
+    # never run anywhere, which is why it ships broken.
+    #
+    # Passing our own list as the support set makes the check a tautology,
+    # which is the honest shape: we are asserting these names are the ones we
+    # mean, and the real verdict comes from the trainable-parameter count
+    # below. A shorter support set would only make this raise earlier with a
+    # worse message.
     add_lora_to_model(
         model,
         lora_rank=cfg["lora_r"],
         lora_alpha=cfg["lora_alpha"],
         lora_target_modules=LORA_TARGET_MODULES,
+        lora_target_modules_support=LORA_TARGET_MODULES,
     )
 
     trainable = [p for p in model.parameters() if p.requires_grad]
@@ -368,8 +696,10 @@ def build_policy(cfg: dict, init_device: str = "cuda"):
     total = sum(p.numel() for p in model.parameters())
     logger.info(
         "🔧 LoRA r=%d alpha=%d | trainable %.1f M / %.2f B (%.3f%%)",
-        cfg["lora_r"], cfg["lora_alpha"],
-        sum(p.numel() for p in trainable) / 1e6, total / 1e9,
+        cfg["lora_r"],
+        cfg["lora_alpha"],
+        sum(p.numel() for p in trainable) / 1e6,
+        total / 1e9,
         100.0 * sum(p.numel() for p in trainable) / max(total, 1),
     )
 
@@ -379,7 +709,11 @@ def build_policy(cfg: dict, init_device: str = "cuda"):
     # argument would break red line #2's signature.
     model.processor = build_processor(processor_path)
     if torch.cuda.is_available():
-        logger.info("🖥️  %s | %.1f GiB allocated", torch.cuda.get_device_name(0), torch.cuda.memory_allocated() / 2**30)
+        logger.info(
+            "🖥️  %s | %.1f GiB allocated",
+            torch.cuda.get_device_name(0),
+            torch.cuda.memory_allocated() / 2**30,
+        )
     return model
 
 
@@ -402,7 +736,11 @@ def merge_lora_and_export(policy, output_dir: str) -> str:
         # peft's LoraLayer exposes `merge()`; injected adapters are plain
         # modules rather than a PeftModel wrapper, so there is no
         # `merge_and_unload()` to call here.
-        if hasattr(module, "merge") and callable(module.merge) and hasattr(module, "lora_A"):
+        if (
+            hasattr(module, "merge")
+            and callable(module.merge)
+            and hasattr(module, "lora_A")
+        ):
             module.merge()
             merged += 1
     logger.info("🧷 Merged %d LoRA layers back into the base", merged)
@@ -416,6 +754,7 @@ def merge_lora_and_export(policy, output_dir: str) -> str:
 
 
 # ─── Training ─────────────────────────────────────────────
+
 
 def run_training(cfg: dict) -> tuple:
     """Execute LingBot training, returns (metrics, proof).
@@ -458,7 +797,9 @@ def _run_custom(cfg: dict, custom_script: str) -> tuple:
     spec.loader.exec_module(mod)
 
     if not hasattr(mod, "train"):
-        raise ValueError(f"{custom_script} Missing train(cfg, episodes, policy) entry function")
+        raise ValueError(
+            f"{custom_script} Missing train(cfg, episodes, policy) entry function"
+        )
 
     episodes = _load_episodes(cfg["train_data"])
     logger.info("📊 Loaded %d episodes", len(episodes))
@@ -525,6 +866,7 @@ def _get_gpu_name() -> str:
     """
     try:
         import torch
+
         if torch.cuda.is_available():
             return torch.cuda.get_device_name(0)
     except ImportError:
@@ -534,9 +876,14 @@ def _get_gpu_name() -> str:
 
 # ─── Main ─────────────────────────────────────────────────
 
+
 def main():
     """Main entry point: init logging, read config, run training, print JSON result."""
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s,%(msecs)03d [%(name)s] [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s,%(msecs)03d [%(name)s] [%(levelname)s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
     cfg = get_config()
 
     logger.info("🦿 LingBot-VLA 2.0 Runner")
@@ -544,7 +891,12 @@ def main():
     logger.info("   Checkpoint: %s", cfg["checkpoint_path"])
     logger.info("   Train data: %s", cfg["train_data"])
     logger.info("   Output:     %s", cfg["output_dir"])
-    logger.info("   Epochs:     %s | BS: %s | LR: %s", cfg["epochs"], cfg["batch_size"], cfg["learning_rate"])
+    logger.info(
+        "   Epochs:     %s | BS: %s | LR: %s",
+        cfg["epochs"],
+        cfg["batch_size"],
+        cfg["learning_rate"],
+    )
     logger.info("   Device:     %s", _get_gpu_name())
 
     metrics, proof = run_training(cfg)
