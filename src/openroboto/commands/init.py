@@ -76,6 +76,16 @@ SECTION_KEYS = (
     #: model has not changed" then passes by never having been compared.
     "base_repo",
     "base_revision",
+    #: Which rule book judges this season's checkpoint, which files feed the
+    #: fingerprint, which loader the evaluator uses. `adapter` no longer answers
+    #: that -- its `_openpi` / `_lingbot` suffixes are historical and must not be
+    #: read as the base model (protocol 0.8.0).
+    #:
+    #: 🔴 `None` here means **not decided yet, refuse** -- the opposite of the
+    #: `None` on the five instants above, which means "this boundary is not
+    #: checked". `real/1` is `None` today. Defaulting it to `openpi` would judge a
+    #: submission somebody already paid for by rules nobody chose for that season.
+    "base_model_family",
 )
 
 
