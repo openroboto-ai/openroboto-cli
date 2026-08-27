@@ -1727,7 +1727,10 @@ def test_the_real_track_is_not_judged_by_a_book_admission_will_not_open(
         "resolve_competition",
         lambda *a, **k: SimpleNamespace(
             live=_live_row(
-                id=3, track="real", seq=1, adapter="real_xarm6",
+                id=3,
+                track="real",
+                seq=1,
+                adapter="real_xarm6",
                 base_model_family="openpi",
             ),
             kind="transfer",
