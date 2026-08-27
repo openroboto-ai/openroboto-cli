@@ -10,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Final
 
-__version__: Final = "0.1.0a3"
+__version__: Final = "0.1.0a4"
 """Client version.
 
 Its predecessor `rt.py` had no version number anywhere in the file -- when a
