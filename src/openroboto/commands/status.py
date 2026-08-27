@@ -22,12 +22,10 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime
-from typing import TypeVar
 
 from openroboto_protocol.schemas import (
     Competition,
     Reason,
-    ScanRejection,
     SubmissionHistoryItem,
 )
 from openroboto_protocol.status import normalize_status
@@ -48,8 +46,6 @@ DEFAULT_LIMIT = 10
 #: One request instead of a paging loop. It is the backend's maximum, and a
 #: season with more entries than this has other problems.
 ROSTER_LIMIT = 1000
-
-_Row = TypeVar("_Row", SubmissionHistoryItem, ScanRejection)
 
 
 def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
@@ -80,14 +76,20 @@ def run(args: argparse.Namespace) -> int:
     say(f"hotkey: {hotkey}")
     say("")
 
-    history = fetch_submissions(settings.backend_url, hotkey, args.limit)
-    submissions = _by_round(history.data, args.round)
+    history = fetch_submissions(
+        settings.backend_url, hotkey, args.limit, round_num=args.round
+    )
+    submissions = history.data
     say(f"Submissions ({len(submissions)})")
     if not submissions:
         say("  (No records. If you just ran announce, wait one chain-scan cycle.)")
     for row in submissions:
+        # 🔴 No `round=` here. The field is gone from the response (protocol
+        # 0.9.0); `--round` still works, but it is applied by the backend now.
+        # `task_id` is what a miner quotes when asking us to look something up,
+        # so it earns the space the round number used to take.
         say(
-            f"  round={row.round_num} "
+            f"  task={row.task_id} "
             f"status={display_status(row)} "
             f"repo={row.hf_repo_id or '?'} "
             f"commit_block={row.commit_block} "
@@ -95,14 +97,16 @@ def run(args: argparse.Namespace) -> int:
         )
     say_more_hint(history.meta.page.has_more, history.meta.page.total)
 
-    rejected = fetch_rejections(settings.backend_url, hotkey, args.limit)
-    rejections = _by_round(rejected.data, args.round)
+    rejected = fetch_rejections(
+        settings.backend_url, hotkey, args.limit, round_num=args.round
+    )
+    rejections = rejected.data
     say("")
     say(f"Rejected during chain scan ({len(rejections)})")
     if not rejections:
         say("  (No rejections.)")
     for rejection in rejections:
-        say(f"  round={rejection.round_num} burn_block={rejection.burn_block}")
+        say(f"  task={rejection.task_id} burn_block={rejection.burn_block}")
         say(f"    reason: {rejection.reject_reason or '?'}")
         for line in explain(rejection.reason):
             say(f"    {line}")
@@ -223,12 +227,6 @@ def display_status(row: SubmissionHistoryItem) -> str:
 
 def _when(moment: datetime | None) -> str:
     return moment.isoformat() if moment is not None else "?"
-
-
-def _by_round(rows: list[_Row], round_num: int) -> list[_Row]:
-    if not round_num:
-        return rows
-    return [row for row in rows if row.round_num == round_num]
 
 
 def _load_settings(path: str) -> Settings:

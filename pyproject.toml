@@ -1,6 +1,6 @@
 [project]
 name = "openroboto"
-version = "0.1.0a2"
+version = "0.1.0a3"
 description = "OpenRoboto subnet (Bittensor netuid 80) CLI — everything a miner or external validator types."
 readme = "README.md"
 license = "MIT"
@@ -37,7 +37,7 @@ dependencies = [
     # local and CI were both green while what was actually installed was 0.2.0.
     # It only blows up once the path override is removed before a release and the
     # install really comes from PyPI — and that is exactly release time.
-    "openroboto-protocol==0.8.0",
+    "openroboto-protocol==0.9.0",
     "pyyaml>=6.0",
     # Production miner machines run 10.5.0 (the old requirements.txt pinned that
     # version). The two APIs used are private surface of the SDK:

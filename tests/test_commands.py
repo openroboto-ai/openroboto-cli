@@ -1854,12 +1854,6 @@ def test_status_normalises_legacy_words() -> None:
     assert status_command.display_status(_history_row(eval_status="")) == "?"
 
 
-def test_status_round_filter() -> None:
-    rows = [_history_row(round_num=1), _history_row(round_num=2)]
-    assert status_command._by_round(rows, 0) == rows
-    assert status_command._by_round(rows, 2) == [rows[1]]
-
-
 def test_status_explains_a_rejection_reason() -> None:
     """The two things a miner needs: a stable error code, and "do I have to burn
     again"."""

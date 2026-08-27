@@ -169,7 +169,11 @@ class BackendError(Exception):
 
 
 def fetch_submissions(
-    base_url: str, hotkey: str = "", limit: int = DEFAULT_LIMIT, offset: int = 0
+    base_url: str,
+    hotkey: str = "",
+    limit: int = DEFAULT_LIMIT,
+    offset: int = 0,
+    round_num: int = 0,
 ) -> ListEnvelope[SubmissionHistoryItem]:
     """Query the submission history.
 
@@ -180,19 +184,43 @@ def fetch_submissions(
     getting it wrong once shows up as **silently displaying a few rows too
     few** -- neither the backend nor the CLI raises any error.
     """
+    # 🔴 `round_num` filters on the **server**, not here. The field is not in the
+    # response at all any more (protocol 0.9.0 dropped it), so there is nothing
+    # left to filter on once the rows arrive -- while the backend still accepts
+    # the query parameter and selects rows by `competition_id`.
+    # 0 means "no filter": `_get` drops empty values rather than sending them.
     raw = _get(
-        base_url, HISTORY_PATH, {"hotkey": hotkey, "limit": limit, "offset": offset}
+        base_url,
+        HISTORY_PATH,
+        {
+            "hotkey": hotkey,
+            "limit": limit,
+            "offset": offset,
+            "round_num": round_num or "",
+        },
     )
     return _parse(ListEnvelope[SubmissionHistoryItem], raw, HISTORY_PATH)
 
 
 def fetch_rejections(
-    base_url: str, hotkey: str = "", limit: int = DEFAULT_LIMIT, offset: int = 0
+    base_url: str,
+    hotkey: str = "",
+    limit: int = DEFAULT_LIMIT,
+    offset: int = 0,
+    round_num: int = 0,
 ) -> ListEnvelope[ScanRejection]:
     """Query records rejected during the chain-scan stage -- the answer to
     "it is on chain but not in the queue" is here."""
+    # Server-side filter, same as `fetch_submissions` -- see the note there.
     raw = _get(
-        base_url, REJECTIONS_PATH, {"hotkey": hotkey, "limit": limit, "offset": offset}
+        base_url,
+        REJECTIONS_PATH,
+        {
+            "hotkey": hotkey,
+            "limit": limit,
+            "offset": offset,
+            "round_num": round_num or "",
+        },
     )
     return _parse(ListEnvelope[ScanRejection], raw, REJECTIONS_PATH)
 

@@ -74,7 +74,6 @@ def _submission(**overrides: Any) -> dict[str, Any]:
         "task_id": "task-1",
         "uid": 7,
         "hotkey": "5X",
-        "round_num": 3,
         "hf_repo_id": "miner/model",
         "hf_commit": "c0ffee",
         "commit_block": 1200,
@@ -159,9 +158,43 @@ def test_rows_come_from_data_not_from_a_custom_wrapper(
 ) -> None:
     """The old shape was `{success, submissions, total, ...}`; the business fields now
     live only under `data`."""
-    _capture(monkeypatch, _list_envelope([_submission(round_num=9)]))
+    # ⚠️ 断言换成 `uid` 是因为协议包 0.9.0 把 `round_num` 从
+    # `SubmissionHistoryItem` 上删了（那一列 2026-08-27 已经退休）。
+    # 这条用例证的是「行从 `data` 里解出来」，用哪个业务字段都成立。
+    _capture(monkeypatch, _list_envelope([_submission(uid=9)]))
     page = backend_api.fetch_submissions("https://api.example", hotkey="5X")
-    assert [row.round_num for row in page.data] == [9]
+    assert [row.uid for row in page.data] == [9]
+
+
+def test_the_round_filter_goes_out_on_the_wire(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`--round` is handed to the backend, not applied to the rows here.
+
+    🔴 It used to be a client-side filter over `row.round_num`. Protocol 0.9.0
+    dropped that field from both response models, so filtering after the rows
+    arrive is not possible at all any more -- and leaving the old code in place
+    did not degrade to an empty list, it raised `AttributeError` on every
+    `openroboto status` run.
+
+    The backend still accepts `?round_num=` on both endpoints and selects rows
+    by `competition_id`. This asserts the parameter really goes out: an
+    implementation that quietly dropped `--round` would show a miner every
+    season's rows while he asked for one, and nothing would look wrong.
+    """
+    seen = _capture(monkeypatch, _list_envelope([]))
+    backend_api.fetch_submissions("https://api.example", hotkey="5X", round_num=2)
+    backend_api.fetch_rejections("https://api.example", hotkey="5X", round_num=2)
+    assert all("round_num=2" in request.full_url for request in seen), [
+        request.full_url for request in seen
+    ]
+
+    # 0 means "no filter" and must not go out as `?round_num=0`: the backend
+    # reads 0 as a sentinel of its own, so sending it is not the same as
+    # leaving it off.
+    seen.clear()
+    backend_api.fetch_submissions("https://api.example", hotkey="5X")
+    assert "round_num" not in seen[0].full_url
 
 
 def test_paging_comes_from_meta_not_from_data(monkeypatch: pytest.MonkeyPatch) -> None:
