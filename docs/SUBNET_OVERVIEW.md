@@ -134,6 +134,8 @@ Each task's evaluation seed is derived from **two independent public beacons**, 
 seed = uint32( last 4 bytes of SHA256( "{block_hash}:{round_num}:{drand_randomness}" ) )
 ```
 
+`{round_num}` here is the `r` field of the on-chain commitment payload (§11), **not** the `round_num` an API response reports — the latter is a display value normalized to the season's own sequence number. See [SEED_GENERATION.md](./SEED_GENERATION.md) for when the two differ.
+
 The seed is unpredictable before submission, frozen after it, and reproducible by anyone: the API exposes `block_hash`, `drand_round`, `drand_random`, and the derived `seed` for every task, and the drand value can be checked byte-for-byte at `https://api.drand.sh/public/{round}`. Even if one beacon were compromised, the other still guarantees unpredictability.
 
 **Seed failure handling**: If drand is temporarily unavailable (network issue, rate limit), the task enters `seed_failed` status — a non-terminal, retryable state. The scanner automatically retries seed computation on each scan cycle. On success, the task moves to `pending` (enqueued). On continued failure, `seed_retry_count` is incremented. This is an infrastructure issue, not a submission fault — submissions are never rejected due to drand unavailability.

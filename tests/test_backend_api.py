@@ -74,7 +74,6 @@ def _submission(**overrides: Any) -> dict[str, Any]:
         "task_id": "task-1",
         "uid": 7,
         "hotkey": "5X",
-        "round_num": 3,
         "hf_repo_id": "miner/model",
         "hf_commit": "c0ffee",
         "commit_block": 1200,
@@ -159,9 +158,43 @@ def test_rows_come_from_data_not_from_a_custom_wrapper(
 ) -> None:
     """The old shape was `{success, submissions, total, ...}`; the business fields now
     live only under `data`."""
-    _capture(monkeypatch, _list_envelope([_submission(round_num=9)]))
+    # ⚠️ 断言换成 `uid` 是因为协议包 0.9.0 把 `round_num` 从
+    # `SubmissionHistoryItem` 上删了（那一列 2026-08-27 已经退休）。
+    # 这条用例证的是「行从 `data` 里解出来」，用哪个业务字段都成立。
+    _capture(monkeypatch, _list_envelope([_submission(uid=9)]))
     page = backend_api.fetch_submissions("https://api.example", hotkey="5X")
-    assert [row.round_num for row in page.data] == [9]
+    assert [row.uid for row in page.data] == [9]
+
+
+def test_the_round_filter_goes_out_on_the_wire(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`--round` is handed to the backend, not applied to the rows here.
+
+    🔴 It used to be a client-side filter over `row.round_num`. Protocol 0.9.0
+    dropped that field from both response models, so filtering after the rows
+    arrive is not possible at all any more -- and leaving the old code in place
+    did not degrade to an empty list, it raised `AttributeError` on every
+    `openroboto status` run.
+
+    The backend still accepts `?round_num=` on both endpoints and selects rows
+    by `competition_id`. This asserts the parameter really goes out: an
+    implementation that quietly dropped `--round` would show a miner every
+    season's rows while he asked for one, and nothing would look wrong.
+    """
+    seen = _capture(monkeypatch, _list_envelope([]))
+    backend_api.fetch_submissions("https://api.example", hotkey="5X", round_num=2)
+    backend_api.fetch_rejections("https://api.example", hotkey="5X", round_num=2)
+    assert all("round_num=2" in request.full_url for request in seen), [
+        request.full_url for request in seen
+    ]
+
+    # 0 means "no filter" and must not go out as `?round_num=0`: the backend
+    # reads 0 as a sentinel of its own, so sending it is not the same as
+    # leaving it off.
+    seen.clear()
+    backend_api.fetch_submissions("https://api.example", hotkey="5X")
+    assert "round_num" not in seen[0].full_url
 
 
 def test_paging_comes_from_meta_not_from_data(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -339,3 +372,148 @@ def test_weights_unwraps_only_one_level_of_weights_key(
     monkeypatch.setattr(backend_api, "_get", lambda *a, **k: b'{"5A": 0.9, "5B": 0.1}')
 
     assert backend_api.fetch_weights("http://x") == {"5A": 0.9, "5B": 0.1}
+
+
+# ─── competitions ────────────────────────────────────────────
+
+
+def _competition_row(**overrides: Any) -> dict[str, Any]:
+    row = {
+        "id": 3,
+        "track": "real",
+        "seq": 1,
+        "label": "xArm 6 第一届",
+        "adapter": "real_xarm6",
+        "status": "active",
+        "submit_closes_at": "2026-09-10T00:00:00Z",
+        "base_repo": None,
+        "base_revision": None,
+        "params": {"fee": {"kind": "transfer", "amount_tao": 2.0, "coldkey": None}},
+    }
+    return {**row, **overrides}
+
+
+def test_competitions_come_back_as_the_protocol_declares_them(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _capture(monkeypatch, _list_envelope([_competition_row()]))
+
+    listed = backend_api.fetch_competitions("https://api.example")
+
+    row = listed.data[0]
+    assert (row.track, row.seq, row.adapter) == ("real", 1, "real_xarm6")
+    # 🔴 `null` survives as `None`. Filled in with anything here, the CLI's
+    # fail-closed gate never fires and the fee leaves for an address nobody
+    # holds the key to.
+    assert row.params["fee"]["coldkey"] is None
+    assert listed.meta.page.total == 1
+
+
+def test_the_archived_flag_is_the_one_fastapi_declares(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """⚠️ `?archived=1` is not a synonym: FastAPI drops query parameters it has
+    not declared, so the archived season never comes back **and nothing reports
+    an error** -- it just looks like a shorter list."""
+    seen = _capture(monkeypatch, _list_envelope([]))
+    backend_api.fetch_competitions("https://api.example", include_archived=True)
+    assert "include_archived=true" in seen[0].full_url
+
+
+def test_the_archived_flag_is_absent_when_it_is_not_asked_for(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen = _capture(monkeypatch, _list_envelope([]))
+    backend_api.fetch_competitions("https://api.example")
+    assert "include_archived" not in seen[0].full_url
+
+
+def test_competitions_need_no_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A miner who has just run `pip install` holds no key, and this is their
+    first call. A key attached here fails exactly like a 404 does."""
+    seen = _capture(monkeypatch, _list_envelope([]))
+    backend_api.fetch_competitions("https://api.example")
+    assert seen[0].get_header("X-api-key") is None
+
+
+def test_a_competition_list_in_the_wrong_shape_is_an_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """It feeds the pre-payment check. Parsing it loosely means comparing a fee
+    against `None` and calling that a match."""
+    _capture(monkeypatch, _list_envelope([{"id": 3, "track": "real"}]))
+    with pytest.raises(backend_api.BackendError, match="does not match the shape"):
+        backend_api.fetch_competitions("https://api.example")
+
+
+# ─── which subnet the backend watches ────────────────────────
+#
+# `openroboto init` writes this number into `subnet.netuid`, so everything here
+# is about one question: is the value in front of us really the backend's answer,
+# or something that merely parsed?
+
+
+def test_the_backend_states_its_own_netuid(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`/healthz` is bare JSON on purpose (backend ADR 02 §3.3) -- probes are
+    read by orchestrators on fixed field paths, so it carries no envelope."""
+    seen = _capture(monkeypatch, {"status": "ok", "round": 1, "netuid": 313})
+    assert backend_api.fetch_netuid("https://api.example") == 313
+    assert seen[0].full_url == "https://api.example/healthz"
+
+
+def test_a_backend_that_does_not_answer_the_probe_is_not_a_netuid_of_zero(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """🔴 Every way of not knowing has to raise.
+
+    A missing key reads as `None`, an old backend returns a page of HTML, a
+    misconfigured one could serve `0` -- and each of those, turned into a number
+    by a `.get(..., 0)` or an `int()`, is a subnet this miner never chose. The
+    fee is burned on whatever comes out of here.
+    """
+    for payload in ({"status": "ok"}, {"netuid": 0}, {"netuid": "313"}, ["ok"]):
+        _capture(monkeypatch, payload)
+        with pytest.raises(backend_api.BackendError, match="not a subnet number"):
+            backend_api.fetch_netuid("https://api.example")
+
+
+def test_an_unreachable_probe_says_what_it_was_for(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The miner asked for a workspace, not for a health check; the message has
+    to connect the two, and keep the retry advice that came with it."""
+    _fail_with(monkeypatch, _http_error(404))
+    with pytest.raises(backend_api.BackendError) as excinfo:
+        backend_api.fetch_netuid("https://api.example")
+    assert "which subnet it watches" in str(excinfo.value)
+    assert "Nothing was written" in str(excinfo.value)
+
+
+# ─── roster ──────────────────────────────────────────────────
+
+
+def test_the_roster_reads_payment_status_not_burn_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The new endpoints call it by its real name -- a fee can be a transfer.
+    The older ones still say `burn_*`; reading the wrong one here yields an
+    empty string and a miner told nothing about their payment."""
+    row = {
+        "hotkey": "5Hb5muCtV2SqiVkZ",
+        "uid": 23,
+        "hf_repo_id": "miner/model",
+        "submitted_at": "2026-08-24T00:00:00Z",
+        "payment_status": "paid",
+        "hf_access_status": "verified",
+        "invalid_reason": None,
+        "counts_as_submitted": True,
+    }
+    seen = _capture(monkeypatch, _list_envelope([row]))
+
+    listed = backend_api.fetch_roster(
+        "https://api.example", 3, hotkey="5Hb5muCtV2SqiVkZ"
+    )
+
+    assert listed.data[0].payment_status == "paid"
+    assert "/api/v1/competitions/3/roster?" in seen[0].full_url
+    assert "hotkey=5Hb5muCtV2SqiVkZ" in seen[0].full_url

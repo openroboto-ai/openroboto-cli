@@ -33,3 +33,20 @@ set -x
 uv run mypy src
 uv run ruff check src tests
 uv run ruff format --check src tests
+
+# `templates/` and `runner/` are excluded from the three gates above on purpose:
+# they run inside the training container, import openpi / torch (which this package
+# does not install), and reformatting them would make diffing against the container
+# side harder. That reasoning covers *style*. It does not cover *correctness*, and
+# excluding them from style silently excluded them from correctness too.
+#
+# 2026-08-25: `_run_default` called `_save_norm_stats(...)`, which was never defined
+# anywhere. The default training flow — the one a miner with no custom script runs —
+# died on NameError every single time, and had done so unnoticed, because F821 was
+# never pointed at that directory.
+#
+# So: style stays excluded, correctness does not. `--isolated` is what bypasses
+# pyproject's extend-exclude; without it these paths are silently skipped and the
+# command passes while checking nothing.
+uv run ruff check --isolated --select F821,F811,F841 \
+    src/openroboto/templates src/openroboto/runner

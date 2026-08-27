@@ -1,5 +1,11 @@
 # Custom Training Strategy — Usage Guide
 
+> **Status**: current · **Updated**: 2026-08-25 · **Audience**: miners writing their
+> own training logic.
+> **Scope**: the `train(cfg, episodes, policy)` contract and how your script reaches
+> the training container. For the round workflow around it, read
+> [MINER.md](./MINER.md).
+
 ## Overview
 
 Custom training scripts are injected into the container through a **volume mount**, so you can replace the training logic without rebuilding the Docker image.
@@ -78,10 +84,10 @@ def train(cfg, episodes, policy):
             if steps % 10 == 0:
                 loss_curve.append({"step": steps, "loss": round(loss, 6)})
 
-    # Save the model
-    adapter_dir = f"{cfg['output_dir']}/adapter"
+    # Export the checkpoint at the top of output_dir -- that directory is
+    # uploaded verbatim as the HF repository root
     if hasattr(policy, "save_pretrained"):
-        policy.save_pretrained(adapter_dir)
+        policy.save_pretrained(cfg["output_dir"])
 
     metrics = {
         "final_loss": loss_curve[-1]["loss"] if loss_curve else 0.5,
@@ -146,9 +152,8 @@ def train(cfg, episodes, policy):
                     "loss": round(loss.item(), 6),
                 })
 
-    # Save the adapter
-    adapter_dir = f"{cfg['output_dir']}/adapter"
-    policy.save_pretrained(adapter_dir)
+    # Export the checkpoint at the top of output_dir
+    policy.save_pretrained(cfg["output_dir"])
 
     metrics = {
         "final_loss": loss_curve[-1]["loss"] if loss_curve else 0.5,
@@ -225,9 +230,8 @@ def train(cfg, episodes, policy):
                     "lr": scheduler.get_last_lr()[0],
                 })
 
-    # Save
-    adapter_dir = f"{cfg['output_dir']}/adapter"
-    policy.save_pretrained(adapter_dir)
+    # Export the checkpoint at the top of output_dir
+    policy.save_pretrained(cfg["output_dir"])
 
     metrics = {
         "final_loss": loss_curve[-1]["loss"] if loss_curve else 0.5,
@@ -264,31 +268,26 @@ def _gpu_name():
 
 ## How to use it
 
-### Option 1: pass it in miner.py
+### Option 1: `miner.yaml` (the normal way)
 
-```python
-from miner.trainer_vla import train_vla
-
-train_vla(
-    checkpoint_path=...,
-    train_json_path=...,
-    output_dir="/tmp/output_vla",
-    config=train_cfg,
-    hf_token=hf_token,
-    custom_train_script="/path/to/my_strategy.py",  # ← add this line
-)
-```
-
-### Option 2: through config.yaml
-
-Add the path to your miner config:
+`openroboto init` already writes this, pointing at the `train_strategy.py` it
+unpacked next to it:
 
 ```yaml
-training:
-  custom_train_script: /path/to/my_strategy.py
+custom_train_script: "train_strategy.py"   # top level, not nested under `training:`
 ```
 
-Then read the setting in `trainer_vla.py` or `training_pipeline_vla.py` and pass it through.
+Then just run:
+
+```bash
+openroboto train
+```
+
+### Option 2: one run with a different script
+
+```bash
+openroboto train -s /path/to/my_strategy.py     # overrides custom_train_script
+```
 
 ### Option 3: direct docker run for testing
 
@@ -327,8 +326,9 @@ docker run -v /path/to/my_training:/data/scripts ...
 
 1. **You must define a `train(cfg, episodes, policy)` function**, otherwise the container exits with an error.
 2. **You must return the `(metrics, proof)` dict pair** in the same format as the default pipeline.
-3. **Model save directory** must be `cfg['output_dir']/adapter` — that is where the training pipeline collects your output from the container.
-4. **The adapter saved there is not the submission artifact.** The evaluation service only accepts complete model checkpoints (openpi JAX `params/` or PyTorch `model.safetensors`, plus `assets/physical-intelligence/libero/norm_stats.json`); a bare LoRA adapter is rejected by a CPU pre-check before evaluation. Merge the adapter into the π0.5 base and export the full checkpoint before running `rt.py upload`. See [docs/SUBNET_OVERVIEW.md](../docs/SUBNET_OVERVIEW.md).
+3. **`cfg['output_dir']` is the checkpoint root.** `openroboto submit` uploads that directory verbatim as your Hugging Face repository root — nothing rearranges it afterwards. Export **at the top of it**, not into a subdirectory: the evaluator descends only two levels looking for the weights, and the LingBot exporter's own layout, `checkpoints/global_step_N/hf_ckpt/`, is already one level too deep. If your trainer insists on writing there, move the contents up before your `train()` returns. `openroboto train` prints the directory it found the weights in when they are not at the top.
+   *(Earlier versions of this page said the save directory must be `cfg['output_dir']/adapter`. That was never true — nothing collected from that subdirectory — and it contradicted the next point.)*
+4. **Export the full checkpoint, not a LoRA adapter.** The evaluator only accepts complete model checkpoints (openpi JAX `params/` or PyTorch `model.safetensors`, plus `assets/physical-intelligence/libero/norm_stats.json`; sharded safetensors plus `model.safetensors.index.json` for LingBot-VLA 2.0). A bare adapter is rejected before a GPU is allocated, and nothing merges it for you: there is **no `openroboto merge` command and there will not be one** — merging needs the model libraries, which cannot share an interpreter with bittensor, so it belongs in the training container next to the trainer that produced the weights. Run `openroboto check` before `openroboto submit`: it applies the evaluator's rules locally, for free. See [SUBNET_OVERVIEW.md](./SUBNET_OVERVIEW.md).
 5. **openpi modules are available** — the container ships with openpi installed; `import openpi.*` works out of the box.
 6. **GPU is available** — torch and CUDA work normally inside the container.
 7. **Temporary directories** — `/tmp` is usable inside the container but is lost on exit; persistent output must be written to `cfg['output_dir']`.

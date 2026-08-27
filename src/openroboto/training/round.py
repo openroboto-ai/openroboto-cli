@@ -31,12 +31,6 @@ WEIGHT_SUFFIXES = (".safetensors", ".bin", ".pt", ".pth", ".ckpt")
 DOWNLOAD_TIMEOUT_SEC = 300
 DOWNLOAD_RETRIES = 3
 
-PI05_BASE_CHECKPOINT = "gs://openpi-assets/checkpoints/pi05_base"
-"""Public address of the π0.5 base checkpoint.
-
-Used when control.json does not specify one.
-"""
-
 LOCAL_CHECKPOINT_CACHE = Path("cache/pi05_base")
 """Local cache directory for the base checkpoint, relative to the current working
 directory.
@@ -54,8 +48,18 @@ def resolve_checkpoint(configured: str) -> str:
     Anything starting with `gs://` is always replaced by the local cache directory
     (created empty if it does not exist); every other path is returned unchanged.
     Matches the branching in the old `miner.py`.
+
+    🔴 **Empty stays empty.** This used to substitute
+    `gs://openpi-assets/checkpoints/pi05_base` for a missing value, which was a
+    base model guessed by the client: the LingBot image was handed a π0.5 path
+    it silently ignored, and any competition after it would have been handed the
+    same one. Empty means no `CHECKPOINT_PATH` reaches `docker run`, so the
+    image falls back to the base it was built around -- see
+    `training/container.py::build_docker_command`. Seasons that do need a
+    specific one say so in `params.training.checkpoint`; π0.5's is recorded
+    there.
     """
-    path = configured or PI05_BASE_CHECKPOINT
+    path = configured
     if not path.startswith("gs://"):
         return path
     LOCAL_CHECKPOINT_CACHE.mkdir(parents=True, exist_ok=True)
@@ -73,7 +77,9 @@ def resolve_checkpoint(configured: str) -> str:
 class TrainParams:
     """Hyperparameters for one training round.
 
-    Comes from the `training` section of control.json.
+    Comes from the `training:` section of `miner.yaml` — the miner's own. The
+    defaults here and the defaults in `Settings` are the same five numbers,
+    which is the pair to keep in step if either ever moves.
     """
 
     epochs: int = 3
@@ -82,16 +88,6 @@ class TrainParams:
     lora_r: int = 32
     lora_alpha: int = 64
     max_episodes: int | None = None
-
-    @classmethod
-    def from_control(cls, training: dict[str, Any]) -> TrainParams:
-        return cls(
-            epochs=int(training.get("epochs", 3)),
-            batch_size=int(training.get("batch_size", 4)),
-            learning_rate=float(training.get("learning_rate", 1e-4)),
-            lora_r=int(training.get("lora_r", 32)),
-            lora_alpha=int(training.get("lora_alpha", 64)),
-        )
 
 
 @dataclass
@@ -136,6 +132,7 @@ def train_round(
     hotkey: str,
     val_json_path: str | None = None,
     custom_train_script: str | None = None,
+    image: str = "",
 ) -> TrainOutcome:
     """Load the data → run the container → assemble metrics and the training proof."""
     started = time.time()
@@ -150,7 +147,7 @@ def train_round(
     if val_json_path and Path(val_json_path).is_file():
         eval_samples = prepare_samples(load_episodes(val_json_path))
 
-    container_metrics, _container_proof = run_training(
+    container_metrics, container_proof = run_training(
         train_samples=train_samples,
         eval_samples=eval_samples,
         output_dir=output_dir,
@@ -162,10 +159,30 @@ def train_round(
         lora_alpha=params.lora_alpha,
         hotkey=hotkey,
         custom_train_script=custom_train_script,
+        image=image,
     )
 
     duration = time.time() - started
+    # 🔴 Ask the container, not this machine. Training runs inside `docker run
+    # --gpus all`; `_gpu_stats()` reads the *host* process, which on a laptop
+    # driving a remote box has no CUDA at all and answers `("cpu", 0.0)`.
+    #
+    # That answer used to be written straight into `training_proof.json` and
+    # published to the miner's public HF repo. Measured on 2026-08-26: the proof
+    # said `gpu_device: "cpu"` and `gpu_memory_peak_gb: 0.0` for a run that the
+    # container's own `proof.json`, in the same directory, recorded as an
+    # A100-SXM4-80GB peaking at 20.64 GiB. The file exists so a miner can show
+    # how a checkpoint was produced -- one that contradicts the run it describes
+    # is worse than no file, because it reads as a claim rather than a gap.
+    #
+    # The host reading stays as the fallback: an in-process trainer (no
+    # container, so no `proof.json`) really is measured by `_gpu_stats()`.
     gpu_name, gpu_memory_gb = _gpu_stats()
+    if container_proof:
+        gpu_name = str(container_proof.get("gpu_device") or gpu_name)
+        gpu_memory_gb = float(
+            container_proof.get("gpu_memory_peak_gb") or gpu_memory_gb
+        )
 
     metrics = {
         "final_loss": container_metrics.get("final_loss", 0.0),
@@ -179,7 +196,14 @@ def train_round(
     proof = {
         "miner_uid": hotkey,
         "dataset_hash": file_hash(train_json_path),
-        "adapter_hash": directory_hash(Path(output_dir) / "adapter"),
+        # Hashes the whole output directory, which is the checkpoint root. It
+        # used to hash `output_dir/adapter` -- the subdirectory the bundled
+        # strategies wrote a LoRA adapter into, a layout that is rejected before
+        # evaluation and is no longer written by anything. The **key** keeps its
+        # name: `training_proof.json` is uploaded to the miner's HF repo, and
+        # renaming a field there breaks whoever is reading it (no consumer in
+        # our own four repositories, which is not the same as no consumer).
+        "adapter_hash": directory_hash(Path(output_dir)),
         "base_model_hash": (
             directory_hash(Path(checkpoint_path)) if checkpoint_path else ""
         ),

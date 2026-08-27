@@ -1,8 +1,11 @@
 # Public Configuration Reference
 
-> **Status**: current · **Updated**: 2026-08-19 · **Audience**: miners, external validators
+> **Status**: current · **Updated**: 2026-08-26 · **Audience**: miners, external validators
 > **Scope**: Every `miner.yaml` / `validator.yaml` field: meaning, unit, and what breaks if it is wrong.
-> **Note**: Round-scoped values (fee, dataset) are **not** here — they come from [control_json.md](./control_json.md).
+> **Note**: Season-scoped values (fee, dataset, base checkpoint) are **not** here
+> either — `openroboto init` copies them into the `competition:` section of this
+> same file, from the backend. They no longer come from `control.json`; see
+> [control_json.md](./control_json.md) for what is left in that file.
 
 Real configuration files are local-only. Copy an example, fill its placeholders, and keep the resulting YAML outside Git.
 
@@ -81,20 +84,37 @@ openroboto init my-miner    # miner.yaml + train_strategy.py + README.md + .giti
 | `subnet` | `network`, `netuid` | Bittensor network and subnet |
 | `subnet` | `wallet_path`, `coldkey`, `hotkey`, `hotkey_ss58` | Local wallet selection |
 | `subnet` | `wallet_password` | Optional local unlock value; never commit it |
-| `urls` | `control_json` | Public miner-readable control document |
-| `urls` | `dataset_train`, `dataset_val` | Public training and validation resources |
-| `model` | `vla_model_id`, `vla_checkpoint_path` | Base model selection. Leave the path empty and the container downloads the base checkpoint into `./cache/pi05_base` |
+| `urls` | `control_json` | Where the subnet publishes `public_key`. Miners need nothing from it; external validators have no other way to get that key |
+| `competition` | the whole section | Which competition this workspace mines. **Written by `openroboto init`, rewritten by `openroboto init --refresh`** — the season's own spec, kept on disk so `build` / `train` / `check` never go online. Empty = the π0.5 simulation competition, as before |
+| `competition` | `track`, `seq` | The durable key. `id` is stored too, but it is local to one backend database and is re-resolved from `(track, seq)` before it is sent anywhere |
+| `competition` | `adapter` | Decides the rules `openroboto check` judges your checkpoint by (π0.5 and LingBot-VLA 2.0 accept different layouts) and whether `openroboto train` has a container for this season |
+| `competition` | `params` | The season's spec verbatim: `fee`, `training` (`image` / `dataset` / `checkpoint`), `strategy_template`, `format`. Read, never rewritten by us — a new season adding a key needs no new CLI |
+| `competition` | `params.training.dataset` | `{train, val}` — what this season trains on. `null` means the season has not published one, and `openroboto train` refuses rather than reaching for another season's data |
+| `competition` | `params.training.checkpoint` | Where this season's training **starts**. `null` = the training image uses the base it was built around. 🔴 Not `base_repo`: that is the **baseline** the leaderboard measures you against, and for π0.5 the two were different addresses |
+| `model` | `vla_checkpoint_path` | A base checkpoint you already have locally. Empty is normal; when the season names one, the season wins |
 | `huggingface` | `token`, `username` | Local Hugging Face upload credentials |
 | root | `custom_train_script` | Optional miner-owned training strategy path |
+| `training` | `epochs`, `batch_size`, `learning_rate`, `lora_r`, `lora_alpha` | **Yours to tune** — that is the competition. They reach the container as `EPOCHS` / `BATCH_SIZE` / `LR` / `LORA_R` / `LORA_ALPHA`, which your strategy script reads out of `cfg`. Defaults `3 / 4 / 1e-4 / 32 / 64` are the values the subnet used to hand everybody. ⚠️ Write the learning rate `1.0e-4`, not `1e-4` — YAML reads the second as text |
 | root | `log_level`, `log_dir` | Local logging |
 
-`payment` and selected training values are read from the public `control.json`.
+Nothing else in this file is fetched. `openroboto train` opens no URL beyond the
+dataset the season names: the round is `competition.seq`, the status is
+`competition.status`, and the five hyperparameters above are yours.
 
-> **Do not set `payment.burn_rate_tao` locally.** The announced fee is the only
-> correct value; a stale local override burns the wrong amount, and a wrong amount is
-> rejected with no refund. If `control.json` cannot be fetched, `openroboto burn`
-> **refuses to run** rather than falling back to a guess — there is deliberately no
-> built-in default fee.
+> **A workspace with a `competition` section does not read `control.json` for its
+> fee.** That season's `params.fee` is the fee, and `openroboto submit` confirms it
+> against the backend in the moment before paying — printing which season, how long
+> it has left, how much and to whom, and asking. That check cannot be turned off, and
+> `--force` does not skip it. A backend it cannot reach is a refusal, not a warning:
+> without an answer there is no way to say who the money would be going to.
+
+> **`payment.burn_rate_tao` has no effect, wherever you set it.** Not in
+> `miner.yaml` and not in `control.json`: an amount says how much, never *which
+> competition*, and a fee paid with no season attached is filed under whichever
+> season the backend defaults to — with the TAO already gone. The fee comes from
+> `competition.params.fee` and nowhere else, and a workspace with no `competition`
+> section is refused rather than charged a subnet-wide rate. There is deliberately
+> no built-in default fee.
 
 ## Weight-setting validator
 

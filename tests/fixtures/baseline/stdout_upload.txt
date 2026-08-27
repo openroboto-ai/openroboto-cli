@@ -1,0 +1,3 @@
+✅ uploaded: https://huggingface.co/legacyminer/pi05-MMMMMMMMMMMM/commit/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+   commit=aaaaaaaa repo=legacyminer/pi05-MMMMMMMMMMMM
+   → next: `openroboto burn` (it runs the pre-spend self-check first)

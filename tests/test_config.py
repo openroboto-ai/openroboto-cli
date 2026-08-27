@@ -2,15 +2,20 @@
 
 from __future__ import annotations
 
+import inspect
 import io
 import json
+import re
 import urllib.error
+from importlib.resources import files
 from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 from openroboto_protocol.constants import BURN_BLOCK_WINDOW
 
+from openroboto import adapters
 from openroboto.config import (
     ConfigError,
     ControlFetchError,
@@ -78,8 +83,90 @@ def test_chain_commands_refuse_to_run_without_netuid() -> None:
     assert "netuid" in str(excinfo.value)
 
 
-def test_apply_control_only_touches_payment_and_training() -> None:
-    settings = Settings.from_mapping({"backend": {"url": "https://backend.invalid"}})
+#: The five hyperparameters control.json used to hand every miner, verbatim
+#: from the production file (`openroboto-backend/tests/fixtures/
+#: control_json_baseline.json`). They are the defaults now, so a workspace that
+#: does not touch them trains exactly as it did before the move.
+CONTROL_JSON_HYPERPARAMETERS = {
+    "epochs": 3,
+    "batch_size": 4,
+    "learning_rate": 1e-4,
+    "lora_r": 32,
+    "lora_alpha": 64,
+}
+
+
+def _hyperparameters(settings: Settings) -> dict[str, Any]:
+    return {name: getattr(settings, name) for name in CONTROL_JSON_HYPERPARAMETERS}
+
+
+def test_hyperparameter_defaults_are_what_control_json_used_to_serve() -> None:
+    assert _hyperparameters(Settings()) == CONTROL_JSON_HYPERPARAMETERS
+
+
+def test_the_shipped_template_carries_those_same_five_values() -> None:
+    """The template writes them out explicitly rather than leaving them to the
+    defaults: a miner cannot tune a knob they cannot see.
+
+    Only the `training:` block is parsed here -- the rest of the template holds
+    `$placeholders` that `init` fills in from the backend it asked.
+    """
+    template = (files("openroboto") / "templates" / "miner.yaml").read_text(
+        encoding="utf-8"
+    )
+    written = yaml.safe_load(template)["training"]
+    assert written == CONTROL_JSON_HYPERPARAMETERS
+    assert (
+        _hyperparameters(Settings.from_mapping({"training": written}))
+        == CONTROL_JSON_HYPERPARAMETERS
+    )
+
+
+def test_hyperparameters_are_the_miners_to_change(tmp_path: Path) -> None:
+    """🔴 The whole point of the move. `learning_rate` is spelled the way the
+    template spells it -- YAML 1.1 resolves `1e-4` as a string, so a parser that
+    does not cast would ship text to `docker run -e LR=...`."""
+    path = tmp_path / "miner.yaml"
+    path.write_text(
+        "training:\n"
+        "  epochs: 10\n"
+        "  batch_size: 8\n"
+        "  learning_rate: 5.0e-5\n"
+        "  lora_r: 64\n"
+        "  lora_alpha: 128\n",
+        encoding="utf-8",
+    )
+    assert _hyperparameters(Settings.load(str(path))) == {
+        "epochs": 10,
+        "batch_size": 8,
+        "learning_rate": 5e-5,
+        "lora_r": 64,
+        "lora_alpha": 128,
+    }
+
+
+def test_a_learning_rate_yaml_read_as_text_still_reaches_the_container_as_a_number(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "miner.yaml"
+    path.write_text("training:\n  learning_rate: 1e-4\n", encoding="utf-8")
+    assert Settings.load(str(path)).learning_rate == 1e-4
+
+
+def test_apply_control_only_touches_payment() -> None:
+    """Everything but `payment` is now read off the competition row instead.
+
+    The `training` block is the one that matters here: while it landed in
+    settings, a stale control.json could still decide which base checkpoint a
+    season trains from -- the exact override this move exists to remove.
+    """
+    settings = Settings.from_mapping(
+        {
+            "backend": {"url": "https://backend.invalid"},
+            "model": {"vla_checkpoint_path": "/mine/pi05_base"},
+            "training": {"epochs": 7},
+        }
+    )
     apply_control(
         settings,
         {
@@ -93,10 +180,9 @@ def test_apply_control_only_touches_payment_and_training() -> None:
     )
     assert settings.burn_rate_tao == 0.1
     assert settings.limit_price_rao == 5
-    assert settings.vla_checkpoint_path == "gs://bucket/ckpt"
-    # dataset / round / public_key do not land in settings -- they are per-round inputs,
-    # not configuration
-    assert settings.dataset_train_url == ""
+    # round / status / dataset / training / public_key change nothing.
+    assert settings.vla_checkpoint_path == "/mine/pi05_base"
+    assert settings.epochs == 7
     assert settings.backend_url == "https://backend.invalid"
 
 
@@ -324,6 +410,72 @@ def test_local_pointing_at_a_hosted_environment_is_a_contradiction() -> None:
         cfg.require_for_chain()
 
 
+def test_a_season_from_one_backend_is_not_paid_for_on_another_chain() -> None:
+    """🔴 **Every self-describing field agrees, and the config is still wrong.**
+
+    This is the workspace `init --backend-url <a local backend>` used to write:
+    the season came from 127.0.0.1:8011, and everything written around it says
+    mainnet -- environment, network, netuid, both URLs, all consistent with each
+    other. The contradiction is not among them, which is exactly why it was
+    never caught: it is between the file and where the season came from.
+
+    What it costs is not theoretical. `(track, seq)` is unique inside one
+    database, not across them, and both sides seed the same tracks -- so
+    `submit` looks up `(sim, 2)`, **finds** production's `(sim, 2)`, and burns
+    real TAO for a season this workspace was never trained for.
+    """
+    cfg = Settings.from_mapping(
+        {
+            "environment": "mainnet",
+            "subnet": {"netuid": 80, "network": "finney"},
+            "competition": {
+                "track": "sim",
+                "seq": 2,
+                "source": "http://127.0.0.1:8011",
+            },
+        }
+    )
+    with pytest.raises(ConfigError) as excinfo:
+        cfg.require_for_chain()
+    assert "127.0.0.1:8011" in str(excinfo.value)
+
+
+def test_the_same_host_on_another_port_is_another_backend() -> None:
+    """Two backends on one machine differ by nothing but the port, and the
+    dev default (8001) is one keystroke from the one in the report (8011)."""
+    cfg = Settings.from_mapping(
+        {
+            "environment": "local",
+            "subnet": {"netuid": 313, "network": "test"},
+            "backend": {"url": "http://127.0.0.1:8001"},
+            "urls": {"control_json": "http://127.0.0.1:8001/control.json"},
+            "competition": {
+                "track": "sim",
+                "seq": 2,
+                "source": "http://127.0.0.1:8011",
+            },
+        }
+    )
+    with pytest.raises(ConfigError):
+        cfg.require_for_chain()
+
+
+def test_a_workspace_that_names_its_own_backend_passes() -> None:
+    """The ordinary case, and the one `init` writes: the season came from the
+    backend this config talks to. Being stricter than that would refuse every
+    workspace the command produces."""
+    Settings.from_mapping(
+        {
+            "subnet": {"netuid": 80, "network": "finney"},
+            "competition": {
+                "track": "sim",
+                "seq": 1,
+                "source": "https://api.openroboto.ai",
+            },
+        }
+    ).require_for_chain()
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # weight_interval_min -- bounded on both sides by the chain
 # ─────────────────────────────────────────────────────────────────────────────
@@ -404,3 +556,99 @@ def test_burn_block_window_comes_from_the_protocol_package() -> None:
     burned by then.
     """
     assert Settings().burn_block_window is BURN_BLOCK_WINDOW
+
+
+# ─── competition ─────────────────────────────────────────────
+
+
+def test_competition_section_is_read_and_passed_through_verbatim() -> None:
+    """`init` writes the competition it was told to; the CLI dispatches on the
+    adapter and hands `params` on untouched.
+
+    The pass-through is the point: a competition parameter the client has never
+    heard of must survive into the code that needs it, or every new parameter
+    costs a CLI release and a fleet-wide upgrade.
+    """
+    cfg = Settings.from_mapping(
+        {
+            "competition": {
+                "adapter": "sim_lingbot",
+                "params": {
+                    "fee": {"burn_rate_tao": 0.1},
+                    "format": {"cameras": ["camera_top"], "unknown_key": 7},
+                },
+            }
+        }
+    )
+    assert cfg.competition_adapter == "sim_lingbot"
+    assert cfg.competition_params["format"]["unknown_key"] == 7
+    assert cfg.competition_params["fee"] == {"burn_rate_tao": 0.1}
+
+
+def test_a_config_without_a_competition_section_still_parses() -> None:
+    """Every miner.yaml written before competitions existed. MIGRATION.md §2
+    promises it keeps working; `adapters.DEFAULT_ADAPTER` decides what it means."""
+    cfg = Settings.from_mapping({"subnet": {"netuid": 80}})
+    assert cfg.competition_adapter == ""
+    assert cfg.competition_params == {}
+
+
+def test_competition_params_must_be_a_mapping() -> None:
+    with pytest.raises(ConfigError):
+        Settings.from_mapping({"competition": {"adapter": "x", "params": ["nope"]}})
+
+
+def test_the_config_carries_the_base_model_through_to_the_rule_book() -> None:
+    """🔴 End to end for the key this whole split added: `miner.yaml` says which
+    base model, and that is what picks the rule book -- **not** the adapter name.
+
+    The pair below is the point: same adapter, two base models, two profiles.
+    The previous version of this test asserted `real_xarm6 == LINGBOT`, which was
+    a guess baked into the table, and backwards from the plan (xArm 6 comes up on
+    π0.5 first).
+    """
+    for family, profile in (
+        ("openpi", adapters.OPENPI),
+        ("lingbot_vla", adapters.LINGBOT),
+    ):
+        cfg = Settings.from_mapping(
+            {"competition": {"adapter": "real_xarm6", "base_model_family": family}}
+        )
+        assert cfg.competition_base_model_family == family
+        assert (
+            adapters.format_profile(
+                cfg.competition_adapter, cfg.competition_base_model_family
+            )
+            == profile
+        )
+
+
+def test_a_config_with_no_base_model_falls_back_only_where_it_is_provable() -> None:
+    """The two sim adapters provably name their base model, so a `miner.yaml`
+    written before this key existed keeps working. `real_xarm6` names hardware,
+    so it is refused instead -- that is the whole reason the key exists."""
+    assert adapters.format_profile("sim_openpi") == adapters.OPENPI
+    assert adapters.format_profile("sim_lingbot") == adapters.LINGBOT
+    assert adapters.format_profile("") == adapters.OPENPI
+    with pytest.raises(ConfigError):
+        adapters.format_profile("real_xarm6")
+
+
+def test_an_unknown_adapter_is_refused_rather_than_treated_as_simulation() -> None:
+    """🔴 The failure this exists to prevent: a competition this client is too old
+    to know about, silently judged by the π0.5 rules. That verdict is delivered to
+    the miner as "no model weights found" right before they decide whether to burn.
+    """
+    with pytest.raises(ConfigError) as excinfo:
+        adapters.resolve("real_xarm7")
+    message = str(excinfo.value)
+    assert "real_xarm7" in message
+    assert "pip install -U openroboto" in message
+
+
+def test_the_adapter_table_holds_no_competition_data() -> None:
+    """Values (images, templates, fees, addresses) come from `competition.params`.
+    One written into this table means a CLI release to change a number."""
+    source = inspect.getsource(adapters)
+    assert not re.search(r"5[A-Za-z0-9]{47}", source)
+    assert not re.search(r"\d+\.\d+\s*TAO", source)

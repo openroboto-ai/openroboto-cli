@@ -27,10 +27,22 @@ openroboto submit          # upload → burn → announce
 openroboto status          # what the subnet made of it, and why
 ```
 
-**`check` before `submit`, every time.** Training produces a LoRA adapter, and a
-bare adapter is **rejected** — the evaluator needs a complete merged checkpoint.
-`check` applies the evaluator's own rules locally, for free. `submit` burns TAO,
-and burns are **not refunded**.
+**`check` before `submit`, every time.** The bundled `train_strategy.py` does not
+train and **exports no checkpoint** — the export is the step marked for you to
+write, and it is the one that decides whether the round is worth anything. Two
+rules for it:
+
+- the training output directory **is the checkpoint root** (`submit` uploads it
+  verbatim as your HF repository root), so export at the top of it, not into a
+  subdirectory the evaluator will not descend into;
+- export the **full** checkpoint, not a LoRA adapter. There is **no `openroboto
+  merge` command** and the evaluator merges nothing either — that work belongs in
+  `train_strategy.py`, which runs in the training container where the model
+  libraries are.
+
+`openroboto train` tells you what the run actually left behind. `check` applies the
+evaluator's own rules locally, for free. `submit` burns TAO, and a burn is
+**not refunded**.
 
 ## What is in here
 

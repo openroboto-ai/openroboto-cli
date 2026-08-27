@@ -1,6 +1,6 @@
 [project]
 name = "openroboto"
-version = "0.1.0a2"
+version = "0.1.0a3"
 description = "OpenRoboto subnet (Bittensor netuid 80) CLI — everything a miner or external validator types."
 readme = "README.md"
 license = "MIT"
@@ -37,7 +37,7 @@ dependencies = [
     # local and CI were both green while what was actually installed was 0.2.0.
     # It only blows up once the path override is removed before a release and the
     # install really comes from PyPI — and that is exactly release time.
-    "openroboto-protocol==0.6.0",
+    "openroboto-protocol==0.9.0",
     "pyyaml>=6.0",
     # Production miner machines run 10.5.0 (the old requirements.txt pinned that
     # version). The two APIs used are private surface of the SDK:
@@ -123,6 +123,10 @@ ignore = ["RUF001", "RUF002", "RUF003"]
 # constraints of this package (see the note in [tool.mypy]).
 "src/openroboto/templates/*" = ["T20", "B", "RUF"]
 "src/openroboto/runner/*" = ["T20", "B", "RUF", "E", "UP", "I"]
+# `baseline_capture.py` is both a test helper and a standalone generator invoked by
+# `scripts/gen_baseline.sh`; its whole stdout is a progress report, same as the
+# command layer.
+"tests/baseline_capture.py" = ["T20"]
 # The release-gate script's whole output is a progress report on stdout, same as
 # the command layer. Listed here so it stays clean if the lint scope ever widens
 # past `src tests` -- today `scripts/lint.sh` does not reach it.
@@ -198,8 +202,10 @@ testpaths = ["tests"]
 # GPU / real chain / real Docker (AGENTS.md §4: those only test argument assembly, not
 # a real run). Its purpose is not to "prove there are enough tests", it is "must not
 # go down".
-# Sits on the measured value: 70.26 as of the burn-path tests (2026-08-21, when
-# payment/burn.py went 28.81% -> 100%, taking the total from 68.30). Slack between
+# Sits on the measured value: 79.91 as of the three silent-fallback gates -- the burn
+# that requires this run's competition verdict, the build that will not fill one
+# competition's image name with another's contents, and the adapters that say
+# "cannot train" out loud (2026-08-26, up from 79.52, 73.34 and 73.14). Slack between
 # the gate and reality is not safety margin, it is permission for exactly that many
 # points of silent regression. Raise it whenever a real run comes in higher.
 #
@@ -208,6 +214,6 @@ testpaths = ["tests"]
 # ~100% covered by construction, so it reports about 12 points higher — 82.38 rather
 # than 70.26. That number was briefly committed here and CI rejected the very commit
 # that introduced it. The gate is not the place to find out you measured differently.
-fail_under = 70.26
+fail_under = 79.91
 precision = 2
 show_missing = true

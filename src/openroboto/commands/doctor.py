@@ -6,7 +6,7 @@ item states "which item is unsatisfied / what the expected value is / how to
 fix it", and an unsatisfied item exits non-zero.
 
 There are two classes:
-- required items (config / docker / image / control.json) -- an unsatisfied
+- required items (config / competition / docker / image) -- an unsatisfied
   one fails outright;
 - informational items (GPU, HF token, wallet balance) -- when bittensor is not
   installed or there is no card in the environment, they emit a hint but do
@@ -21,19 +21,21 @@ import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
+from importlib.metadata import PackageNotFoundError, requires, version
 
-from openroboto.config import (
-    ConfigError,
-    ControlFetchError,
-    Settings,
-    apply_control,
-    environments,
-    fetch_control,
-)
+from openroboto import adapters
+from openroboto.commands.build import competition_adapter, competition_image
+from openroboto.competition import Fee, load_snapshot
+from openroboto.config import ConfigError, Settings, environments
 from openroboto.console import say
 from openroboto.training.container import runner_image
 
 MIN_PYTHON = (3, 11)
+
+#: The package that owns the commitment encoding. Its version **is** the
+#: contract version between this CLI and the backend (see the note on the
+#: dependency in `pyproject.toml`).
+PROTOCOL_PACKAGE = "openroboto-protocol"
 
 
 @dataclass(frozen=True)
@@ -61,7 +63,7 @@ def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) 
 
 
 def run(args: argparse.Namespace) -> int:
-    results = [check_python()]
+    results = [check_python(), check_protocol()]
 
     settings: Settings | None
     try:
@@ -77,13 +79,15 @@ def run(args: argparse.Namespace) -> int:
 
     if settings is not None:
         results.extend(check_settings(settings))
-        results.append(check_control(settings))
+        results.append(check_competition(settings))
         results.append(check_hf_token(settings))
         results.append(check_wallet(settings))
 
     results.append(check_docker())
     results.append(check_gpu())
-    results.append(check_image())
+    # The competition decides which image `train` runs, so a config that did not
+    # parse means checking the historical default rather than guessing one.
+    results.append(check_image(args.config if settings is not None else ""))
 
     for result in results:
         say(result.render())
@@ -115,6 +119,82 @@ def check_python() -> CheckResult:
     )
 
 
+def check_protocol() -> CheckResult:
+    """Whether the installed protocol package is the one this CLI is pinned to.
+
+    This is a money item, not a tidiness item. `openroboto-protocol` is what
+    encodes the on-chain commitment, so a miner who upgrades it on its own
+    (`pip install -U openroboto-protocol` succeeds and only *warns* about the
+    pin) announces bytes the backend does not expect -- and finds out after
+    the TAO is gone. `openroboto --version` already prints the number, but
+    printing it is not checking it: nobody knows by heart which version this
+    release wanted.
+
+    The expected version is read back out of this package's own metadata
+    rather than written down again here. `pyproject.toml` already declares
+    `openroboto-protocol==<v>`; a second copy of that number in this file
+    would drift silently at the next release, which is precisely the failure
+    mode this check exists to catch.
+    """
+    try:
+        installed = version(PROTOCOL_PACKAGE)
+    except PackageNotFoundError:
+        return CheckResult(
+            "protocol package",
+            False,
+            f"{PROTOCOL_PACKAGE} is not installed",
+            "pip install -U openroboto",
+        )
+
+    pinned = pinned_protocol_version()
+    if pinned is None:
+        # Running from a source tree that was never installed: there is no
+        # declaration to compare against, and guessing one here would be the
+        # very second copy this function avoids. Report what is loaded and
+        # move on -- a miner never hits this path, a developer does.
+        return CheckResult(
+            "protocol package",
+            True,
+            f"{installed} (no pin found to compare against)",
+            required=False,
+        )
+    if installed != pinned:
+        return CheckResult(
+            "protocol package",
+            False,
+            f"{installed} installed, this CLI is pinned to {pinned}",
+            f"pip install '{PROTOCOL_PACKAGE}=={pinned}' -- the commitment "
+            f"encoding lives in that package, so a mismatch is paid for in TAO",
+        )
+    return CheckResult("protocol package", True, installed)
+
+
+def pinned_protocol_version() -> str | None:
+    """The exact version this package declares for `openroboto-protocol`.
+
+    Returns None when there is nothing to compare against: either this package
+    is not installed as a distribution, or the dependency is not pinned with
+    `==`. Both mean "cannot tell", which is not the same as "mismatch".
+    """
+    try:
+        declared = requires("openroboto") or []
+    except PackageNotFoundError:
+        return None
+    for requirement in declared:
+        name, pin, rest = requirement.partition("==")
+        if pin and _normalized(name) == PROTOCOL_PACKAGE:
+            # A requirement string may carry an environment marker
+            # (`; python_version < "3.12"`) after the version.
+            return rest.split(";")[0].strip()
+    return None
+
+
+def _normalized(name: str) -> str:
+    """PEP 503 name comparison -- `openroboto_protocol` and
+    `openroboto-protocol` are the same distribution."""
+    return name.strip().replace("_", "-").lower()
+
+
 def check_settings(settings: Settings) -> list[CheckResult]:
     """Required fields. Missing ones do not necessarily blow up now, but they
     certainly will blow up at the step that spends money."""
@@ -127,6 +207,7 @@ def check_settings(settings: Settings) -> list[CheckResult]:
         netuid=settings.netuid,
         control_json_url=settings.control_json_url,
         backend_url=settings.backend_url,
+        competition_source=settings.competition_source,
     )
     results = [
         CheckResult(
@@ -162,46 +243,53 @@ def check_settings(settings: Settings) -> list[CheckResult]:
             "set miner.yaml → huggingface.username / token (the token needs "
             "write access)",
         ),
-        CheckResult(
-            "control.json URL",
-            bool(settings.control_json_url),
-            settings.control_json_url or "not set",
-            "set miner.yaml → urls.control_json",
-        ),
     ]
     return results
 
 
-def check_control(settings: Settings) -> CheckResult:
-    """Whether control.json can be fetched, what this round's status is, and
-    what the rate is."""
-    if not settings.control_json_url:
+def check_competition(settings: Settings) -> CheckResult:
+    """Which season this workspace mines, and what entering it costs.
+
+    This replaced a `control.json` check on 2026-08-26. That file answered the
+    same three questions -- round, status, rate -- for a subnet that ran one
+    season at a time, and every one of its answers is now either wrong or
+    narrower than the workspace's own:
+
+    * its `round` is a single subnet-wide counter, and it reads `1` while the
+      real track's first season and the simulation track's second are both open;
+    * its `status` only ever says `active`, where a season has three
+      (`draft` / `active` / `archived`);
+    * its `burn_rate_tao` is the subnet-wide rate, and `real/1` charges 2 TAO --
+      see `_entry_fee` for the wallet that was ticked green at 0.5 TAO.
+
+    It is also the only check here that needed the network, which made an
+    unreachable host look like a broken workspace. The season snapshot is
+    written into `miner.yaml` by `init` and is what `submit` confirms against,
+    so reading it offline is both truer and cheaper.
+
+    🔴 The file itself is **not** retired: external validators still read
+    `public_key` out of it to get a rate-limit token, and that URL must not 404.
+    What went away is the miner's reason to fetch it.
+    """
+    snapshot = load_snapshot(settings)
+    if snapshot is None:
         return CheckResult(
-            "control.json", False, "URL not set", "set miner.yaml → urls.control_json"
+            "competition",
+            False,
+            "this workspace does not say which season it mines",
+            "`openroboto init --refresh` writes the competition section",
         )
     try:
-        control = fetch_control(settings.control_json_url).control or {}
-    except ControlFetchError as exc:
+        fee = snapshot.fee()
+    except ConfigError as exc:
         return CheckResult(
-            "control.json",
-            False,
-            str(exc),
-            "this is an infrastructure problem, not a config error — check your "
-            "network connection and the URL",
+            "competition", False, str(exc), "`openroboto init --refresh`"
         )
-
-    # Once fetched, **apply** it, do not merely display it. `check_wallet`
-    # runs after this and needs the real rate in settings to compare against
-    # the balance; if we displayed without applying, it could only report
-    # "rate unknown". Parsing goes through the single `apply_control`
-    # implementation; do not second-guess the shape of the payment section
-    # here.
-    apply_control(settings, control)
     return CheckResult(
-        "control.json",
+        "competition",
         True,
-        f"round={control.get('round')} status={control.get('status')} "
-        f"burn_rate={settings.burn_rate_tao} TAO",
+        f"{snapshot.name} · {snapshot.status} · "
+        f"{fee.amount_tao} TAO to enter, by {fee.kind}",
     )
 
 
@@ -250,8 +338,35 @@ def check_gpu() -> CheckResult:
     return CheckResult("GPU", True, detail)
 
 
-def check_image() -> CheckResult:
-    image = runner_image()
+def check_image(config_path: str = "") -> CheckResult:
+    """Is the image `openroboto train` would run actually here?
+
+    Two things this used to get wrong, both silent:
+
+    1. it looked up `runner_image()` with no competition, i.e. the π0.5 default,
+       while `train` runs the image `params.training.image` names. Doctor
+       reported on an image nothing was going to use;
+    2. for a competition this client has no container for, an image under that
+       name can still be sitting in `docker images` -- built by an older release
+       out of the openpi context, or by hand. "ready" is the one thing that must
+       not be said about it: the name came from the competition and the contents
+       came from somewhere else, and this is the last place that can say so.
+
+    An empty `config_path` (no config, or one that failed to parse) checks what
+    it always did.
+    """
+    try:
+        adapter = adapters.resolve(competition_adapter(config_path))
+    except ConfigError as exc:
+        return CheckResult(
+            "training image",
+            False,
+            str(exc).splitlines()[0],
+            "pip install -U openroboto",
+            required=False,
+        )
+    image = runner_image(competition_image(config_path))
+
     if not shutil.which("docker"):
         return CheckResult(
             "training image",
@@ -261,6 +376,25 @@ def check_image() -> CheckResult:
             required=False,
         )
     found = _run(["docker", "images", "-q", image])
+
+    if adapter.training == adapters.UNAVAILABLE:
+        # Not a fixable item -- `openroboto build` refuses this competition on
+        # purpose -- so it does not fail the run. It still has to be said.
+        detail = (
+            f"this client has no training image for this competition; `{image}` "
+            f"is on this machine but was not built from anything that ships here"
+            if found
+            else "this client has no training image for this competition yet"
+        )
+        return CheckResult(
+            "training image",
+            False,
+            detail,
+            "`openroboto train` will not run it; train your own way, then "
+            "`openroboto check` and `openroboto submit`",
+            required=False,
+        )
+
     if not found:
         return CheckResult(
             "training image", False, f"{image} not found", "openroboto build"
@@ -298,8 +432,8 @@ def check_hf_token(settings: Settings) -> CheckResult:
 
 
 def check_wallet(settings: Settings) -> CheckResult:
-    """Whether the wallet can be opened, and whether the coldkey balance is
-    enough for this round's burn.
+    """Whether the wallet can be opened, and whether the coldkey balance covers
+    this competition's entry fee (`_entry_fee`, not the subnet-wide rate).
 
     The `except Exception` here is deliberate: exceptions at the wallet layer
     come from the bittensor SDK (`KeyFileError`, substrate connection
@@ -348,27 +482,59 @@ def check_wallet(settings: Settings) -> CheckResult:
             "wallet", True, f"loaded (balance unavailable: {exc})", required=False
         )
 
-    # When the rate is unknown it cannot be compared against the balance
-    # (`None` does not compare), and we must not pretend it is enough either
-    # -- doctor is the self-check entry point before money is spent, so
-    # "cannot be determined" has to be reported truthfully as exactly that.
-    if settings.burn_rate_tao is None:
+    priced = _entry_fee(settings)
+    # An unknown fee cannot be compared against the balance (`None` does not
+    # compare), and pretending it is covered is worse than saying so -- doctor is
+    # the self-check entry point before money is spent, so "cannot be determined"
+    # is reported as exactly that.
+    if priced is None:
         return CheckResult(
             "wallet balance",
             False,
-            f"{balance:.4f} TAO (this round's rate is unknown, cannot tell "
-            f"whether it is enough)",
-            "make control.json reachable, or pin payment.burn_rate_tao in miner.yaml",
+            f"{balance:.4f} TAO (this workspace's entry fee is unknown, so "
+            f"whether that is enough cannot be told)",
+            "`openroboto init --refresh` rewrites the competition section, which "
+            "is where the fee comes from",
         )
 
-    enough = balance >= settings.burn_rate_tao
+    season, fee = priced
+    enough = balance >= fee.amount_tao
     return CheckResult(
         "wallet balance",
         enough,
-        f"{balance:.4f} TAO (this round burns {settings.burn_rate_tao} TAO)",
-        "balance too low, top up before you submit — a burn that fails halfway "
+        f"{balance:.4f} TAO ({season} costs {fee.amount_tao} TAO to enter, "
+        f"by {fee.kind})",
+        "balance too low, top up before you submit — a payment that fails halfway "
         "still has to be redone",
     )
+
+
+def _entry_fee(settings: Settings) -> tuple[str, Fee] | None:
+    """What entering this workspace's competition costs, and which one that is.
+
+    🔴 **Not `settings.burn_rate_tao`.** That is control.json's subnet-wide rate,
+    and the subnet runs several seasons at once: on `real/1` it reads 0.1 while
+    that season's own `params.fee` is 2 TAO, so a wallet holding 0.5 TAO was
+    ticked green here and ran out at `submit` -- after the upload, and with no
+    hint anywhere in the report that the two numbers were about different things.
+    The season's `params.fee` is the amount `submit` actually confirms and pays,
+    so it is the one to hold a balance against.
+
+    `None` means there is nothing to compare with, and both ways of getting there
+    are real: a workspace with no `competition:` section (which cannot pay at all
+    -- `submit` refuses it), and one whose section will not parse. Neither is
+    guessed past; `fee_of` has no defaults for the same reason.
+    """
+    snapshot = load_snapshot(settings)
+    if snapshot is None:
+        return None
+    try:
+        return snapshot.name, snapshot.fee()
+    except ConfigError:
+        # The unparseable half. Naming the broken key belongs to the command
+        # that acts on it; here the honest report is "unknown", which is what
+        # the caller prints.
+        return None
 
 
 def _coldkey_address(settings: Settings) -> str:

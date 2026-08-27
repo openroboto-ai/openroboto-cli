@@ -63,8 +63,9 @@ openroboto status
 ```
 
 Steps 2 and 4 exist for one reason: **burns are not refundable.** The most expensive
-mistake on this subnet is discovering after paying that the upload was a bare LoRA
-adapter. `doctor` and `check` are free and catch that.
+mistake on this subnet is discovering after paying that the upload was not something
+the evaluator can load — a bare LoRA adapter, or a checkpoint buried in a
+subdirectory. `doctor` and `check` are free and catch both.
 
 Full walkthrough: [docs/MINER.md](docs/MINER.md).
 Real-machine setup, systemd, custom strategies: [docs/MINER_DEPLOY.md](docs/MINER_DEPLOY.md).
@@ -75,24 +76,41 @@ Real-machine setup, systemd, custom strategies: [docs/MINER_DEPLOY.md](docs/MINE
 |---|---|
 | `openroboto init [DIR] [-s simple\|example] [--validator]` | Create a working workspace: config, a training strategy to edit, a README with the exact next commands, and a `.gitignore` that keeps your wallet password out of git |
 | `openroboto doctor` | Environment check: Python, config, `control.json`, Docker, GPU, image, HF token, wallet balance |
-| `openroboto build` | Build the training image from the build context shipped inside the package (no clone, no network) |
+| `openroboto build` | Build the training image from the build context shipped inside the package (no clone, no network). Refuses for a competition this client has no image for, rather than filling that competition's image name with the π0.5 one |
 | `openroboto train [-s script.py]` | Run one round; your strategy script is mounted into the container |
 | `openroboto check [PATH]` | Verify checkpoint layout with the rules the evaluator uses — **no GPU, no network, no second repository** |
-| `openroboto upload / burn / announce` | The three submission steps, individually — for recovery, not routine use |
+| `openroboto upload / announce` | Two of the submission steps, individually — for recovery, not routine use |
+| `openroboto burn` | Refuses, and says so. Paying needs the season confirmed against the backend and the uploaded layout judged, and this command can do neither — use `openroboto submit` |
 | `openroboto submit [--force]` | All three, resumable from `state/round_N.json` |
 | `openroboto status [--hotkey]` | Submission history and scanner rejection reasons (no API key needed) |
 | `openroboto validator run` | External validator: read published weights, set them on chain |
 | `openroboto --version` | CLI version and protocol package version |
 
-⚠️ **`openroboto merge` does not exist yet.** Training produces a LoRA adapter, and a
-bare adapter is rejected — merging it into the base model is currently a manual step.
-`openroboto check` catches an unmerged upload before you pay.
+⚠️ **There is no `openroboto merge`, and none is planned.** Exporting a full
+checkpoint is part of **training** — it needs the model libraries, which cannot live
+in the same interpreter as `bittensor` — so it belongs in your training script,
+inside the training container. The bundled strategies leave that step blank on
+purpose and say so; `openroboto train` tells you what the run actually produced, and
+`openroboto check` gives the verdict **before you pay**.
+
+⚠️ **`openroboto submit` checks the layout too, and it is not optional.** Between
+the upload and the payment it reads the file listing of your HuggingFace
+repository — the same listing the subnet reads *after* the fee — and stops
+without paying anything if that listing would not earn a score. There is no flag
+to skip it, because past that point a rejection is final and the TAO is not
+refunded. If the listing cannot be fetched at all, it also stops: an answer we
+could not get is not one this will spend your money on. Run `openroboto check`
+first anyway — it is free, it runs before the multi-gigabyte upload, and it
+checks two more rules that need the weight index on your disk.
 
 ## Things that will cost you TAO if you skip them
 
-The fee is published live in `control.json`; on mainnet today it is 0.1 TAO. Never
-hard-code it — the CLI reads it, and **refuses to burn if it cannot** rather than
-guessing an amount the backend would reject.
+The fee is published on the competition you are entering (`params.fee`) — 0.1 TAO
+on the mainnet simulation season today, a different number on the real-hardware
+one, which is why no single figure belongs in your config. Never hard-code it:
+`openroboto submit` confirms it against the backend in the moment before paying,
+and **refuses to pay at all** if it cannot, rather than reaching for an amount
+that says how much but not which competition.
 
 **Do not run `burn` and `announce` as separate steps unless you are recovering.** The
 backend only accepts a submission whose burn is within **50 blocks (~10 minutes)** of
@@ -110,6 +128,11 @@ The evaluator accepts **complete model checkpoints** — an openpi JAX `params/`
 directory or a PyTorch `model.safetensors`, plus
 `assets/physical-intelligence/libero/norm_stats.json`. A bare LoRA adapter is rejected
 by a CPU pre-check before any GPU time is spent.
+
+Put them at the **top** of the directory you upload. The evaluator descends two
+levels looking for the weights and stops; the LingBot exporter's own layout,
+`checkpoints/global_step_N/hf_ckpt/`, is one level past that, so an unedited upload
+of a training output is admitted and then never loaded.
 
 Exact requirements: [docs/SUBNET_OVERVIEW.md](docs/SUBNET_OVERVIEW.md).
 
@@ -148,6 +171,13 @@ openroboto train     # starts it for you, data and strategy mounted in
 The training image definition ships **inside the package**. There is nothing to
 clone, nothing to keep in sync, and no network needed to build it. You do need
 Docker on the host.
+
+⚠️ There is exactly **one** image definition in the package and it installs
+openpi (π0.5). Competitions on another base model have no image here yet, and
+`build` / `train` say so and stop instead of running the π0.5 one under that
+competition's name — train those your own way, then come back for `openroboto
+check` and `openroboto submit`, which both work on a checkpoint this CLI did
+not produce.
 
 ### Running the CLI in a container too (optional, needs a clone)
 

@@ -9,7 +9,8 @@
 OpenRoboto derives each submission's base evaluation seed from three public inputs:
 
 1. the hash of the block containing the miner commitment;
-2. the subnet round number;
+2. the round number **as written in the on-chain commitment payload** (the `r` field) —
+   see the warning below, this is not always the `round_num` the API reports back;
 3. randomness from a recorded drand quicknet round.
 
 ```text
@@ -32,6 +33,21 @@ def derive_seed(block_hash: str, round_num: int, drand_random: str) -> int:
 ```
 
 No private task, held-out data identifier, or dataset mapping participates in this formula.
+
+### ⚠️ Take `round_num` from the chain, not from the API
+
+The `round_num` field in API responses (`GET /api/v1/submissions/{task_id}`, the
+leaderboard, the evaluation queue) is a **display value**: it is the season's own
+sequence number, normalized by the backend when the submission is admitted. The
+number that goes into the formula above is the raw `r` you wrote into the on-chain
+commitment payload, which the backend does not rewrite.
+
+The two are equal for every submission made without a `cid` field — those are
+rejected outright when `r` does not match the running season. They can differ for
+submissions that carry a `cid`, because there `r` is not validated against anything.
+
+If a recomputed seed does not match, check this first. The raw value is also
+preserved in the task id, whose shape is `task_{hotkey}_r{r}_v{attempt}`.
 
 ## Why the formula is public
 
@@ -79,7 +95,8 @@ This translation is deterministic and public. It randomizes the evaluation mecha
 
 ## Audit checklist
 
-- obtain the miner commitment and containing block hash from chain;
+- obtain the miner commitment and containing block hash from chain — including the
+  payload's `r`, which is the round number the formula takes;
 - obtain the recorded drand round and randomness from the public beacon;
 - recompute the uint32 base seed with `openroboto_protocol.seed.derive_seed`;
 - recompute per-task seeds with the public validator toolkit;

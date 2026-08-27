@@ -18,10 +18,17 @@ from __future__ import annotations
 from typing import Any
 
 from openroboto_protocol.commitment import (
+    CommitmentFieldError,
     CommitmentPayload,
     CommitmentTooLargeError,
+    Track,
+    check_payload,
     encode,
 )
+
+from openroboto import round_state
+from openroboto.competition import load_snapshot
+from openroboto.config.settings import Settings
 
 HF_COMMIT_LEN = 40
 BLOCK_HASH_PLACEHOLDER = "f" * 64
@@ -89,9 +96,37 @@ def check_burn_window(
     return "", ""
 
 
-def check_announce_ready(state: dict[str, Any], round_num: int) -> list[str]:
+def payload_track(settings: Settings) -> Track:
+    """Which track's rules this workspace's payload is judged by.
+
+    A config with no competition section is the simulation track -- the same
+    reading the chain side gives a commitment that carries no `cid`, and the
+    promise `MIGRATION.md` §2 makes to configs written before competitions
+    existed.
+
+    A track string this client does not know **raises** (`ValueError` carrying
+    the offending value) and never falls back to simulation. Falling back would
+    put a real-track submission on the simulation leaderboard *after* the entry
+    fee has been paid.
+    """
+    snapshot = load_snapshot(settings)
+    if snapshot is None:
+        return Track.SIM
+    return Track(snapshot.track)
+
+
+def check_announce_ready(
+    state: dict[str, Any], round_num: int, track: Track = Track.SIM
+) -> list[str]:
     """Return the list of reasons blocking the submission; an empty list means
-    it is fine to continue."""
+    it is fine to continue.
+
+    `track` decides which fields are required, and the decision itself is the
+    protocol package's (`check_payload`) rather than a second copy written here:
+    "what does the real track require" spelled out on both sides is how the two
+    drift. It defaults to the simulation track, which is what a config with no
+    competition section is.
+    """
     reasons: list[str] = []
 
     hf_repo_id = str(state.get("hf_repo_id", ""))
@@ -128,13 +163,45 @@ def check_announce_ready(state: dict[str, Any], round_num: int) -> list[str]:
                 "-- pick a shorter HF repo name"
             )
 
+    # The field rules of the track being entered, checked **before the fee**.
+    # On the simulation track this only repeats the commit format above; on the
+    # real track it is the gate that stops a fee being paid for a submission the
+    # backend will refuse for a missing `cid` or a malformed fingerprint.
+    try:
+        check_payload(_estimated_payload(state, round_num), track)
+    except CommitmentFieldError as exc:
+        reasons.append(f"{_FIELD_ADVICE.get(exc.field, str(exc))} ({exc})")
+
     return reasons
 
 
-def payload_size(state: dict[str, Any], round_num: int) -> int:
-    """Estimate the byte size of the on-chain payload (using the placeholder
-    block hash and the burn fields)."""
-    payload = CommitmentPayload(
+#: What to do about each on-chain key `check_payload` can reject. Keyed by the
+#: **chain key name** the protocol package reports, so a new required field
+#: surfaces as its raw message rather than being silently mapped to the wrong
+#: advice.
+_FIELD_ADVICE = {
+    "c": "The HF commit in the checkpoint is not a commit SHA -- run "
+    "`openroboto upload` again",
+    "cid": "This workspace mines a real-track competition, but the checkpoint "
+    "does not say which season the fee is for -- run `openroboto submit`, "
+    "which resolves it from the backend, rather than `openroboto burn` on "
+    "its own",
+    "m": "The model fingerprint for this round is missing or malformed. The "
+    "real track needs it on chain because the repository may be private, so "
+    "the evaluator cannot compute it later -- run `openroboto upload` again",
+}
+
+
+def _estimated_payload(state: dict[str, Any], round_num: int) -> CommitmentPayload:
+    """The payload as it would go on chain, with a placeholder block hash.
+
+    `competition_id` / `model_hash` are read from the checkpoint, so the size
+    below counts the keys this submission will actually carry: a legacy config
+    has neither and estimates exactly what it always did, while a real-track one
+    pays for both keys here rather than at the on-chain step, when the fee is
+    already gone.
+    """
+    return CommitmentPayload(
         hotkey_ss58=str(state.get("hotkey_ss58", "")),
         block_hash=BLOCK_HASH_PLACEHOLDER,
         hf_commit=str(state.get("hf_commit", "")),
@@ -142,5 +209,12 @@ def payload_size(state: dict[str, Any], round_num: int) -> int:
         hf_repo_id=str(state.get("hf_repo_id", "")),
         burn_tx_hash=str(state.get("burn_tx_hash", "")) or "0" * 64,
         burn_block=int(state.get("burn_block", 0) or 0) or 1,
+        competition_id=round_state.competition_id(state),
+        model_hash=round_state.model_hash(state),
     )
-    return len(encode(payload))
+
+
+def payload_size(state: dict[str, Any], round_num: int) -> int:
+    """Estimate the byte size of the on-chain payload (using the placeholder
+    block hash and the burn fields)."""
+    return len(encode(_estimated_payload(state, round_num)))

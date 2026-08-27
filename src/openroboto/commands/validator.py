@@ -6,6 +6,13 @@ and it is only responsible for reading them back and setting them on chain.
 control.json refreshes `public_key` every round, so the loop updates it along
 the way -- a validator does not have to be restarted when the key rotates.
 
+🔴 **`public_key` is the only thing this loop takes out of that file**, and it is
+the whole reason the URL has to keep answering: it is an external validator's
+only channel to the key, and their code is not ours to upgrade. The rest of the
+file is a miner-side artifact on its way out; the `payment` block in particular
+used to be applied to `Settings` on every cycle, which set a burn rate on a
+process that never burns anything.
+
 The old loop called `scan_chain_submissions()` every 60 seconds but **used the
 return value in exactly zero places** -- a full metagraph sync plus reading the
 commitment of every hotkey one by one, pure wasted RPC. It is removed here.
@@ -24,7 +31,7 @@ from openroboto.chain import (
     open_wallet,
     set_weights_on_chain,
 )
-from openroboto.config import ControlFetchError, Settings, apply_control, fetch_control
+from openroboto.config import ControlFetchError, Settings, fetch_control
 from openroboto.console import say
 
 logger = logging.getLogger("openroboto.validator")
@@ -68,7 +75,6 @@ def run(args: argparse.Namespace) -> int:
                 fetched = fetch_control(settings.control_json_url, control_etag)
                 control_etag = fetched.etag
                 if fetched.control is not None:
-                    apply_control(settings, fetched.control)
                     new_key = fetched.control.get("public_key", "")
                     if isinstance(new_key, str) and new_key and new_key != public_key:
                         logger.info("public_key in control.json has been updated")

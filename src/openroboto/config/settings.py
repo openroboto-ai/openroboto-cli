@@ -7,14 +7,17 @@ key name was touched.
 
 Division of labour:
 - `miner.yaml` belongs to **the user** (credentials, paths, their own training
-  script);
-- `control.json` belongs to **the subnet** (this round's payment / dataset /
-  training / process), see `config/control.py`.
+  script, their own hyperparameters);
+- the **competition row** belongs to the subnet (this season's fee, image,
+  dataset, base checkpoint), and `openroboto init` copies it into the
+  `competition:` section of this same file;
+- `control.json` is down to `public_key`, the one thing external validators
+  have no other way to get. See `config/control.py`.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import yaml
@@ -141,14 +144,72 @@ class Settings:
     weight_interval_min: int = 60
 
     # ─── Public HTTP resources ─────────────────────────
+    #: Where the subnet publishes `public_key`. That is **all** it is read for
+    #: now: the round, the status, the dataset and the base checkpoint moved to
+    #: the competition row, and the fee has come from `params.fee` since the
+    #: pre-payment check landed. `urls.dataset_train` / `dataset_val` are gone
+    #: with them -- a dataset URL that is not the one this season publishes is
+    #: a training run on the wrong data, and it looks exactly like a normal one.
     control_json_url: str = ""
-    dataset_train_url: str = ""
-    dataset_val_url: str = ""
-    dataset_test_url: str = ""
+
+    # ─── Competition ───────────────────────────────────
+    #: The `competition:` section verbatim -- the snapshot `openroboto init`
+    #: wrote of the season this workspace mines. Empty = a config from before
+    #: competitions existed, which keeps working unchanged.
+    #:
+    #: Stored raw because that is what it is: a copy of one backend row, read
+    #: through `competition.Snapshot`. The two fields below are the parts the
+    #: commands reach for often enough to deserve a name of their own; they are
+    #: read out of this same section, never set independently.
+    competition: dict[str, Any] = field(default_factory=dict)
+    #: Which competition this workspace mines, as the adapter string
+    #: `openroboto init` wrote into `miner.yaml`. Empty = a config from before
+    #: competitions existed; see `adapters.DEFAULT_ADAPTER` for what that means.
+    competition_adapter: str = ""
+    #: `competition.base_model_family` -- which base model this season runs on.
+    #: `""` = the file does not say (written before the key existed, or the season
+    #: has not decided). Resolved by `adapters.base_model_family()`, which refuses
+    #: rather than guesses.
+    competition_base_model_family: str = ""
+    #: That competition's own parameters, verbatim from the snapshot `init`
+    #: wrote. Passed through, never interpreted here: a value the CLI
+    #: understands is a value that needs a CLI release to change.
+    competition_params: dict[str, Any] = field(default_factory=dict)
+    #: `competition.source` -- **which backend served the season above**.
+    #: `""` = the file does not say (written before the key existed).
+    #:
+    #: It is not decoration: `(track, seq)` is unique per database, not across
+    #: them, so a season fetched from one backend matches a season on another
+    #: and nothing else in this file records which one it was. That is the fact
+    #: `require_for_chain()` hands to `check_coherent()`.
+    competition_source: str = ""
 
     # ─── Model ─────────────────────────────────────────
-    vla_model_id: str = "pi05"
+    #: A base checkpoint already on this machine. Empty is the normal case:
+    #: the season names its own starting point in `params.training.checkpoint`,
+    #: and when neither says anything the training image uses its own default.
+    #:
+    #: The season wins over this field, which is what control.json did before
+    #: it (`training.vla_checkpoint_path` overwrote whatever miner.yaml said).
+    #: The other direction lets a path left over from an earlier season quietly
+    #: train the next one on the wrong base.
     vla_checkpoint_path: str = ""
+
+    # ─── Training hyperparameters ──────────────────────
+    #: 🔴 **These five are the miner's, not the subnet's.** They used to arrive
+    #: in control.json's `training` block, which meant we picked the epoch count
+    #: and the LoRA rank for every miner on the subnet -- their competition
+    #: space, decided centrally. The defaults are the values control.json
+    #: served, so a workspace that leaves them alone trains exactly as before.
+    #:
+    #: They reach the container as `EPOCHS` / `BATCH_SIZE` / `LR` / `LORA_R` /
+    #: `LORA_ALPHA` (red line #2 -- strategy scripts read them out of `cfg`,
+    #: so the names do not change).
+    epochs: int = 3
+    batch_size: int = 4
+    learning_rate: float = 1e-4
+    lora_r: int = 32
+    lora_alpha: int = 64
 
     # ─── HuggingFace ───────────────────────────────────
     hf_token: str = ""
@@ -222,6 +283,9 @@ class Settings:
             netuid=self.netuid,
             control_json_url=self.control_json_url,
             backend_url=self.backend_url,
+            # 🔴 The fact none of the fields above can contradict: they describe
+            # each other, while this one describes where the season came from.
+            competition_source=self.competition_source,
         )
         if missing:
             raise ConfigError(
@@ -301,15 +365,42 @@ class Settings:
 
         urls = _section(data, "urls")
         cfg.control_json_url = urls.get("control_json", cfg.control_json_url)
-        cfg.dataset_train_url = urls.get("dataset_train", cfg.dataset_train_url)
-        cfg.dataset_val_url = urls.get("dataset_val", cfg.dataset_val_url)
-        cfg.dataset_test_url = urls.get("dataset_test", cfg.dataset_test_url)
+
+        # The competition snapshot. `params` is stored raw: the CLI dispatches on
+        # `adapter` and reads the few keys a given step needs, and anything it
+        # does not recognize is a key a later competition added -- dropping it
+        # here would mean a CLI release per competition parameter.
+        competition = _section(data, "competition")
+        cfg.competition = competition
+        cfg.competition_adapter = str(
+            competition.get("adapter", cfg.competition_adapter) or ""
+        )
+        # Which base model, as opposed to which track: `adapter` no longer says
+        # (`real_xarm6` names a robot arm). `""` = this file does not say, which
+        # `adapters.base_model_family()` resolves or refuses -- never guesses.
+        cfg.competition_base_model_family = str(
+            competition.get("base_model_family", cfg.competition_base_model_family)
+            or ""
+        )
+        cfg.competition_source = str(competition.get("source") or "")
+        cfg.competition_params = _section(competition, "params")
 
         model = _section(data, "model")
-        cfg.vla_model_id = model.get("vla_model_id", cfg.vla_model_id)
         cfg.vla_checkpoint_path = model.get(
             "vla_checkpoint_path", cfg.vla_checkpoint_path
         )
+
+        # The miner's own hyperparameters. `float()` on the learning rate is not
+        # decoration: YAML 1.1 only resolves `1.0e-4` as a float, and a config
+        # written `1e-4` arrives here as the *string* "1e-4" -- which would
+        # reach `docker run -e LR=1e-4` unchanged and only be noticed by
+        # whoever compares two runs' losses.
+        training = _section(data, "training")
+        cfg.epochs = int(training.get("epochs", cfg.epochs))
+        cfg.batch_size = int(training.get("batch_size", cfg.batch_size))
+        cfg.learning_rate = float(training.get("learning_rate", cfg.learning_rate))
+        cfg.lora_r = int(training.get("lora_r", cfg.lora_r))
+        cfg.lora_alpha = int(training.get("lora_alpha", cfg.lora_alpha))
 
         hf = _section(data, "huggingface")
         cfg.hf_token = hf.get("token", cfg.hf_token)

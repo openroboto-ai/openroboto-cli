@@ -57,9 +57,11 @@ from __future__ import annotations
 import json
 import urllib.error
 import urllib.parse
+from datetime import datetime
 from typing import Any, TypeVar
 
 from openroboto_protocol.schemas import (
+    Competition,
     Contract,
     ErrorEnvelope,
     ListEnvelope,
@@ -92,6 +94,8 @@ DEFAULT_LIMIT = 20
 
 HISTORY_PATH = "/api/v1/submissions/history"
 REJECTIONS_PATH = "/api/v1/scan-rejections"
+COMPETITIONS_PATH = "/api/v1/competitions"
+HEALTH_PATH = "/healthz"
 WEIGHTS_PATH = "/api/v1/weights"
 #: The pre-v1 address. Still live, and still the only one an
 #: un-migrated backend has -- see `fetch_weights`.
@@ -165,7 +169,11 @@ class BackendError(Exception):
 
 
 def fetch_submissions(
-    base_url: str, hotkey: str = "", limit: int = DEFAULT_LIMIT, offset: int = 0
+    base_url: str,
+    hotkey: str = "",
+    limit: int = DEFAULT_LIMIT,
+    offset: int = 0,
+    round_num: int = 0,
 ) -> ListEnvelope[SubmissionHistoryItem]:
     """Query the submission history.
 
@@ -176,21 +184,177 @@ def fetch_submissions(
     getting it wrong once shows up as **silently displaying a few rows too
     few** -- neither the backend nor the CLI raises any error.
     """
+    # 🔴 `round_num` filters on the **server**, not here. The field is not in the
+    # response at all any more (protocol 0.9.0 dropped it), so there is nothing
+    # left to filter on once the rows arrive -- while the backend still accepts
+    # the query parameter and selects rows by `competition_id`.
+    # 0 means "no filter": `_get` drops empty values rather than sending them.
     raw = _get(
-        base_url, HISTORY_PATH, {"hotkey": hotkey, "limit": limit, "offset": offset}
+        base_url,
+        HISTORY_PATH,
+        {
+            "hotkey": hotkey,
+            "limit": limit,
+            "offset": offset,
+            "round_num": round_num or "",
+        },
     )
     return _parse(ListEnvelope[SubmissionHistoryItem], raw, HISTORY_PATH)
 
 
 def fetch_rejections(
-    base_url: str, hotkey: str = "", limit: int = DEFAULT_LIMIT, offset: int = 0
+    base_url: str,
+    hotkey: str = "",
+    limit: int = DEFAULT_LIMIT,
+    offset: int = 0,
+    round_num: int = 0,
 ) -> ListEnvelope[ScanRejection]:
     """Query records rejected during the chain-scan stage -- the answer to
     "it is on chain but not in the queue" is here."""
+    # Server-side filter, same as `fetch_submissions` -- see the note there.
     raw = _get(
-        base_url, REJECTIONS_PATH, {"hotkey": hotkey, "limit": limit, "offset": offset}
+        base_url,
+        REJECTIONS_PATH,
+        {
+            "hotkey": hotkey,
+            "limit": limit,
+            "offset": offset,
+            "round_num": round_num or "",
+        },
     )
     return _parse(ListEnvelope[ScanRejection], raw, REJECTIONS_PATH)
+
+
+def fetch_competitions(
+    base_url: str, *, include_archived: bool = False
+) -> ListEnvelope[Competition]:
+    """The competitions taking submissions, in `(track, seq)` order.
+
+    Anonymous: a miner who has just run `pip install openroboto` holds no key,
+    and this is their **first** call to the backend. Sorted by the backend and
+    not re-sorted here -- "there is only one, so do not ask" in `init` depends
+    on that order being the backend's, not on whatever a local sort happens to
+    produce.
+
+    ⚠️ The parameter is `include_archived`, a bool. An `?archived=1` invented
+    here would be dropped by FastAPI as an undeclared query string: the archived
+    season simply never comes back, **and nothing reports an error**.
+    """
+    raw = _get(
+        base_url,
+        COMPETITIONS_PATH,
+        # Sent only when asked for. `False` would go out as the string "False",
+        # which happens to parse correctly today and is one backend refactor
+        # away from not doing so.
+        {"include_archived": "true" if include_archived else ""},
+    )
+    return _parse(ListEnvelope[Competition], raw, COMPETITIONS_PATH)
+
+
+def fetch_netuid(base_url: str) -> int:
+    """Which subnet this backend watches, from its own liveness probe.
+
+    For a self-hosted backend this is the **only** honest answer to "which chain
+    is this workspace on". `openroboto init` used to answer it from a static
+    template instead, which is how asking a testnet backend for the season
+    produced a mainnet workspace around it.
+
+    ⚠️ `/healthz` is deliberately **not** enveloped (backend ADR 02 §3.3: probes
+    stay bare JSON so orchestrators can read fixed field paths), so this is the
+    one endpoint here that is parsed by hand rather than by the protocol package.
+
+    Raises:
+        BackendError: unreachable, or it does not say. **Never returns a guess** --
+            a netuid invented here is the one number that decides which chain
+            burns the fee.
+    """
+    try:
+        raw = _get(base_url, HEALTH_PATH)
+    except BackendError as exc:
+        raise BackendError(
+            f"{base_url} answered the competition list but not {HEALTH_PATH}, so "
+            f"it cannot say which subnet it watches -- and that is what decides "
+            f"where your fee is burned. Nothing was written.\n"
+            f"  {exc.args[0] if exc.args else exc}",
+            code=exc.code,
+            retryable=exc.retryable,
+            request_id=exc.request_id,
+        ) from exc
+
+    body = _decode(raw, HEALTH_PATH)
+    netuid = body.get("netuid") if isinstance(body, dict) else None
+    if not isinstance(netuid, int) or isinstance(netuid, bool) or netuid <= 0:
+        raise BackendError(
+            f"{base_url}{HEALTH_PATH} reports netuid {netuid!r}, which is not a "
+            f"subnet number.\n"
+            f"  → upgrade that backend, or point --backend-url at one that "
+            f"answers the probe"
+        )
+    return netuid
+
+
+class RosterEntry(Contract):
+    """One row of a competition's entry list.
+
+    ⚠️ **The only response model in this repository that the protocol package
+    does not publish.** `openroboto-protocol` 0.7.0 has `Competition` but no
+    roster model, and it is released -- adding one means a release of that
+    package plus a re-pin here. This is a display-only path (`openroboto
+    status`), no money branches on it, so it waits here for the protocol
+    package's next version rather than blocking the command. **Do not grow this
+    habit**: every other model comes from the protocol package precisely so that
+    "the shape the backend sends" and "the shape the CLI parses" are one
+    declaration.
+
+    The field name is `payment_status`, not `burn_status`. The new endpoints use
+    the real name (a fee can be a transfer); the older endpoints still say
+    `burn_*`, and the two must not be confused for each other.
+    """
+
+    hotkey: str
+    #: Nullable: production has nine rows at `uid=0` for nine different hotkeys,
+    #: which means "not known", not "uid zero".
+    uid: int | None = None
+    hf_repo_id: str = ""
+    hf_commit: str | None = None
+    #: The moment it was announced **on chain**, not the moment it was written
+    #: to the database (a re-scan rewrites the latter).
+    submitted_at: datetime | None = None
+    #: Verbatim from the backend, one of the eight payment status words. Not
+    #: mapped onto a second vocabulary here.
+    payment_status: str = ""
+    hf_access_status: str = ""
+    invalid_reason: str | None = None
+    #: Whether this row still occupies the `(hotkey, competition, hf_commit)`
+    #: slot -- i.e. whether submitting that commit again would be skipped.
+    #:
+    #: 🔴 **Required, deliberately, on the one model in this file that has
+    #: defaults for everything else.** It is a conclusion the backend computes
+    #: (`submission_writes.counts_as_submitted`), and it is what `submit` asks
+    #: before it pays; a default here would answer "the slot is free" on behalf
+    #: of a backend that never said so, which is the direction that spends the
+    #: fee. A backend too old to send it therefore fails to parse -- loudly, with
+    #: `_parse`'s "the backend has not caught up yet" -- rather than being
+    #: guessed at.
+    counts_as_submitted: bool
+
+
+def fetch_roster(
+    base_url: str,
+    competition_id: int,
+    *,
+    hotkey: str = "",
+    limit: int = DEFAULT_LIMIT,
+    offset: int = 0,
+) -> ListEnvelope[RosterEntry]:
+    """One competition's entry list, newest submission first.
+
+    `hotkey` filters it down to one miner, which is how "am I on the list" is
+    answered without paging through everyone else.
+    """
+    path = f"{COMPETITIONS_PATH}/{competition_id}/roster"
+    raw = _get(base_url, path, {"hotkey": hotkey, "limit": limit, "offset": offset})
+    return _parse(ListEnvelope[RosterEntry], raw, path)
 
 
 def fetch_weights(base_url: str, public_key: str = "") -> Weights:

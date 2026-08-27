@@ -6,6 +6,12 @@
 
 > For miners participating in the RobotTrain subnet.
 
+> **Mining the LingBot-VLA 2.0 competition instead?** Read
+> [MINER_LINGBOT.md](./MINER_LINGBOT.md). Most of this page still applies —
+> the fee, the chain announcement, the repository naming, the burn→announce
+> window — but the checkpoint layout and where the base model comes from do not,
+> and following the π0.5 rules there gets your upload rejected after you pay.
+
 ## Architecture
 
 ```
@@ -41,11 +47,20 @@
 ```
 
 **Two-stage workflow**: `openroboto train` does prep + training. After it
-completes, `openroboto submit` does upload → burn → announce.
+completes, `openroboto submit` does upload → check the layout → burn → announce.
 
 Run `openroboto doctor` before the first round and `openroboto check` before
 paying — both exist so that "burned TAO, then found out the model was wrong"
 stops happening.
+
+`openroboto submit` judges the layout itself as well, between the upload and the
+payment, so skipping `openroboto check` no longer means skipping the rules. It
+reads the file listing of your HuggingFace repository — the same listing the
+subnet reads after the fee — and stops without paying if that listing would not
+earn a score. There is no flag to switch it off: past that point a rejection is
+final and the TAO is not refunded. Running `openroboto check` first is still
+worth it, because it is free, it runs *before* the multi-gigabyte upload, and it
+checks two rules that need the weight index file on your disk.
 
 **Backend auto-scans chain**: Backend runs `ChainScanner` + `ScannerLoop` (polls every 60s), discovers miner submissions, verifies burns, computes seeds, and queues for evaluation.
 
@@ -100,10 +115,13 @@ The CLI pulls `control.json` via **HTTP direct link** (ETag cached), no R2 SDK
 dependency. `openroboto submit` handles the post-training pipeline, reading the
 wallet password from `miner.yaml`.
 
-The evaluation fee comes from `control.json` and from nowhere else. If it cannot
-be fetched, `burn` **refuses to run** instead of falling back to a guess — an
-amount that does not match is rejected by the backend, and the TAO is not
-refunded.
+The evaluation fee comes from the season you are entering
+(`competition.params.fee` in `miner.yaml`) and from nowhere else — not from
+`control.json`, whose `payment` block is one rate for a subnet that runs several
+seasons at once, and not from anything typed into `miner.yaml`. `openroboto
+submit` confirms it against the backend in the moment before paying; a workspace
+with no `competition` section is refused rather than charged a guess. An amount
+that does not match is rejected by the backend, and the TAO is not refunded.
 
 ## Chain Submission Format
 

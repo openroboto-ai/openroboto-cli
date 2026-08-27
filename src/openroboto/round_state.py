@@ -21,6 +21,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from openroboto.huggingface.upload import commit_sha_from_url
+
 STATE_DIR = Path("state")
 """Checkpoint directory, relative to the current working directory."""
 
@@ -56,6 +58,58 @@ def save_state(round_num: int, state: dict[str, Any], base: Path = STATE_DIR) ->
     state_path(round_num, base).write_text(
         json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8"
     )
+
+
+def competition_id(state: dict[str, Any]) -> int | None:
+    """Which season this round is being submitted to, or `None`.
+
+    It is written by the step that **paid** -- the pre-payment check resolves it
+    from the row the backend served at that moment -- and read back here by
+    `announce`, the same way `burn_tx_hash` travels between two commands that
+    can be run minutes apart. Keeping it in the checkpoint is what makes a bare
+    `openroboto announce` after a failed pipeline carry the same `cid` the fee
+    was paid under.
+
+    `None` means the key is absent, which is every config written before
+    competitions existed; on chain the `cid` key is then not written at all.
+    """
+    value = state.get("competition_id")
+    return int(value) if value else None
+
+
+def announced_commit(state: dict[str, Any]) -> str:
+    """The HF commit this round pins on chain -- `""` if there is none.
+
+    The URL wins because what the upload returns *is* that commit; the
+    `hf_commit` key is the fall back for a URL with no commit segment, which is
+    what `repo_info().sha` leaves behind. The old code knew only about the URL
+    and wrote `c` as an empty string when it could not get one -- and without a
+    commit the backend cannot verify the model, which is a fee paid for a
+    submission nobody can score.
+
+    It lives here, next to the other checkpoint readers, because **two** steps
+    need the same answer: `announce` puts it on chain, and the layout gate in
+    `submit` judges the repository *at that revision* before the fee is paid. A
+    gate that judged some other revision would be theatre, and two copies of a
+    one-line expression is exactly how that happens.
+    """
+    return commit_sha_from_url(str(state.get("hf_url", ""))) or str(
+        state.get("hf_commit", "")
+    )
+
+
+def model_hash(state: dict[str, Any]) -> str | None:
+    """The fingerprint of the weights this round uploaded, or `None`.
+
+    🔴 An empty string is **not** passed on. On chain, `encode()` distinguishes
+    `None` (key absent) from `""` (key present and empty), and `""` would both
+    break byte compatibility with every older payload and pin a fingerprint that
+    says "there were no weights". A checkpoint that somehow holds one is treated
+    as not having a fingerprint at all, and `check_payload` then refuses the
+    real track by name.
+    """
+    value = state.get("model_hash")
+    return str(value) if value else None
 
 
 def is_step_done(state: dict[str, Any], step: str) -> bool:

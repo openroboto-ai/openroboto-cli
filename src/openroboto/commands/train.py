@@ -1,22 +1,58 @@
 """`openroboto train` -- run one round of training (Step 1-2 of the old
 `miner.py`).
 
-The round, the dataset and the hyperparameters all come from control.json;
-training itself runs inside the openpi-runner container (red line #2, see
-`training/container.py`). When it finishes, the checkpoint is written into
-`state/round_N.json`, and the later upload / burn / announce continue from
-there.
+Everything this command needs is already on disk when it starts: the season's
+spec in the `competition:` section of `miner.yaml` (round, status, image,
+dataset, base checkpoint) and the miner's own hyperparameters beside it.
+**Not one byte is fetched.** Training runs inside the runner container (red
+line #2, see `training/container.py`); when it finishes the checkpoint is
+written into `state/round_N.json`, and the later upload / burn / announce
+continue from there.
+
+## Why control.json is gone from here
+
+It used to be mandatory: no `urls.control_json`, no training. That file is one
+static JSON for the whole subnet, so everything it said was said once for
+everybody -- one round number, one dataset, one base checkpoint, one set of
+hyperparameters -- while the subnet has been running several competitions at
+once for a while now. Reading the round from it meant a LingBot miner training
+"round 1" on the π0.5 sample, on the π0.5 checkpoint path, and nothing on that
+path could notice.
+
+Each of those fields now comes from the place that actually varies per season
+(the competition row), except the five hyperparameters, which come from the
+miner: choosing their epoch count and LoRA rank for them was deciding the
+competition on their behalf.
+
+The output directory **is the checkpoint root**
+------------------------------------------------
+Whatever the strategy leaves in `cfg["output_dir"]` is what `submit` uploads,
+byte for byte, as the Hugging Face repository root. Nothing in this package
+rearranges it afterwards: there is no `openroboto merge` and the evaluator
+merges nothing either.
+
+That makes the layout the strategy writes the whole game, and two ways of
+getting it wrong are common enough to be called out at the end of every run
+(see `export_advice`): exporting nothing at all, and exporting into a
+subdirectory. The second one is not carelessness -- the vendor's own LingBot
+export lands in `checkpoints/global_step_N/hf_ckpt/`, three levels down, and
+the evaluator stops searching at two.
 """
 
 from __future__ import annotations
 
 import argparse
 import tempfile
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from openroboto.config import Settings, apply_control, fetch_control
+from openroboto import adapters
+from openroboto.commands.build import competition_image
+from openroboto.commands.check import weights_subdir
+from openroboto.competition import REFRESH_HINT, Snapshot, load_snapshot
+from openroboto.config import Settings
 from openroboto.console import fail, say
 from openroboto.round_state import (
     DEFAULT_OUTPUT_ROOT,
@@ -54,29 +90,52 @@ def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) 
 def run(args: argparse.Namespace) -> int:
     settings = Settings.load(args.config)
 
-    if not settings.control_json_url:
+    adapter = adapters.resolve(settings.competition_adapter)
+    if adapter.training == adapters.UNAVAILABLE:
+        # Refuse before anything is fetched or created. A no-op "run" would
+        # leave an empty output directory behind, and the next `openroboto
+        # check` would deliver a verdict about it -- a verdict about nothing.
         fail(
-            "urls.control_json is not set — without it there is no way to know "
-            "which round it is or which dataset to train on"
+            f"Training support for this competition (adapter "
+            f"`{settings.competition_adapter}`) has not been released yet: the "
+            f"one training image that ships with this client installs openpi "
+            f"(π0.5), which is not the base model this competition is judged "
+            f"on.\n"
+            f"   🔴 It will not quietly run that image instead. An image named "
+            f"after this competition may already be on this machine -- built by "
+            f"an older release out of the openpi context -- and training in it "
+            f"would finish with no error at all, on the wrong base model.\n"
+            f"   → train it however you like, then `openroboto check` and "
+            f"`openroboto submit` -- both work on a checkpoint this CLI did not "
+            f"produce\n"
+            f"   → watch for the announcement, then `pip install -U openroboto`"
         )
         return 1
 
-    control = fetch_control(settings.control_json_url).control
-    if control is None:
-        fail("control.json returned 304 but there is no local cache — just retry")
-        return 1
-    apply_control(settings, control)
-
-    round_num = int(control.get("round", 0))
-    status = str(control.get("status", ""))
-    if status != ACTIVE_STATUS:
+    snapshot = load_snapshot(settings)
+    if snapshot is None:
         fail(
-            f"round {round_num} is `{status}`, not `active` — anything you train "
-            "now has nowhere to be submitted"
+            "This workspace does not say which competition it mines, so there "
+            "is no round to train, no dataset to train on and no base model to "
+            "start from.\n"
+            "   → `openroboto init --refresh` writes the `competition:` section "
+            "from the backend"
         )
         return 1
 
-    say(f"🦞 Round {round_num} | hotkey={settings.hotkey} | HF={settings.hf_username}")
+    if snapshot.status != ACTIVE_STATUS:
+        fail(
+            f"{snapshot.name} ({snapshot.label}) is `{snapshot.status}`, not "
+            f"`active` — anything you train against it has nowhere to be "
+            f"submitted.\n" + REFRESH_HINT
+        )
+        return 1
+
+    round_num = snapshot.seq
+    say(
+        f"🦞 {snapshot.label} ({snapshot.name}) | hotkey={settings.hotkey} | "
+        f"HF={settings.hf_username}"
+    )
 
     state = load_state(round_num)
     output_dir = str(Path(args.output_dir) / f"round_{round_num}")
@@ -86,18 +145,35 @@ def run(args: argparse.Namespace) -> int:
         say(f"    → next: `openroboto check {state.get('round_output', output_dir)}`")
         return 0
 
-    dataset = _section(control, "dataset")
-    train_url = dataset.get("train_url") or settings.dataset_train_url
+    dataset = _dataset(snapshot)
+    train_url = str(dataset.get("train") or "")
     if not train_url:
         fail(
-            "no training set URL: neither dataset.train_url in control.json nor "
-            "urls.dataset_train in miner.yaml is set"
+            f"{snapshot.name} ({snapshot.label}) has not published a training "
+            f"set (`competition.params.training.dataset`), so there is nothing "
+            f"to train on.\n"
+            f"   Refusing rather than reaching for another season's data: a run "
+            f"on the wrong dataset finishes without an error and is only found "
+            f"out after the fee is paid.\n" + REFRESH_HINT
         )
         return 1
-    val_url = dataset.get("val_url") or settings.dataset_val_url
+    val_url = str(dataset.get("val") or "")
 
-    params = TrainParams.from_control(_section(control, "training"))
-    checkpoint = resolve_checkpoint(settings.vla_checkpoint_path)
+    params = TrainParams(
+        epochs=settings.epochs,
+        batch_size=settings.batch_size,
+        learning_rate=settings.learning_rate,
+        lora_r=settings.lora_r,
+        lora_alpha=settings.lora_alpha,
+    )
+    # The season's starting point wins over the local path, exactly as
+    # control.json's `training.vla_checkpoint_path` did before it. Empty on both
+    # sides is a real answer -- "this season does not name one" -- and it leaves
+    # the training image to use its own base, which is the only thing that knows
+    # what its base is.
+    checkpoint = resolve_checkpoint(
+        str(snapshot.training.get("checkpoint") or "") or settings.vla_checkpoint_path
+    )
     strategy = args.strategy or settings.custom_train_script
     if strategy and not Path(strategy).is_file():
         fail(
@@ -114,7 +190,7 @@ def run(args: argparse.Namespace) -> int:
             "started_at": datetime.now(UTC).isoformat(),
             "checkpoint_path": checkpoint,
             "round_output": output_dir,
-            "data_version": dataset.get("version", f"v{round_num}"),
+            "data_version": f"v{round_num}",
             "epochs": params.epochs,
             "batch_size": params.batch_size,
             "lr": params.learning_rate,
@@ -145,6 +221,10 @@ def run(args: argparse.Namespace) -> int:
             params=params,
             hotkey=settings.hotkey_ss58 or settings.hotkey,
             custom_train_script=strategy or None,
+            # The same image `openroboto build` builds. Resolved from the
+            # competition rather than fixed here, so that building one image and
+            # training in another is not a thing that can happen quietly.
+            image=competition_image(args.config),
         )
 
     if not outcome.metrics.get("final_loss"):
@@ -167,18 +247,74 @@ def run(args: argparse.Namespace) -> int:
         state["hotkey_ss58"] = settings.hotkey_ss58
     save_state(round_num, state)
 
-    say(f"✅ Training finished, model is in {output_dir}")
+    say(f"✅ Training finished, output is in {output_dir}")
     say("")
-    say(
-        "⚠️  The default training output is a LoRA adapter; submitting it as-is "
-        "**will be rejected** (the evaluator does not merge)."
-    )
-    say("    Merge the adapter into the π0.5 base, export a full checkpoint, then:")
-    say(f"    openroboto check {output_dir}      # free, local, do not skip it")
-    say(f"    openroboto submit --round {round_num}")
+    for line in export_advice(Path(output_dir), round_num):
+        say(line)
     return 0
 
 
-def _section(control: dict[str, Any], name: str) -> dict[str, Any]:
-    value = control.get(name)
-    return value if isinstance(value, dict) else {}
+def export_advice(output_dir: Path, round_num: int) -> list[str]:
+    """What the run actually produced, and the next command that is true for it.
+
+    This used to be four fixed lines telling every miner to "merge the adapter
+    into the π0.5 base" -- wrong for the LingBot competitions, which do not use
+    LoRA at all, and wrong since the merge decision: nothing merges, on this side
+    or the evaluator's, and the export is the trainer's job.
+
+    Fixed text cannot be right for all three outcomes anyway, and the difference
+    between them is one `rglob` away at the moment the artifact appears. Saying
+    it here rather than leaving it to `check` is the point: the nesting case is
+    the one that costs money, and a miner who skips `check` meets it after the
+    burn.
+
+    The verdict itself still belongs to `check` (red line #1 -- the format rules
+    live in the protocol package); every branch ends by pointing at it.
+    """
+    subdir = weights_subdir(output_dir)
+
+    if subdir is None:
+        return [
+            "⚠️  There are no model weights in the output.",
+            "    Exporting the checkpoint is the training side's job, and the bundled",
+            "    strategies do not do it -- they exercise the pipeline, they do "
+            "not train.",
+            "    Point your trainer's export at the output directory itself: it is",
+            "    the checkpoint root, and `submit` uploads it verbatim as the HF",
+            "    repository root.",
+            "    A bare LoRA adapter is not a substitute: there is no `openroboto "
+            "merge`,",
+            "    and the evaluator merges nothing either.",
+            f"    → openroboto check {output_dir}   # free, local; it names what "
+            "is missing",
+        ]
+
+    if subdir:
+        nested = output_dir / subdir
+        return [
+            f"⚠️  The checkpoint is in {subdir}/, not at the top of the output.",
+            "    `submit` uploads the output directory verbatim as the repository",
+            "    root, and the evaluator only searches a couple of levels below it.",
+            "    The official LingBot export lands in "
+            "checkpoints/global_step_N/hf_ckpt/,",
+            "    which is already too deep -- so this is the normal way to get here.",
+            "    Submit that directory instead, or move its contents to the top:",
+            f"      openroboto check {nested}",
+            f"      openroboto submit --round {round_num} --output-dir {nested}",
+        ]
+
+    return [
+        f"    openroboto check {output_dir}      # free, local, do not skip it",
+        f"    openroboto submit --round {round_num}",
+    ]
+
+
+def _dataset(snapshot: Snapshot) -> Mapping[str, Any]:
+    """`params.training.dataset`, or `{}` when this season names none.
+
+    `null` is what the backend serves for a season whose dataset has not been
+    published, and it must stay distinguishable from a URL — `{}` here becomes
+    the refusal above, never a default address.
+    """
+    value = snapshot.training.get("dataset")
+    return value if isinstance(value, Mapping) else {}

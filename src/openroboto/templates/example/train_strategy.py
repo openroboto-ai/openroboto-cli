@@ -6,6 +6,11 @@ Mount this script into the container:
     -e CUSTOM_TRAIN=/data/scripts/my_strategy.py
 
 Interface: train(cfg, episodes, policy) → (metrics_dict, proof_dict)
+
+Two blocks are marked below and both are yours to fill in: the training loop,
+and the **export**. The export is the one that decides whether the round is
+worth anything -- `cfg["output_dir"]` is uploaded verbatim as the Hugging Face
+repository root, so what you leave there is exactly what gets evaluated.
 """
 
 import time
@@ -61,10 +66,30 @@ def train(cfg: dict, episodes: list, policy) -> tuple:
     # ↑↑↑ Write your training logic here ↑↑↑
     # ═══════════════════════════════════════════
 
-    # Save model adapter (required)
-    adapter_dir = f"{cfg['output_dir']}/adapter"
+    # ═══════════════════════════════════════════
+    # ↓↓↓ Export the checkpoint (required) ↓↓↓
+    # ═══════════════════════════════════════════
+    #
+    # `cfg["output_dir"]` **is** the checkpoint root: `openroboto submit`
+    # uploads this directory verbatim as the Hugging Face repository root, and
+    # the evaluator looks for the weights at the top of it, descending only a
+    # couple of levels. So:
+    #
+    #   * export at the top of `output_dir`, never into a subdirectory. The
+    #     LingBot exporter writes `checkpoints/global_step_N/hf_ckpt/` -- three
+    #     levels down, one too many -- so if you use it, move the contents up
+    #     here;
+    #   * export the **full** checkpoint, not a LoRA adapter. Nothing merges an
+    #     adapter: not this package (there is no `openroboto merge`) and not the
+    #     evaluator, which rejects a bare adapter before allocating a GPU.
+    #
+    # The call below is openpi's; substitute your own trainer's HF-format
+    # export, pointed at the same directory.
     if hasattr(policy, "save_pretrained"):
-        policy.save_pretrained(adapter_dir)
+        policy.save_pretrained(cfg["output_dir"])
+    #
+    # ↑↑↑ Export the checkpoint (required) ↑↑↑
+    # ═══════════════════════════════════════════
 
     # Build return value
     metrics = {
