@@ -1696,6 +1696,52 @@ def test_the_dedup_question_is_asked_about_this_hotkey_and_this_season(
 # ─── the order of the gates, and what the prompt is for ──────
 
 
+def test_the_real_track_is_not_judged_by_a_book_admission_will_not_open(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """🔴 The real track has no layout rules, so this gate must not invent one.
+
+    Admission does not judge real-track layout on purpose: the base model is
+    undecided there, and judging such a checkpoint by the openpi directory
+    rules is a silent misjudgement costing the miner 2 TAO
+    (backend `admit_real()`, gate 4).
+
+    This gate ran anyway, because `layout_of` picks a rule book from
+    `base_model_family` alone and `real/1` says `openpi`. It refused a
+    submission the backend would have taken -- `missing_weights` against rules
+    nobody will ever apply -- and since no real-track checkpoint is in openpi
+    layout, that refusal blocked **the entire real track**. Found by running
+    the flow end to end on testnet, not by reading it.
+
+    ⚠️ Not a relaxation. The rule is unchanged: judge by the book admission
+    will use. For this track that book is empty, and an empty book acquits --
+    so the payment must be reached.
+    """
+    monkeypatch.chdir(tmp_path)
+    save_state(1, _uploaded_state())
+    # A LingBot listing: nothing in it satisfies the openpi rules, which is
+    # exactly the shape that used to be refused here.
+    _, paid = _submitting(monkeypatch, _real_season_settings())
+    monkeypatch.setattr(
+        submit_command,
+        "resolve_competition",
+        lambda *a, **k: SimpleNamespace(
+            live=_live_row(
+                id=3, track="real", seq=1, adapter="real_xarm6",
+                base_model_family="openpi",
+            ),
+            kind="transfer",
+            amount_tao=2.0,
+            cid=3,
+        ),
+    )
+
+    args = argparse.Namespace(config="miner.yaml", round=1, output_dir="", force=False)
+    assert submit_command.run(args) == 0
+    assert len(paid) == 1, "the real track never reached the payment"
+    assert "missing_weights" not in capsys.readouterr().out
+
+
 def test_the_rule_book_comes_from_the_live_row_not_from_miner_yaml(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

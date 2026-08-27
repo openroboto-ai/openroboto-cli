@@ -97,6 +97,7 @@ import argparse
 from datetime import UTC, datetime
 from typing import Any
 
+from openroboto_protocol.commitment import Track
 from openroboto_protocol.model_format import FormatIssueCode, FormatReport
 from openroboto_protocol.model_hash import model_hash_from_hf_tree
 from openroboto_protocol.schemas import Competition
@@ -320,6 +321,28 @@ def layout_is_payable(
     reaches `cli.main`, which prints it and exits 1 -- unpaid, which is the
     point.
     """
+    if live.track == Track.REAL:
+        # 🔴 **The real track has no rule book, so this gate has nothing to be
+        #    the equal of.**
+        #
+        #    Admission deliberately does not judge layout there: the base model
+        #    is undecided, and judging a real-track checkpoint by the openpi
+        #    directory rules is a silent misjudgement whose price is the
+        #    miner's 2 TAO (backend `admit_real()`, gate 4, and `adapters`
+        #    raising `BaseModelUndecided` rather than falling back).
+        #
+        #    Running it anyway inverts the whole point of this gate. It refused
+        #    a submission the backend would have accepted -- with
+        #    `missing_weights` against π0.5 rules nobody will ever apply to it
+        #    -- and that refusal blocks **the entire real track**, since no
+        #    real-track checkpoint is in openpi layout.
+        #
+        #    ⚠️ This is not the gate being relaxed. The rule stands: judge by
+        #    the book admission will use. Here that book is empty, and an empty
+        #    book acquits.
+        say("ℹ️  real track: admission does not judge layout, so neither does this")
+        return True
+
     layout = layout_of(live.adapter, live.base_model_family or "", live.params)
     repo_id = str(state.get("hf_repo_id", ""))
     revision = announced_commit(state)
