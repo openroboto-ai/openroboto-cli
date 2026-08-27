@@ -60,18 +60,30 @@ def test_gcs_checkpoint_is_passed_as_env_not_mount() -> None:
     )
     assert "-e" in command
     assert "CHECKPOINT_PATH=gs://openpi-assets/checkpoints/pi05_base" in command
-    assert not any(part.endswith(":/data/checkpoint") for part in command)
+    assert not any(part.endswith(":/data/cache") for part in command)
 
 
-def test_local_checkpoint_is_mounted_by_parent_directory() -> None:
+def test_local_checkpoint_is_mounted_where_openpi_downloads_to() -> None:
+    """🔴 The mount point has to be `OPENPI_DATA_HOME`, or the cache is a lie.
+
+    The Dockerfile sets `OPENPI_DATA_HOME=/data/cache`, which is where openpi
+    writes anything it downloads. This used to mount at `/data/checkpoint` --
+    a path nothing else in the image knows -- so the base model landed in the
+    container's own writable layer and vanished with the container. The host
+    cache stayed empty forever, `training/round.py`'s "cache hit" branch could
+    never run, and every `train` re-downloaded several GB in silence.
+
+    Still mounted by **parent** directory: the name has to survive so that
+    `CHECKPOINT_PATH` points at the checkpoint and not at its container.
+    """
     command = build_docker_command(
         train_data_path="/tmp/data/train.json",
         output_dir="/out",
         checkpoint_path="/models/pi05_base",
         image=IMAGE,
     )
-    assert "/models:/data/checkpoint" in command
-    assert "CHECKPOINT_PATH=/data/checkpoint/pi05_base" in command
+    assert "/models:/data/cache" in command
+    assert "CHECKPOINT_PATH=/data/cache/pi05_base" in command
 
 
 def test_custom_strategy_uses_volume_mount_and_env(tmp_path: Path) -> None:

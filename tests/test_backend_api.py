@@ -158,9 +158,9 @@ def test_rows_come_from_data_not_from_a_custom_wrapper(
 ) -> None:
     """The old shape was `{success, submissions, total, ...}`; the business fields now
     live only under `data`."""
-    # ⚠️ 断言换成 `uid` 是因为协议包 0.9.0 把 `round_num` 从
-    # `SubmissionHistoryItem` 上删了（那一列 2026-08-27 已经退休）。
-    # 这条用例证的是「行从 `data` 里解出来」，用哪个业务字段都成立。
+    # ⚠️ Asserts on `uid` because protocol 0.9.0 dropped `round_num` from
+    # `SubmissionHistoryItem`. What this pins is that rows are parsed out of
+    # `data`; any business field proves it.
     _capture(monkeypatch, _list_envelope([_submission(uid=9)]))
     page = backend_api.fetch_submissions("https://api.example", hotkey="5X")
     assert [row.uid for row in page.data] == [9]

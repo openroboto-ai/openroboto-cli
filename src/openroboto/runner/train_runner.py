@@ -31,6 +31,11 @@ logger = logging.getLogger(__name__)
 
 # ─── Config from env ──────────────────────────────────────
 
+#: Where the π0.5 base comes from when the season does not name one. Kept as a
+#: constant so the two former copies of this string cannot drift apart.
+DEFAULT_BASE_CHECKPOINT = "gs://openpi-assets/checkpoints/pi05_base"
+
+
 def get_config() -> dict:
     """Read training config from environment variables.
 
@@ -74,6 +79,47 @@ def run_training(cfg: dict) -> tuple:
     return _run_default(cfg)
 
 
+def _resolve_checkpoint(configured: str) -> str:
+    """Make sure a usable base checkpoint is on disk, and return where it is.
+
+    🔴 **The test is "is anything in it", not "does it exist".**
+
+    The CLI mounts a host cache directory here and creates it with
+    `mkdir(parents=True, exist_ok=True)` *before* `docker run`
+    (`training/round.py::_checkpoint_path`). So on a first run the path always
+    exists and is always empty. The old test was `not os.path.exists(cp)`,
+    which is therefore never true, and nothing ever downloaded the base model.
+
+    It did not fail here, either. It failed four frames deeper inside orbax
+    with `FileNotFoundError: Metadata file (named _METADATA) does not exist at
+    .../params` -- naming neither the base model nor the download that never
+    happened. Every miner following the documented `build` -> `train` flow hit
+    this on their first run.
+
+    ⚠️ Only `_run_custom` calls this. `_run_default` never loads a model, so it
+    must **not** download one -- see the note at its call site.
+    """
+    from openpi.shared import download
+
+    if configured.startswith("gs://"):
+        return str(download.maybe_download(configured))
+
+    # A directory that exists but holds nothing is not a checkpoint. Neither is
+    # one holding only a stray `.DS_Store`, hence checking for `params`, which
+    # is what `create_trained_policy` actually opens.
+    params = os.path.join(configured, "params")
+    if os.path.isdir(params) and os.listdir(params):
+        logger.info(f"📦 π₀.₅ checkpoint (cached): {configured}")
+        return configured
+
+    logger.info(
+        "📥 No base model at %s -- downloading %s (several GB, first run only)",
+        configured,
+        DEFAULT_BASE_CHECKPOINT,
+    )
+    return str(download.maybe_download(DEFAULT_BASE_CHECKPOINT))
+
+
 def _run_custom(cfg: dict, custom_script: str) -> tuple:
     """Load and execute an externally mounted custom training script.
 
@@ -101,17 +147,10 @@ def _run_custom(cfg: dict, custom_script: str) -> tuple:
         raise ValueError(f"{custom_script} Missing train(cfg, episodes, policy) entry function")
 
     # Prepare common dependencies
-    from openpi.shared import download
     from openpi.training import config as _config
     from openpi.policies import policy_config
 
-    cp = cfg["checkpoint_path"]
-    if cp.startswith("gs://"):
-        cp = download.maybe_download(cp)
-    elif not os.path.exists(cp):
-        cp = download.maybe_download("gs://openpi-assets/checkpoints/pi05_base")
-
-    logger.info(f"📦 π₀.₅ checkpoint: {cp}")
+    cp = _resolve_checkpoint(cfg["checkpoint_path"])
     train_cfg = _config.get_config("pi05_libero")
     episodes = _load_episodes(cfg["train_data"])
     logger.info(f"📊 Loaded {len(episodes)} episodes")
@@ -141,11 +180,11 @@ def _run_default(cfg: dict) -> tuple:
         (metrics, proof) dicts holding the training metrics and the proof
     """
 
-    # Download checkpoint if needed
-    cp = cfg["checkpoint_path"]
-    logger.info(f"📦 π₀.₅ checkpoint: {cp}")
-
-    # Load training data
+    # ⚠️ **No checkpoint is resolved or downloaded here, on purpose.** This path
+    # never loads a model -- see the docstring -- so pulling several GB would
+    # cost a first-time miner a long wait for something the smoke test does not
+    # use. What used to sit here was a comment reading "Download checkpoint if
+    # needed" above no download at all, which read like the opposite.
     episodes = _load_episodes(cfg["train_data"])
     logger.info(f"📊 Loaded {len(episodes)} episodes")
 

@@ -115,10 +115,22 @@ def build_docker_command(
             # A GCS path is downloaded by the openpi inside the container itself.
             command += ["-e", f"CHECKPOINT_PATH={checkpoint_path}"]
         else:
+            # 🔴 **Mounted at `/data/cache`, which is `OPENPI_DATA_HOME`.**
+            #
+            # This used to mount at `/data/checkpoint`, a path nothing else in
+            # the image knows about, while the Dockerfile sets
+            # `OPENPI_DATA_HOME=/data/cache` -- so openpi downloaded the base
+            # model into the container's own writable layer and it went away
+            # with the container. The host cache therefore stayed empty, the
+            # "Local base-model cache hit" branch in `training/round.py` could
+            # never be true, and **every `train` re-downloaded several GB**.
+            #
+            # Nothing reported this: the download is quiet, and the only visible
+            # symptom was a training run that took longer than it should have.
             checkpoint = Path(checkpoint_path).resolve()
             command += [
-                "-v", f"{checkpoint.parent}:/data/checkpoint",
-                "-e", f"CHECKPOINT_PATH=/data/checkpoint/{checkpoint.name}",
+                "-v", f"{checkpoint.parent}:/data/cache",
+                "-e", f"CHECKPOINT_PATH=/data/cache/{checkpoint.name}",
             ]  # fmt: skip
 
     if val_data_path:
