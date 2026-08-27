@@ -22,7 +22,13 @@ from openroboto_protocol.model_format import (
     FormatIssueCode,
     FormatReport,
 )
-from openroboto_protocol.schemas import Competition, Reason, SubmissionHistoryItem
+from openroboto_protocol.schemas import (
+    Competition,
+    ListEnvelope,
+    Reason,
+    ScanRejection,
+    SubmissionHistoryItem,
+)
 
 from openroboto.backend_api import BackendError, RosterEntry
 from openroboto.commands import build as build_command
@@ -1829,7 +1835,6 @@ def _history_row(**overrides: Any) -> SubmissionHistoryItem:
         "task_id": "task-1",
         "uid": 7,
         "hotkey": "5X",
-        "round_num": 1,
         "hf_repo_id": "miner/model",
         "hf_commit": "c0ffee",
         "commit_block": 1200,
@@ -1852,6 +1857,48 @@ def test_status_normalises_legacy_words() -> None:
         == "eval_failed"
     )
     assert status_command.display_status(_history_row(eval_status="")) == "?"
+
+
+def test_status_prints_a_row_without_touching_a_field_that_no_longer_exists(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """🔴 Walks the real `run()`, because that is where the breakage was.
+
+    Protocol 0.9.0 dropped `round_num` from both response models while three
+    lines in `run()` still read it. Every unit test around this command passed
+    -- they all called the small helpers -- and `openroboto status` raised
+    `AttributeError` on the first row it tried to print.
+
+    So this one renders an actual row through the actual command. It asserts on
+    what a miner needs to identify the submission (`task_id`) rather than on
+    the whole line: the wording is for humans and gets rewritten, the fact that
+    printing a row does not blow up is the invariant.
+    """
+    envelope: Any = ListEnvelope[SubmissionHistoryItem].model_validate(
+        {
+            "data": [_history_row().model_dump(mode="json")],
+            "meta": {"request_id": "r-1", "page": _page_meta()},
+        }
+    )
+    empty: Any = ListEnvelope[ScanRejection].model_validate(
+        {"data": [], "meta": {"request_id": "r-1", "page": _page_meta()}}
+    )
+    monkeypatch.setattr(status_command, "fetch_submissions", lambda *a, **k: envelope)
+    monkeypatch.setattr(status_command, "fetch_rejections", lambda *a, **k: empty)
+    # No workspace on disk -> `say_roster` returns early, which is the shape a
+    # miner running `openroboto status --hotkey ...` from anywhere else is in.
+    monkeypatch.setattr(status_command, "load_snapshot", lambda _settings: None)
+
+    args = argparse.Namespace(config="nope.yaml", hotkey="5X", round=0, limit=20)
+    assert status_command.run(args) == 0
+
+    out = capsys.readouterr().out
+    assert "task=task-1" in out
+    assert "Submissions (1)" in out
+
+
+def _page_meta() -> dict[str, Any]:
+    return {"total": 1, "limit": 20, "offset": 0, "has_more": False}
 
 
 def test_status_explains_a_rejection_reason() -> None:
