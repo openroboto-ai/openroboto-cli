@@ -477,6 +477,69 @@ def test_refresh_updates_the_competition_and_nothing_else(
     assert "# ─── Bittensor subnet ─" in after
 
 
+def test_refresh_never_asks_which_season(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """🔴 `--refresh` re-reads the season this workspace already mines.
+
+    Asking looked harmless because `_pick` takes the only row without a prompt
+    when one season is open, which is how this survived until four were. With
+    several open, a mistyped digit silently repoints the workspace at a
+    different season while the hyperparameters, the strategy script and
+    anything already trained in `tmp/` stay exactly where they were -- and this
+    flag's whole contract is "leave every other line untouched".
+
+    `input` is replaced with something that fails loudly: a prompt here is the
+    defect, so it must not be answerable.
+    """
+    target = _workspace(tmp_path, monkeypatch)
+
+    def _no_prompt(_: str = "") -> str:
+        raise AssertionError("--refresh asked which competition to use")
+
+    monkeypatch.setattr("builtins.input", _no_prompt)
+    # Four open, and the workspace's own is not the first in the list.
+    _serving(
+        monkeypatch,
+        _row(id=7, track="sim", seq=1, label="π0.5", adapter="sim_openpi"),
+        _row(id=8, track="sim", seq=2, label="LingBot", adapter="sim_lingbot"),
+        _row(id=9, track="real", seq=2, label="xArm 6 第二届"),
+        _row(label="xArm 6 第一届（延长）"),
+    )
+
+    assert init_command.run(_init_args(target, refresh=True)) == 0
+
+    # ⚠️ Assert on the section, not on the whole file: the shipped template's
+    #    prose mentions LingBot by name, so a substring search over the file
+    #    would pass for the wrong reason.
+    section = yaml.safe_load((target / "miner.yaml").read_text(encoding="utf-8"))[
+        "competition"
+    ]
+    assert (section["track"], section["seq"]) == ("real", 1)
+    assert section["label"] == "xArm 6 第一届（延长）"
+
+
+def test_refresh_refuses_when_the_season_is_no_longer_listed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Refusing is the only move: a workspace points at one season, and this
+    flag cannot repoint it without breaking its own contract. The message has
+    to name the other command, or the miner is stuck holding a workspace that
+    no command will touch."""
+    target = _workspace(tmp_path, monkeypatch)
+    before = (target / "miner.yaml").read_text(encoding="utf-8")
+    _serving(monkeypatch, _row(id=9, track="real", seq=2, label="xArm 6 第二届"))
+    capsys.readouterr()  # drop what `_workspace` printed; only the refusal matters
+
+    assert init_command.run(_init_args(target, refresh=True)) == 1
+
+    assert (target / "miner.yaml").read_text(encoding="utf-8") == before
+    captured = capsys.readouterr()
+    out = captured.out + captured.err
+    assert "openroboto init" in out
+    assert "xArm 6 第一届" in out, "the refusal has to name the season it looked for"
+
+
 def test_refresh_keeps_the_previous_version_on_disk(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

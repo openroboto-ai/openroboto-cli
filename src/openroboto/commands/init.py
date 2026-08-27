@@ -42,6 +42,7 @@ from openroboto_protocol.schemas import Competition
 
 from openroboto import adapters
 from openroboto.backend_api import BackendError, fetch_competitions, fetch_netuid
+from openroboto.competition import load_snapshot
 from openroboto.config import ConfigError, Settings, environments
 from openroboto.console import fail, hint, say
 
@@ -138,7 +139,19 @@ def run(args: argparse.Namespace) -> int:
     target = Path(args.directory)
     try:
         backend_url = _backend_url(args, target)
-        live = _pick(_competitions(backend_url))
+        rows = _competitions(backend_url)
+        # 🔴 `--refresh` re-reads **the season this workspace already mines**.
+        #    It must not ask.
+        #
+        #    Asking looks harmless because `_pick` takes the only row without a
+        #    prompt when one season is open -- which is how this went unnoticed.
+        #    With several open, a mistyped digit silently repoints the workspace
+        #    at a different season while the training hyperparameters, the
+        #    strategy script and whatever is already trained in `tmp/` stay
+        #    exactly where they were. The contract of this flag is "rewrite the
+        #    competition section, leave every other line untouched"; switching
+        #    seasons is the one thing that cannot honour it.
+        live = _refresh_target(target, rows) if args.refresh else _pick(rows)
         adapters.resolve(live.adapter)
         strategy = _strategy(args.strategy, live)
         if args.refresh:
@@ -304,6 +317,36 @@ def _competitions(backend_url: str) -> list[Competition]:
             f"  → nothing to fix on your side; watch for the next one to open"
         )
     return rows
+
+
+def _refresh_target(target: Path, rows: list[Competition]) -> Competition:
+    """The season this workspace already mines, as the backend serves it today.
+
+    🔴 **Locates, never asks.** See the note at the call site for why asking is
+    the dangerous option here.
+
+    Refusing is the only move when the season is no longer listed: a workspace
+    points at one season, and `--refresh` cannot repoint it without breaking
+    its own contract. `openroboto init <dir>` is how a miner moves to another
+    season, and it says so.
+    """
+    settings = Settings.load(str(target / CONFIG_TEMPLATE["miner"]))
+    snapshot = load_snapshot(settings)
+    if snapshot is None:
+        raise ConfigError(
+            f"{target / CONFIG_TEMPLATE['miner']} has no competition section, "
+            f"so there is nothing to refresh.\n"
+            f"  → `openroboto init {target}` writes a workspace from scratch"
+        )
+    for row in rows:
+        if row.track == snapshot.track and row.seq == snapshot.seq:
+            return row
+    raise ConfigError(
+        f"The backend no longer lists {snapshot.name} ({snapshot.label}) among "
+        f"the competitions taking submissions, so nothing was rewritten.\n"
+        f"  → to mine a different season, run `openroboto init <directory>`; "
+        f"--refresh only updates the one this workspace already has"
+    )
 
 
 def _pick(rows: list[Competition]) -> Competition:
