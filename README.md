@@ -256,41 +256,20 @@ resolve different code, which is the one thing that package exists to prevent.
 
 ## Releasing
 
-Both pre-releases and stable releases go to PyPI, and the version number is what
-separates them:
-
 ```bash
-git tag v0.1.0a5 && git push origin v0.1.0a5    # internal testing build
-git tag v0.1.0   && git push origin v0.1.0      # stable
+git tag v1.0.1   && git push origin v1.0.1      # stable
+git tag v1.1.0a1 && git push origin v1.1.0a1    # pre-release, for testing
 ```
 
 The tag triggers the same gates every pull request runs, and the `pypi`
 environment only accepts `v*` tags, so a stray branch build cannot reach the
-index.
-
-It then waits for a reviewer to approve the `pypi` environment. Uploads cannot be
-undone and a version number can never be reused, so that approval is the last
+index. It then waits for a reviewer to approve that environment: uploads cannot
+be undone and a version number can never be reused, so that approval is the last
 thing standing between a typo and every miner.
 
-Testers install a pre-release by pinning it exactly — no extra index flags:
-
-```bash
-pip install openroboto==0.1.0a5
-```
-
-pip does not pick pre-releases when a stable release exists, so a miner running
-`pip install openroboto` will never land on one.
-
-> ⚠️ **One exception, while it lasts.** `openroboto` has no stable release yet,
-> and pip *does* select a pre-release when nothing stable is available. Until
-> `0.1.0` ships, an alpha on PyPI is what a bare `pip install openroboto` gets.
-> Either publish `0.1.0` early, or yank the alphas once testing is done — a
-> yanked version is skipped by the resolver unless pinned exactly, and anyone who
-> already installed it keeps working.
-
-`workflow_dispatch` publishes to TestPyPI instead. That path exists to rehearse
-the pipeline itself — `uv publish`, the OIDC exchange, the approval gate — not to
-distribute test builds. It can never reach real PyPI.
+`pip install openroboto` resolves to the newest **stable** release. A tester
+takes a pre-release by pinning it exactly (`pip install openroboto==1.1.0a1`);
+no miner lands on one by accident.
 
 ## Repository map
 
