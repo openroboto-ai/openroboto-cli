@@ -14,7 +14,7 @@ you know it is not your machine.
 ## 0. What works today, and what does not
 
 Measured 2026-08-26 against `https://api.openroboto.ai` and against
-`openroboto 0.1.0a5 (openroboto-protocol 0.9.0)`.
+`openroboto 1.0.0 (openroboto-protocol 0.9.0)`.
 
 | Step | Today | Blocked on |
 |---|---|---|
@@ -101,11 +101,11 @@ openroboto --version
 Expect the client and the protocol package on one line:
 
 ```
-openroboto 0.1.0a5 (openroboto-protocol 0.9.0)
+openroboto 1.0.0 (openroboto-protocol 0.9.0)
 ```
 
 Only pre-releases are published so far, and `pip install openroboto` picks
-`0.1.0a5` on its own — pip falls back to pre-releases when a project has no
+`1.0.0` on its own — pip falls back to pre-releases when a project has no
 stable release. You do not need `--pre`.
 
 Machine preparation (NVIDIA driver, Docker, the container toolkit, systemd) has

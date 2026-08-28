@@ -191,7 +191,7 @@ Because scores from the two base models are not comparable, they are not merged:
 
 ```bash
 pip install -U openroboto
-openroboto --version          # expect: openroboto 0.1.0a5 (openroboto-protocol 0.9.0)
+openroboto --version          # expect: openroboto 1.0.0 (openroboto-protocol 0.9.0)
 
 cd my-miner
 openroboto init --refresh     # re-fetch the competition spec into miner.yaml;
