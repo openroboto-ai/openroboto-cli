@@ -43,7 +43,7 @@ pip install openroboto
 openroboto init my-miner          # a ready-to-use workspace: miner.yaml,
                                   # train_strategy.py, README.md, .gitignore
 cd my-miner
-$EDITOR miner.yaml                # hotkey_ss58, HF token + username, control.json URL
+$EDITOR miner.yaml                # hotkey_ss58, HF token + username
 
 # 2. Check everything BEFORE anything costs money
 openroboto doctor                 # GPU, Docker, HF permissions, balance, config
@@ -75,12 +75,10 @@ Real-machine setup, systemd, custom strategies: [docs/MINER_DEPLOY.md](docs/MINE
 | Command | What it does |
 |---|---|
 | `openroboto init [DIR] [-s simple\|example] [--validator]` | Create a working workspace: config, a training strategy to edit, a README with the exact next commands, and a `.gitignore` that keeps your wallet password out of git |
-| `openroboto doctor` | Environment check: Python, config, `control.json`, Docker, GPU, image, HF token, wallet balance |
+| `openroboto doctor` | Environment check: Python, config, the season's own spec, Docker, GPU, image, HF token, wallet balance against **this season's** fee |
 | `openroboto build` | Build the training image from the build context shipped inside the package (no clone, no network). Refuses for a competition this client has no image for, rather than filling that competition's image name with the π0.5 one |
 | `openroboto train [-s script.py]` | Run one round; your strategy script is mounted into the container |
 | `openroboto check [PATH]` | Verify checkpoint layout with the rules the evaluator uses — **no GPU, no network, no second repository** |
-| `openroboto upload / announce` | Two of the submission steps, individually — for recovery, not routine use |
-| `openroboto burn` | Refuses, and says so. Paying needs the season confirmed against the backend and the uploaded layout judged, and this command can do neither — use `openroboto submit` |
 | `openroboto submit [--force]` | All three, resumable from `state/round_N.json` |
 | `openroboto status [--hotkey]` | Submission history and scanner rejection reasons (no API key needed) |
 | `openroboto validator run` | External validator: read published weights, set them on chain |
@@ -206,8 +204,9 @@ the documented path.
 
 Public: miner participation, local training, Hugging Face upload, burn and chain
 announcement; chain commitment formats and weight-setting logic; evaluation rules,
-baseline methodology, LIBERO tooling and seed derivation; the miner-visible
-`control.json` schema and the read-only API contract.
+baseline methodology, LIBERO tooling and seed derivation; and the read-only API
+contract. (`control.json` is documented for external validators, who fetch
+`public_key` from it — no miner command reads it.)
 
 Not here: held-out task data, the scoring-service deployment, and subnet-owner
 operational tooling.
@@ -261,7 +260,7 @@ Both pre-releases and stable releases go to PyPI, and the version number is what
 separates them:
 
 ```bash
-git tag v0.1.0a2 && git push origin v0.1.0a2    # internal testing build
+git tag v0.1.0a5 && git push origin v0.1.0a5    # internal testing build
 git tag v0.1.0   && git push origin v0.1.0      # stable
 ```
 
@@ -276,7 +275,7 @@ thing standing between a typo and every miner.
 Testers install a pre-release by pinning it exactly — no extra index flags:
 
 ```bash
-pip install openroboto==0.1.0a2
+pip install openroboto==0.1.0a5
 ```
 
 pip does not pick pre-releases when a stable release exists, so a miner running

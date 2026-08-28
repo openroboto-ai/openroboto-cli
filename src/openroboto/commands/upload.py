@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import argparse
 from typing import Any
 
 from openroboto_protocol.commitment import Track
@@ -18,33 +17,9 @@ from openroboto.huggingface import (
 )
 from openroboto.preflight import payload_track
 from openroboto.round_state import (
-    load_state,
-    resolve_output_dir,
-    resolve_round,
     save_state,
     training_metrics,
 )
-
-
-def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    parser = subparsers.add_parser("upload", help="upload the model to HuggingFace")
-    parser.add_argument("--config", default="miner.yaml")
-    parser.add_argument("--round", type=int, default=0)
-    parser.add_argument("--output-dir", default="")
-    parser.set_defaults(handler=run)
-
-
-def run(args: argparse.Namespace) -> int:
-    settings = Settings.load(args.config)
-    round_num = resolve_round(args.round)
-    output_dir = args.output_dir or resolve_output_dir(round_num)
-
-    state = load_state(round_num)
-    perform_upload(settings, round_num, output_dir, state)
-    say(f"✅ uploaded: {state['hf_url']}")
-    say(f"   commit={state['hf_commit'][:8]} repo={state['hf_repo_id']}")
-    say("   → next: `openroboto burn` (it runs the pre-spend self-check first)")
-    return 0
 
 
 def perform_upload(

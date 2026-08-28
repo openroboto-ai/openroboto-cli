@@ -14,7 +14,7 @@ you know it is not your machine.
 ## 0. What works today, and what does not
 
 Measured 2026-08-26 against `https://api.openroboto.ai` and against
-`openroboto 0.1.0a2 (openroboto-protocol 0.7.0)`.
+`openroboto 0.1.0a5 (openroboto-protocol 0.9.0)`.
 
 | Step | Today | Blocked on |
 |---|---|---|
@@ -26,7 +26,7 @@ Measured 2026-08-26 against `https://api.openroboto.ai` and against
 | `openroboto build` / `openroboto train` | ❌ both refuse for this competition | same container |
 | `openroboto check` | ✅ works | — |
 | `openroboto doctor` | ✅ works | — |
-| `openroboto upload` / `burn` / `announce` / `submit` | ❌ refuse to pay | the same catalogue as `init` |
+| `openroboto submit` | ❌ refuses to pay | the same catalogue as `init` |
 | `openroboto status` | ✅ works | — |
 
 **Why `init` and `submit` are blocked, in one number.** Both read
@@ -101,11 +101,11 @@ openroboto --version
 Expect the client and the protocol package on one line:
 
 ```
-openroboto 0.1.0a2 (openroboto-protocol 0.7.0)
+openroboto 0.1.0a5 (openroboto-protocol 0.9.0)
 ```
 
 Only pre-releases are published so far, and `pip install openroboto` picks
-`0.1.0a2` on its own — pip falls back to pre-releases when a project has no
+`0.1.0a5` on its own — pip falls back to pre-releases when a project has no
 stable release. You do not need `--pre`.
 
 Machine preparation (NVIDIA driver, Docker, the container toolkit, systemd) has
@@ -382,9 +382,7 @@ re-running `submit` re-transmits nothing.
 The individual steps exist for recovery only:
 
 ```bash
-openroboto upload --round 1
-openroboto burn
-openroboto announce --round 1
+openroboto submit --round 1
 ```
 
 > **⚠️ Do not split burn and announce.** The subnet rejects any submission whose

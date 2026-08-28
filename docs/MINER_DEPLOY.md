@@ -238,10 +238,9 @@ repository; it is now built in.
 ```bash
 openroboto submit       # full pipeline, resumable
 
-# Individual steps (recovery/debugging only — see warning below):
-openroboto upload --round 1
-openroboto burn
-openroboto announce --round 1
+# There are no individual steps. `submit` is re-entrant: what is uploaded is
+# not uploaded again, what is paid for is not paid for again — so after any
+# failure you run the same command.
 ```
 
 > **⚠️ Do not split burn and announce.** The backend enforces a burn→commitment

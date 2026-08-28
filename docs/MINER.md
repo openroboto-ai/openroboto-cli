@@ -71,10 +71,16 @@ checks two rules that need the weight index file on your disk.
 python3.11 -m venv .venv && source .venv/bin/activate
 pip install openroboto
 
-# 2. Create the workspace (config, strategy, README, .gitignore)
+# 2. Pick a competition and create the workspace for it
+#    `init` asks the backend which seasons are open and writes the one you
+#    pick into miner.yaml. Every later command reads that file — only `init`
+#    and `submit` go to the network.
 openroboto init my-miner && cd my-miner
-#    Required in miner.yaml: subnet.hotkey_ss58, huggingface.token,
-#    huggingface.username, urls.control_json, subnet.wallet_password
+#    Then fill in, in miner.yaml:
+#      subnet.hotkey_ss58        your hotkey (the HF repo name derives from it)
+#      subnet.wallet_password    optional; skips the interactive prompt
+#      huggingface.token         a write token
+#      huggingface.username
 
 # 3. Check the environment before anything costs money
 openroboto doctor
@@ -86,7 +92,10 @@ openroboto train
 # 5. Validate the model locally — still free at this point
 openroboto check
 
-# 6. Upload → Burn → Announce
+# 6. Upload → judge the layout → confirm the season → pay → announce
+#    One command, in that order. It prints which season, how long it has
+#    left, how much and to whom, then asks y/N — and everything that can be
+#    refused is refused *before* the money moves.
 openroboto submit
 
 # 7. See what the backend made of it
@@ -102,16 +111,18 @@ or submit to testnet and then ask production why nothing showed up.
 ```yaml
 environment: mainnet   # default: netuid 80, real TAO
 environment: dev       # testnet 313, faucet TAO
-environment: local     # your own backend; you must give backend.url and urls.control_json
+environment: local     # your own backend; you must give backend.url
 ```
 
-`openroboto doctor` reports a mismatched combination, and `burn` / `announce`
-refuse to run on one. Full table and the local-backend example:
+`openroboto doctor` reports a mismatched combination, and `submit` refuses to
+run on one. Full table and the local-backend example:
 [CONFIG.md](./CONFIG.md#environment--one-name-for-four-coupled-settings).
 
-> **⚠️ Burn→announce window.** The backend rejects any submission whose burn tx is more than **50 blocks (~10 minutes)** away from the chain commitment. This is an anti-replay rule: a fee cannot be paid once and attached to a later submission. `openroboto submit` runs upload → burn → announce back-to-back precisely so you stay inside this window. If you run `openroboto burn` and `openroboto announce` separately and the gap exceeds 50 blocks, the submission is rejected and the burned TAO is **not refunded** — `announce` will refuse to submit rather than let you pay a commitment fee for a submission that is already doomed.
+> **⚠️** The backend rejects a payment more than **50 blocks (~10 min)** from
+> the chain commitment — an anti-replay rule. `submit` pays and announces
+> back-to-back so you stay inside it.
 
-The CLI pulls `control.json` via **HTTP direct link** (ETag cached), no R2 SDK
+The CLI reads the season's spec out of `miner.yaml`, written there by `init`. It no longer reads `control.json` at all (external validators still do, for `public_key` only)
 dependency. `openroboto submit` handles the post-training pipeline, reading the
 wallet password from `miner.yaml`.
 
@@ -122,6 +133,33 @@ seasons at once, and not from anything typed into `miner.yaml`. `openroboto
 submit` confirms it against the backend in the moment before paying; a workspace
 with no `competition` section is refused rather than charged a guess. An amount
 that does not match is rejected by the backend, and the TAO is not refunded.
+
+## Two tracks, one flow
+
+The subnet runs several seasons at once. `openroboto init` lists the open ones,
+you pick one, and it is written into `miner.yaml`; every later command reads it
+off disk. One workspace mines one season — for another, run `init` again in a
+new directory.
+
+The tracks differ in three things and nothing else:
+
+| | Simulation | Real robot |
+|---|---|---|
+| Evaluated on | LIBERO, our GPUs | an xArm 6 in our workshop |
+| Fee | burned | transferred to the season's published address |
+| Layout judged before paying | yes | no — the real track's base model is not fixed yet |
+
+`openroboto submit` reads the season's `params.fee` and pays accordingly. You do
+not choose, and there is no separate command for it.
+
+### What `submit` does
+
+Upload → judge the layout → confirm the season is open → check the fee against
+the backend → check this commit is not already entered → show you the season,
+the deadline, the amount and the payee, and ask `y/N` → pay → announce.
+
+Everything that can refuse refuses before the money moves. If a step refuses,
+nothing was spent and the upload is still there.
 
 ## Chain Submission Format
 
@@ -193,7 +231,7 @@ not a client version. A `Raw119` commitment is not an outdated miner.
 
 ## Security Notes
 
-- **HTTP direct links** — Miner/Backend pulls control.json and datasets via HTTP GET, no R2 SDK
+- **HTTP direct links** — datasets are fetched over plain HTTP GET, no R2 SDK. (`control.json` is no longer read by any miner command; external validators still fetch it for `public_key`.)
 - **HF token needs write access** — For uploading models to personal repo
 - **Chain Commitments API** — Data persists on chain, auto-verified after submission
 - **Burn hash strict exact match** — Backend verifies burn tx using strict exact match (no `startswith` prefix matching), preventing false positives from truncated hashes

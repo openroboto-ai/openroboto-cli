@@ -38,7 +38,6 @@ that runs both.
 
 from __future__ import annotations
 
-import argparse
 from typing import Any
 
 from openroboto.chain import get_subtensor, open_wallet
@@ -48,37 +47,6 @@ from openroboto.console import fail, say
 from openroboto.payment import BurnReceipt, execute_stake_burn, execute_transfer
 from openroboto.preflight import check_announce_ready, payload_size, payload_track
 from openroboto.round_state import save_state
-
-
-def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    parser = subparsers.add_parser("burn", help="Burn TAO to pay the evaluation fee")
-    parser.add_argument("--config", default="miner.yaml")
-    parser.add_argument("--round", type=int, default=0)
-    parser.set_defaults(handler=run)
-
-
-def run(args: argparse.Namespace) -> int:
-    """Refuse, and name the command that can pay.
-
-    The subcommand is kept rather than removed: miners have it in scripts and in
-    tutorials, and a sentence about where the fee now comes from is worth more to
-    them than argparse's "invalid choice". See the module docstring for why it
-    cannot pay on its own.
-    """
-    fail(
-        "`openroboto burn` cannot pay an entry fee on its own, so **nothing was"
-        " burned**.\n"
-        "   The amount and the competition it pays for both come from the"
-        " backend, asked in the moment before the money moves, and this command"
-        " has nowhere to ask from.\n"
-        "   → run `openroboto submit`: it uploads, judges the layout, confirms"
-        " the competition and pays, in that order\n"
-        "   Setting `payment.burn_rate_tao` in miner.yaml is not a way around"
-        " this: it supplies an amount, not a season. Paid that way the submission"
-        " carries no competition id and the backend files it under whichever"
-        " season it defaults to -- with the TAO already gone."
-    )
-    return 1
 
 
 def perform_burn(

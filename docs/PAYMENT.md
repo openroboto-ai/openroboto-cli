@@ -49,7 +49,7 @@ A submission's burn reference is checked against the following rules. A submissi
 1. **Extrinsic hash, not extrinsic ID.** The commitment's `b` field must contain the burn extrinsic **hash** (`0x…`, 32 bytes). Explorer-style identifiers such as `8783031-0016` are not accepted. Matching is a strict exact comparison; truncated or prefixed values fail.
 2. **Existence and signer.** The transaction must exist in the referenced block (`bb`) and be signed by the submitting hotkey or by the coldkey that owns it.
 3. **Amount and target.** The burned amount must meet the season's published entry fee (`params.fee.amount_tao`), and the burn target hotkey must match the submitting hotkey.
-4. **Time window.** The burn block must be within a bounded window of the commitment block — **50 blocks** (`scanner.burn_block_window`, symmetric: the check is `abs(burn_block - commit_block) > window`). Burn immediately before committing anyway; an old burn cannot be attached to a new commitment, and an expired one is not refunded. `openroboto announce` refuses to submit once the window has passed.
+4. **Time window.** The burn block must be within a bounded window of the commitment block — **50 blocks** (`scanner.burn_block_window`, symmetric: the check is `abs(burn_block - commit_block) > window`). Burn immediately before committing anyway; an old burn cannot be attached to a new commitment, and an expired one is not refunded. `openroboto submit` pays and announces back-to-back so the window cannot lapse between them.
 5. **No reuse.** Each burn transaction can back exactly one submission. Replayed or shared transaction hashes are rejected.
 6. **Free period.** When the season's published entry fee is `0`, burn verification is skipped and no payment is required.
 

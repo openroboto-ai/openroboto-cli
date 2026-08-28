@@ -29,7 +29,7 @@ from openroboto.commands import upload as upload_module
 from openroboto.config import Settings
 from openroboto.huggingface import UploadResult
 from openroboto.huggingface import tree as tree_module
-from openroboto.preflight import check_announce_ready, payload_size, payload_track
+from openroboto.preflight import payload_size, payload_track
 from openroboto.round_state import (
     announced_commit,
     competition_id,
@@ -236,23 +236,6 @@ def test_the_payment_cannot_be_called_without_a_confirmed_season() -> None:
 
     verdict = inspect.signature(burn_command.perform_burn).parameters["verdict"]
     assert verdict.default is inspect.Parameter.empty
-
-
-def test_burn_on_its_own_pays_nothing_and_says_what_to_run(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """`openroboto burn` cannot obtain a verdict, so it refuses rather than
-    reaching for an amount.
-
-    It also cannot run `submit`'s layout gate, so a version of this command that
-    fetched its own verdict would be the pre-payment layout check with an opt-out
-    -- see the module docstring in `commands/burn.py`.
-    """
-    assert burn_command.run(argparse.Namespace(config="miner.yaml", round=1)) == 1
-
-    printed = capsys.readouterr().err
-    assert "nothing was burned" in printed.lower()
-    assert "openroboto submit" in printed
 
 
 # ─── burn validity window (backend: 50 blocks; over it means rejected, no refund) ────
@@ -1143,6 +1126,11 @@ def test_neither_burn_nor_submit_opens_control_json(
 ) -> None:
     """🔴 The executable half of "the payment path does not read control.json".
 
+    ⚠️ The name still says "neither burn nor submit" because that is the claim;
+    `burn` stopped being a command in 1.0, so `submit` is now the only way to
+    reach the payment at all -- which makes the claim narrower to state and
+    exactly as strong.
+
     Blocking the connection itself catches the whole family at once -- a
     re-import of `fetch_control`, an HTTP call added later, a helper that reaches
     for the rate "just to compare". The block goes on
@@ -1171,8 +1159,9 @@ def test_neither_burn_nor_submit_opens_control_json(
     settings.control_json_url = "https://example.invalid/control.json"
     assert settings.control_json_url  # there is a file here, and nobody opens it
 
-    # `openroboto burn` on its own: refuses, without consulting anything first.
-    assert burn_command.run(argparse.Namespace(config="miner.yaml", round=1)) == 1
+    # ⚠️ This used to also assert `openroboto burn` refuses on its own. That
+    #    command was removed in 1.0, so the hole it guarded is now structural:
+    #    there is no entry point that pays without `submit`.
 
     live = Competition.model_validate(
         {
@@ -1217,47 +1206,47 @@ def test_neither_burn_nor_submit_opens_control_json(
     assert burned["amount_tao"] == 0.25  # it really did get as far as paying
 
 
-def test_a_rate_typed_into_miner_yaml_does_not_buy_a_place_in_a_season(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+def test_a_rate_typed_into_miner_yaml_cannot_lower_what_submit_pays(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """🔴 End to end, the shape of the hole this gate closes.
+    """🔴 What a miner types cannot decide what a miner pays.
 
-    `miner.yaml` says you may set `payment.burn_rate_tao` by hand, and the guard
-    here used to ask "is there an amount". So a hand-filled rate -- the *right*
-    amount, even -- walked straight past the season check. What followed had no
-    error anywhere in it: nothing wrote `competition_id`, so `announce` sent a
-    payload with no `cid`, so the backend filed the submission under the season
-    it defaults to -- the archived π0.5 one. Fee spent, commitment on chain,
-    backend acknowledging it, wrong competition.
+    `payment.burn_rate_tao` is still a field in `miner.yaml`. Nothing on the
+    payment path reads it: the amount comes from the season fetched seconds
+    earlier, so setting it to a tenth of the fee changes nothing about what
+    leaves the wallet.
 
-    Note what the preflight says below: on this season's track the payload is
-    perfectly valid without a `cid`. Nothing downstream is going to catch this,
-    which is why refusing here is the whole defence.
+    This is the half that survives `openroboto burn` being removed. The other
+    half -- paying with an amount and *no season at all* -- is now impossible
+    to express, so it is no longer tested here (see the note below).
     """
     monkeypatch.chdir(tmp_path)
     settings = _season_settings()
-    settings.burn_rate_tao = 0.25  # typed in by hand, and the correct amount
-    monkeypatch.setattr(
-        burn_command.Settings, "load", staticmethod(lambda path: settings)
-    )
-    monkeypatch.setattr(
-        burn_command,
-        "get_subtensor",
-        lambda network: pytest.fail("connected to the chain to pay for no season"),
-    )
-    state = _uploaded_state()
-    save_state(11, state)
-    assert check_announce_ready(state, 11, payload_track(settings)) == []
+    settings.burn_rate_tao = 0.01  # a tenth of what the season charges
+    save_state(9, _uploaded_state())
+    _, paid = _submitting(monkeypatch, settings)
 
-    args = argparse.Namespace(config="miner.yaml", round=11)
-    assert burn_command.run(args) == 1
+    args = argparse.Namespace(config="miner.yaml", round=9, output_dir="", force=False)
+    assert submit_command.run(args) == 0
 
-    printed = capsys.readouterr()
-    assert "nothing was burned" in printed.err.lower()
-    assert "burn_rate_tao" in printed.err  # names the thing that did not count
-    # Nothing about a season reached the checkpoint, so `announce` would have put
-    # a payload with no `cid` on chain -- the wrong-season filing, in one read.
-    assert competition_id(load_state(11)) is None
+    assert len(paid) == 1
+    assert paid[0] == 0.25, "the hand-typed rate reached the wallet"
+
+
+# 🔴 **Two tests were removed here on 2026-08-28, with `openroboto burn`.**
+#
+#    They pinned that `burn` on its own refuses -- once because it cannot
+#    obtain a verdict, once because a hand-typed `payment.burn_rate_tao`
+#    supplies an amount but not a season (fee spent, commitment on chain,
+#    filed under whichever season the backend defaults to, no error anywhere).
+#
+#    That hole is now closed by construction rather than by a guard: there is
+#    no entry point that reaches a payment except `submit`, and `submit` gets
+#    its amount from the live season it just confirmed. A test asserting that a
+#    deleted command refuses would go green by import error.
+#
+#    ⚠️ The half that is still reachable is still tested:
+#    `test_a_rate_typed_into_miner_yaml_cannot_lower_what_submit_pays` below.
 
 
 # ─── the layout gate before the money ────────────────────────
@@ -2137,7 +2126,7 @@ def test_an_empty_model_hash_really_does_reach_the_chain() -> None:
 def test_the_checkpoint_readers_turn_an_empty_value_into_none() -> None:
     """Which is why nothing in this repo ever hands `""` over: the two readers
     every command goes through map absent and empty onto the same `None`."""
-    from openroboto.round_state import competition_id, model_hash
+    from openroboto.round_state import model_hash
 
     assert model_hash({}) is None
     assert model_hash({"model_hash": ""}) is None

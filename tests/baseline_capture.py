@@ -50,11 +50,20 @@ LEGACY_CONFIG = FIXTURES / "miner_legacy.yaml"
 #: baseline exists for: `announce` is where `encode()` is actually called, and
 #: `payload_announce.hex` pins it byte for byte on its own. `submit` only reached
 #: those bytes by way of `perform_announce`.
-COMMANDS = ("upload", "announce")
-
-#: Only `announce` reaches `encode()`; `upload` pushes to HuggingFace and builds
-#: no commitment payload, so a "payload baseline" for it would be the hash of an
-#: empty string -- a fixture that is green forever and guards nothing.
+#: 🔴 **Only `announce`, and only its payload bytes** (2026-08-28).
+#:
+#: `upload` / `burn` / `announce` stopped being commands in 1.0 -- each was one
+#: step of `submit`, and running a step alone is how a fee gets paid for a
+#: submission that is never announced. Their stdout and exit codes were pinned
+#: here; pinning the output of a command nobody can type is not a guarantee,
+#: it is a fixture that can only ever be wrong about something that no longer
+#: exists.
+#:
+#: What survives is the one sentence this file is actually for: **the bytes
+#: that go on chain have not changed.** `perform_announce` is where `encode()`
+#: is called, and it is still called -- by `submit`, in the same order, from
+#: the same state. So the capture goes through that function directly.
+COMMANDS = ("announce",)
 COMMANDS_WITH_PAYLOAD = ("announce",)
 
 ROUND = 1
@@ -159,22 +168,13 @@ def _faked_world(payloads: list[bytes]) -> Iterator[None]:
 def capture(command: str, workdir: Path) -> Capture:
     """Run one command in `workdir` and record its output, exit code and (if it
     has one) the exact bytes it would have written on chain."""
-    import argparse
-    import importlib
-
-    module = importlib.import_module(f"openroboto.commands.{command}")
+    from openroboto.commands.announce import perform_announce
+    from openroboto.config import Settings
 
     workdir.mkdir(parents=True, exist_ok=True)
     shutil.copy(LEGACY_CONFIG, workdir / "miner.yaml")
     model_dir = workdir / "model"
     model_dir.mkdir(exist_ok=True)
-
-    args = argparse.Namespace(
-        config="miner.yaml",
-        round=ROUND,
-        output_dir=str(model_dir),
-        force=False,
-    )
 
     payloads: list[bytes] = []
     out, err = io.StringIO(), io.StringIO()
@@ -186,7 +186,14 @@ def capture(command: str, workdir: Path) -> Capture:
         save_state(ROUND, _seed_state(command))
         with _faked_world(payloads):
             with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-                exit_code = int(module.run(args))
+                # `perform_announce` returns True on success; the baseline's
+                # `exit_code` keeps the shape it always had (0 = fine).
+                from openroboto.round_state import load_state
+
+                ok = perform_announce(
+                    Settings.load("miner.yaml"), ROUND, load_state(ROUND)
+                )
+                exit_code = 0 if ok else 1
     finally:
         os.chdir(previous)
 
