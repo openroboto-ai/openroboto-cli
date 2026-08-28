@@ -45,7 +45,7 @@ The weight-setting validator fetches the URL configured as `urls.control_json`
 of what this client reads out of the file**. `openroboto doctor` also fetches it
 as a reachability check.
 
-🔴 **No payment path reads it any more** (2026-08-26). `openroboto burn` used to
+🔴 **No payment path reads it any more** (2026-08-26). The payment path used to
 fall back to `payment.burn_rate_tao` when `miner.yaml` had no competition
 section; that rate is subnet-wide, the subnet runs several seasons at once, and
 a fee paid without a season attached is filed under whichever season the backend

@@ -121,7 +121,7 @@ If any check fails, the submission is marked `burn_rejected` and never enters th
 
 **Burn hash verification uses strict exact match** — no `startswith` prefix matching. This prevents false positives from truncated `extrinsic_hash`.
 
-> **Practical implication for miners:** the burn tx and the commitment must land on chain within ~2 minutes of each other. Do not run `burn` and `announce` as separate manual steps — any delay between them (wallet prompt, network retry, debugging) will exceed the window, the submission is rejected, and the fee is lost. Always use **`openroboto submit`**, which runs upload → burn → announce back-to-back in a single command. If the gap does exceed the window, `openroboto announce` refuses to publish rather than charging you a commitment fee for a submission the backend will reject.
+> **Practical implication for miners:** the fee and the commitment must land on chain within ~2 minutes of each other. `openroboto submit` pays and announces back-to-back for exactly this reason, and it is the only command that can pay — the individual steps were removed in 1.0 so that a gap cannot open between them.
 
 ## 5. Deterministic, unpredictable seeds
 

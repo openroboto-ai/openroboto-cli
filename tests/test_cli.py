@@ -7,15 +7,17 @@ import pytest
 from openroboto import __version__
 from openroboto.cli import COMMAND_MODULES, build_parser, main, version_string
 
+#: The whole command surface, in the order a miner uses it.
+#:
+#: `upload` / `burn` / `announce` were removed in 1.0: each was one step of
+#: `submit`, and a step run alone is how a fee gets paid for a submission that
+#: is never announced, or a commitment announced without a fee.
 COMMANDS = (
     "init",
     "doctor",
     "build",
     "train",
     "check",
-    "upload",
-    "burn",
-    "announce",
     "submit",
     "status",
     "validator",
@@ -71,7 +73,7 @@ def test_known_errors_become_one_line_messages(
 ) -> None:
     """A missing config is the normal state for a miner, and must not throw a stack
     trace at them."""
-    assert main(["upload", "--config", "/nonexistent/miner.yaml"]) == 1
+    assert main(["submit", "--config", "/nonexistent/miner.yaml"]) == 1
     captured = capsys.readouterr()
     assert "openroboto init" in captured.err
     assert "Traceback" not in captured.err

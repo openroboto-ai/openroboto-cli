@@ -53,9 +53,9 @@ openroboto --version          # CLI version + protocol package version
 | `python miner.py --config miner.yaml` | `openroboto train` |
 | *(nothing — you cloned a second repo)* | `openroboto check` — checkpoint format verdict, locally, **before** you pay |
 | `python rt.py submit --config miner.yaml --round 1` | `openroboto submit --round 1` |
-| `python rt.py upload --config miner.yaml --round 1` | `openroboto upload --round 1` |
-| `python rt.py burn --config miner.yaml` | `openroboto burn` |
-| `python rt.py announce --config miner.yaml --round 1` | `openroboto announce --round 1` |
+| `python rt.py upload --config miner.yaml --round 1` | `openroboto submit` |
+| `python rt.py burn --config miner.yaml` | `openroboto submit` |
+| `python rt.py announce --config miner.yaml --round 1` | `openroboto submit` |
 | *(nothing — you read the website)* | `openroboto status` — your submissions and the exact rejection reason |
 | `python validator.py --config validator.yaml` | `openroboto validator run` |
 | `docker compose up --build miner` | `openroboto train` — see below |
@@ -118,7 +118,7 @@ openroboto doctor      # names every field that is missing or unusable
 commands:
 
 - **Trained but not submitted** → `openroboto check`, then `openroboto submit`.
-- **Burned but not announced** → `openroboto announce --round N`. It reuses the burn
+- **Paid but not announced** → `openroboto submit` again. It reuses the payment
   recorded in your state file; **do not burn again**. Note the burn→commitment window
   is 50 blocks (~10 minutes) — if more time has passed, `announce` will tell you the
   burn has expired rather than charging you another fee for a submission that would be

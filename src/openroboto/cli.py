@@ -18,16 +18,13 @@ from openroboto import __version__
 from openroboto.backend_api import BackendError
 from openroboto.chain.connection import ChainError
 from openroboto.commands import (
-    announce,
     build,
-    burn,
     check,
     doctor,
     init,
     status,
     submit,
     train,
-    upload,
     validator,
 )
 from openroboto.config import ConfigError, ControlFetchError
@@ -38,21 +35,24 @@ from openroboto.payment import BurnError, TransferError
 from openroboto.round_state import StateError
 from openroboto.training import TrainingError
 
+#: The whole command surface, in the order a miner uses it.
+#:
+#: `upload` / `burn` / `announce` were removed for 1.0: each was one step of
+#: `submit`, and running a step alone is how a fee gets paid for a submission
+#: that is never announced, or a commitment announced without a fee. Their
+#: implementations stay — `submit` calls them in order.
 COMMAND_MODULES: tuple[ModuleType, ...] = (
     init,
     doctor,
     build,
     train,
     check,
-    upload,
-    burn,
-    announce,
     submit,
     status,
     validator,
 )
 
-FILE_LOG_COMMANDS = frozenset({"train", "submit", "burn", "announce", "validator"})
+FILE_LOG_COMMANDS = frozenset({"train", "submit", "validator"})
 """These either spend money or run for hours, so their logs must hit disk --
 when something goes wrong it is the only crime scene. Every other command only
 prints to stderr and does not conjure a `logs/` into the miner's directory."""

@@ -26,7 +26,7 @@ Measured 2026-08-26 against `https://api.openroboto.ai` and against
 | `openroboto build` / `openroboto train` | ❌ both refuse for this competition | same container |
 | `openroboto check` | ✅ works | — |
 | `openroboto doctor` | ✅ works | — |
-| `openroboto upload` / `burn` / `announce` / `submit` | ❌ refuse to pay | the same catalogue as `init` |
+| `openroboto submit` | ❌ refuses to pay | the same catalogue as `init` |
 | `openroboto status` | ✅ works | — |
 
 **Why `init` and `submit` are blocked, in one number.** Both read
@@ -382,9 +382,7 @@ re-running `submit` re-transmits nothing.
 The individual steps exist for recovery only:
 
 ```bash
-openroboto upload --round 1
-openroboto burn
-openroboto announce --round 1
+openroboto submit --round 1
 ```
 
 > **⚠️ Do not split burn and announce.** The subnet rejects any submission whose

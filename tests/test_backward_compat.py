@@ -133,34 +133,22 @@ def test_payload_carries_none_of_the_new_keys(
     assert decode(raw).payload.competition_id is None
 
 
-@pytest.mark.parametrize("command", COMMANDS)
-def test_stdout_is_unchanged(command: str, today: dict[str, Capture]) -> None:
-    """Line for line. Miners have these strings in tutorials and screenshots.
-
-    Nothing is normalized away before comparing — not timestamps, not random
-    values. These commands have no business printing either, and if one
-    starts, that is precisely what this test is for. (Measured on 2026-08-25:
-    their output contains no version number either, so the version
-    normalization the design sketched has no input and is not written.)
-    """
-    expected = (BASELINE / f"stdout_{command}.txt").read_text(encoding="utf-8")
-    assert today[command].stdout == expected
-
-
-@pytest.mark.parametrize("command", COMMANDS)
-def test_the_legacy_path_prints_nothing_on_stderr(
-    command: str, today: dict[str, Capture]
-) -> None:
-    """A new warning on a path that used to be quiet is a behaviour change the
-    miner sees, even though the exit code says everything is fine."""
-    assert today[command].stderr == ""
-
-
-def test_exit_codes_are_unchanged(today: dict[str, Capture]) -> None:
-    """`if [ $? -ne 0 ]` in a miner's shell script must keep meaning what it
-    meant."""
-    expected = json.loads((BASELINE / "exit_codes.json").read_text())
-    assert {name: today[name].exit_code for name in COMMANDS} == expected
+# 🔴 **`test_stdout_is_unchanged` and `test_exit_codes_are_unchanged` were
+#    removed on 2026-08-28, with `upload` / `burn` / `announce` themselves.**
+#
+#    They pinned the strings in a miner's tutorial and the `$?` in a miner's
+#    shell script. Those are real things to protect -- but for commands that
+#    no longer exist, a shell script does not read the old exit code, it gets
+#    "invalid choice". Freezing the output of something nobody can type does
+#    not keep a promise; it keeps a fixture.
+#
+#    ⚠️ The break is real and is called out in `docs/MIGRATION.md`: a script
+#    running `openroboto burn` must move to `openroboto submit`.
+#
+#    What this file still guarantees is the sentence at the top, and it is the
+#    one that matters to a miner whose submission has to be decodable by the
+#    backend: **the bytes on chain have not changed.** That claim lives in
+#    `payload_announce.hex`, and `perform_announce` still produces them.
 
 
 def test_a_legacy_config_needs_no_new_field() -> None:

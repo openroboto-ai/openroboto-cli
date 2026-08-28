@@ -9,7 +9,6 @@ own.
 
 from __future__ import annotations
 
-import argparse
 from typing import Any
 
 from openroboto_protocol.commitment import CommitmentFieldError, check_payload
@@ -26,31 +25,9 @@ from openroboto.preflight import check_burn_window, payload_track
 from openroboto.round_state import (
     announced_commit,
     competition_id,
-    load_state,
     model_hash,
-    resolve_round,
     save_state,
 )
-
-
-def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    parser = subparsers.add_parser(
-        "announce", help="Commit the submission announcement on chain"
-    )
-    parser.add_argument("--config", default="miner.yaml")
-    parser.add_argument("--round", type=int, default=0)
-    parser.set_defaults(handler=run)
-
-
-def run(args: argparse.Namespace) -> int:
-    settings = Settings.load(args.config)
-    round_num = resolve_round(args.round)
-    state = load_state(round_num)
-
-    if not perform_announce(settings, round_num, state):
-        return 1
-    say("   → Run `openroboto status` to see whether the backend took the submission")
-    return 0
 
 
 def perform_announce(settings: Settings, round_num: int, state: dict[str, Any]) -> bool:
