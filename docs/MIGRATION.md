@@ -161,7 +161,7 @@ They are unmaintained from 2026-08-19 and will not receive fixes.
 > commitment until then.**
 >
 > Blocking the release: the CLI release · the LingBot training image · the competition
-> list endpoint. `openroboto-protocol 0.7.0` **is** released (2026-08-25, PyPI) and
+> list endpoint. `openroboto-protocol 0.9.0` **is** released (PyPI; 0.7.0 was the version when this line was written) and
 > this repository pins it, so the protocol package is no longer one of them.
 
 ## The three things you actually need to know
@@ -191,7 +191,7 @@ Because scores from the two base models are not comparable, they are not merged:
 
 ```bash
 pip install -U openroboto
-openroboto --version          # expect: openroboto <TBD: version> (openroboto-protocol 0.7.0)
+openroboto --version          # expect: openroboto 0.1.0a5 (openroboto-protocol 0.9.0)
 
 cd my-miner
 openroboto init --refresh     # re-fetch the competition spec into miner.yaml;
