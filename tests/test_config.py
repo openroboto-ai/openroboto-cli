@@ -608,8 +608,8 @@ def test_the_config_carries_the_base_model_through_to_the_rule_book() -> None:
     π0.5 first).
     """
     for family, profile in (
-        ("openpi", adapters.OPENPI),
-        ("lingbot_vla", adapters.LINGBOT),
+        ("pi0.5", adapters.OPENPI),
+        ("lingbot-vla-2.0", adapters.LINGBOT),
     ):
         cfg = Settings.from_mapping(
             {"competition": {"adapter": "real_xarm6", "base_model_family": family}}

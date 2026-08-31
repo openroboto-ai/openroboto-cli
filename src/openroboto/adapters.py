@@ -161,15 +161,28 @@ def resolve(adapter: str) -> Adapter:
 
 #: `competitions.base_model_family` -> the local format profile.
 #:
-#: 🔴 **The keys are the backend's vocabulary, verbatim**, and they are also what the
-#: evaluator's `detect_model_family()` returns -- do not spell them any other way.
+#: 🔴 **The keys are the backend's vocabulary, verbatim**, and the same strings the
+#: evaluator dispatches its loaders on -- do not spell them any other way.
 #: The *values* are this package's own: a profile string is a **directory name**
 #: (`runner/`, `runner/lingbot/`, see `openroboto.runner_context`), which is why
-#: `LINGBOT` is `"lingbot"` and not `"lingbot_vla"`. Shared strings, separate
-#: implementations, same as `ADAPTERS`.
+#: LingBot's is `"lingbot"` rather than the season's full name. Shared strings,
+#: separate implementations, same as `ADAPTERS`.
+#:
+#: ⚠️ **The keys changed on 2026-08-31** (`openpi` / `lingbot_vla` ->
+#: `pi0.5` / `lingbot-vla-2.0`) and **the old spellings are deliberately absent**.
+#: The old pair named two different kinds of thing -- openpi is Physical
+#: Intelligence's *framework*, the model is π0.5 -- and would have run out the day
+#: something other than π0.5 shipped on that framework. The new pair names models
+#: on both sides and carries the generation, which decides the code path: LingBot
+#: v1 and v2 need different config classes (`runner/lingbot/train_runner.py`).
+#:
+#: 🔴 Not keeping both spellings was a decision, not an oversight: two live
+#: vocabularies mean nobody can say which one is correct, and removing the old one
+#: later costs another release. The changeover is a single co-ordinated switch --
+#: the backend and the evaluator flip together and miners are told to upgrade.
 FORMAT_PROFILES: Final = {
-    "openpi": OPENPI,
-    "lingbot_vla": LINGBOT,
+    "pi0.5": OPENPI,
+    "lingbot-vla-2.0": LINGBOT,
 }
 """Every base model this client can judge a checkpoint against."""
 
@@ -182,8 +195,8 @@ FORMAT_PROFILES: Final = {
 #: model from it is what this whole split removed, and the previous guess here was
 #: wrong. A real-track workspace with no `base_model_family` gets a refusal.
 _FAMILY_BY_LEGACY_ADAPTER: Final = {
-    "sim_openpi": "openpi",
-    "sim_lingbot": "lingbot_vla",
+    "sim_openpi": "pi0.5",
+    "sim_lingbot": "lingbot-vla-2.0",
 }
 
 
@@ -214,8 +227,17 @@ def base_model_family(adapter: str, family: str = "") -> str:
             else ""
         )
         + ".\n"
-        f"  → openroboto init --refresh   (re-reads the competition from the backend)\n"
-        f"  → pip install -U openroboto   (if it still says this afterwards)\n"
+        # 🔴 Upgrade comes first, and that order is the whole point of this
+        #    wording. On the day the vocabulary changed (2026-08-31,
+        #    `openpi`/`lingbot_vla` -> `pi0.5`/`lingbot-vla-2.0`) every miner still
+        #    on the previous release lands here, and for them `--refresh` is a
+        #    dead end: it faithfully re-reads a name this build has never heard of
+        #    and prints the same message again. Leading with it sends people round
+        #    a loop before the one command that fixes it.
+        f"  → pip install -U openroboto   (the season names changed; older "
+        f"clients do not know the new ones)\n"
+        f"  → openroboto init --refresh   (if upgrading did not help -- re-reads "
+        f"the competition from the backend)\n"
         f"  Refusing to guess: the base model decides which rules judge your "
         f"checkpoint, and the adapter name does not say -- `real_xarm6` names a "
         f"robot arm. Guessing costs you the entry fee, not a retry.\n"
