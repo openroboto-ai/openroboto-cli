@@ -268,3 +268,65 @@ def test_both_runner_contexts_use_the_same_build_arg_names() -> None:
         dockerfile = (context / "Dockerfile").read_text(encoding="utf-8")
         assert "ARG CODE_REPO=" in dockerfile, f"{context.name}: no CODE_REPO"
         assert "ARG CODE_REF=" in dockerfile, f"{context.name}: no CODE_REF"
+
+
+# ─── Where the addresses come from ────────────────────────
+
+
+def test_no_environment_means_the_pins_this_image_was_built_around(
+    lingbot: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The compatibility promise, and the reason this is a fallback rather than
+    a required variable.
+
+    Every workspace written before `params.training.base_weights` existed sets
+    nothing, and for those "nothing" has to keep meaning what it always meant --
+    the base this image was built around. A required variable would turn all of
+    them into a crash on a machine that was training fine yesterday.
+    """
+    monkeypatch.delenv("BASE_WEIGHTS", raising=False)
+    assert lingbot._addressed("BASE_WEIGHTS", "org/model", "abc123") == (
+        "org/model",
+        "abc123",
+    )
+
+
+def test_the_seasons_address_replaces_both_halves(
+    lingbot: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`repo@revision` is one string on purpose: it cannot half-apply."""
+    monkeypatch.setenv("BASE_WEIGHTS", "other/model@deadbeef")
+    assert lingbot._addressed("BASE_WEIGHTS", "org/model", "abc123") == (
+        "other/model",
+        "deadbeef",
+    )
+
+
+def test_a_season_naming_a_repo_with_no_revision_does_not_keep_the_old_commit(
+    lingbot: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """🔴 The built-in revision belongs to the built-in repository.
+
+    Carrying it over to a repository the season just named is the exact failure
+    the single-string form exists to prevent: "right repository, another
+    version's commit" resolves, downloads, trains, and is judged against
+    something else. Unpinned is visibly unpinned; a wrong pin is not.
+    """
+    monkeypatch.setenv("BASE_WEIGHTS", "other/model")
+    assert lingbot._addressed("BASE_WEIGHTS", "org/model", "abc123") == (
+        "other/model",
+        "",
+    )
+
+
+def test_whitespace_is_not_an_address(
+    lingbot: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`docker run -e BASE_WEIGHTS=` and a stray space arrive as the same
+    intention -- the season named nothing. Without the strip, the second one
+    resolves to a repository called `""`."""
+    monkeypatch.setenv("BASE_WEIGHTS", "   ")
+    assert lingbot._addressed("BASE_WEIGHTS", "org/model", "abc123") == (
+        "org/model",
+        "abc123",
+    )
