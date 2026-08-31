@@ -1037,7 +1037,7 @@ def test_check_refuses_when_the_installed_protocol_cannot_judge_this_competition
     assert "pip install -U openroboto" in message
     assert "openroboto-protocol" in message
     # naming the refusal, so nobody later reads the fall back back in
-    assert "openpi" in message
+    assert "pi0.5" in message
 
 
 def test_check_builds_the_lingbot_layout_out_of_the_pinned_protocol(
@@ -1261,7 +1261,7 @@ def test_build_will_not_fill_a_competitions_image_name_with_another_base(
         track="real",
         seq=2,
         adapter="real_xarm6",
-        base_model_family="lingbot_vla",
+        base_model_family="lingbot-vla-2.0",
         params={"training": {"image": "xarm6-runner:1.0"}},
     )
     args = argparse.Namespace(
@@ -1294,7 +1294,7 @@ def test_build_names_the_context_of_the_base_model_the_season_actually_names(
         track="real",
         seq=2,
         adapter="real_xarm6",
-        base_model_family="openpi",
+        base_model_family="pi0.5",
         params={"training": {"image": "xarm6-runner:1.0"}},
     )
     args = argparse.Namespace(

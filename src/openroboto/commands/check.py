@@ -211,7 +211,12 @@ def protocol_rule(name: str) -> Any:
             f"  → pip install -U openroboto\n"
             f"  (`openroboto --version` prints both versions; the client pins the "
             f"protocol package it was built against.)\n"
-            f"  Not falling back to the π0.5 (openpi) rules on purpose: they "
+            # `pi0.5` verbatim: that is the season vocabulary a miner sees in
+            # `miner.yaml` and in the backend's competition list (renamed
+            # 2026-08-31 from `openpi`, which named the framework rather than the
+            # model). Naming the framework here would send them looking for a
+            # value that no longer appears anywhere they can check.
+            f"  Not falling back to the π0.5 (pi0.5) rules on purpose: they "
             f"report 'no model weights found' for a perfectly good LingBot "
             f"checkpoint. Being told nothing costs you a command; being told the "
             f"wrong thing costs you a burn."

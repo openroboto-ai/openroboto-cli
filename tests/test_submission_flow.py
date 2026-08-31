@@ -572,7 +572,7 @@ def _real_season_settings() -> Settings:
                 "seq": 1,
                 "label": "xArm 6",
                 "adapter": "real_xarm6",
-                "base_model_family": "openpi",
+                "base_model_family": "pi0.5",
                 "params": {
                     "fee": {
                         "kind": "transfer",
@@ -616,7 +616,7 @@ def _real_verdict() -> Any:
             seq=1,
             label="xArm 6",
             adapter="real_xarm6",
-            base_model_family="openpi",
+            base_model_family="pi0.5",
             params={
                 "fee": {"kind": "transfer", "amount_tao": 2.0, "coldkey": FEE_COLDKEY}
             },
@@ -1720,7 +1720,7 @@ def test_the_real_track_is_not_judged_by_a_book_admission_will_not_open(
                 track="real",
                 seq=1,
                 adapter="real_xarm6",
-                base_model_family="openpi",
+                base_model_family="pi0.5",
             ),
             kind="transfer",
             amount_tao=2.0,
@@ -1752,7 +1752,7 @@ def test_the_rule_book_comes_from_the_live_row_not_from_miner_yaml(
         submit_command,
         "resolve_competition",
         lambda *a, **k: SimpleNamespace(
-            live=_live_row(base_model_family="openpi"),
+            live=_live_row(base_model_family="pi0.5"),
             kind="burn",
             amount_tao=0.25,
             cid=2,

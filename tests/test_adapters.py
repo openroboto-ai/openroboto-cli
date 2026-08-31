@@ -47,7 +47,7 @@ def test_each_known_adapter_selects_its_paths(adapter: str, training: str) -> No
 
 @pytest.mark.parametrize(
     ("family", "profile"),
-    [("openpi", adapters.OPENPI), ("lingbot_vla", adapters.LINGBOT)],
+    [("pi0.5", adapters.OPENPI), ("lingbot-vla-2.0", adapters.LINGBOT)],
 )
 def test_each_base_model_selects_its_format_profile(family: str, profile: str) -> None:
     """🔴 Keys are the backend's vocabulary verbatim; values are directory names
@@ -61,11 +61,11 @@ def test_each_base_model_selects_its_format_profile(family: str, profile: str) -
     [
         # 🔴 The combination that could not be expressed before: one arm, either
         # base model, and the season row is the only thing that decides.
-        ("real_xarm6", "openpi", adapters.OPENPI),
-        ("real_xarm6", "lingbot_vla", adapters.LINGBOT),
+        ("real_xarm6", "pi0.5", adapters.OPENPI),
+        ("real_xarm6", "lingbot-vla-2.0", adapters.LINGBOT),
         # And the season row outranks the adapter name for the sim seasons too.
-        ("sim_openpi", "lingbot_vla", adapters.LINGBOT),
-        ("sim_lingbot", "openpi", adapters.OPENPI),
+        ("sim_openpi", "lingbot-vla-2.0", adapters.LINGBOT),
+        ("sim_lingbot", "pi0.5", adapters.OPENPI),
     ],
 )
 def test_the_season_row_decides_the_base_model_not_the_adapter_name(
@@ -161,7 +161,7 @@ def test_no_adapter_claims_a_container_this_package_does_not_ship() -> None:
 
 
 def test_the_packages_default_runner_profile_is_the_default_adapters() -> None:
-    """`openroboto/__init__.py` spells `"openpi"` out rather than importing it
+    """`openroboto/__init__.py` spells `"pi0.5"` out rather than importing it
     (importing `adapters` from the package root is a cycle). Two spellings of
     one value, so they are compared here -- if they drift, a `miner.yaml` with
     no competition section builds out of a directory that does not exist."""
@@ -186,3 +186,41 @@ def test_no_competition_data_is_written_into_this_table() -> None:
         for adapter in adapters.ADAPTERS.values()
         for value in dataclasses.astuple(adapter)
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# The 2026-08-31 rename: framework names out, model names in
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("stale", ["openpi", "lingbot_vla"])
+def test_the_previous_spellings_are_gone(stale: str) -> None:
+    """🔴 **No compatibility layer, on purpose.**
+
+    Keeping both spellings alive means nothing can say which one is correct, and
+    dropping the old one later costs another release. The changeover is a single
+    co-ordinated switch instead: backend and evaluator flip together, miners are
+    told to upgrade (about ten of them, and LingBot had not opened yet).
+
+    A client that still maps the old names would sail past a backend that has not
+    switched -- and then judge a checkpoint by whichever rule book it guessed.
+    """
+    assert stale not in adapters.FORMAT_PROFILES
+
+
+def test_an_unknown_base_model_leads_with_upgrade() -> None:
+    """The wording every miner who has not upgraded will hit on switchover day.
+
+    🔴 **`pip install -U` has to come before `--refresh`.** For them `--refresh`
+    is a dead end: it faithfully re-reads a season name this build has never
+    heard of and prints the same message again. Leading with it sends people
+    round a loop before the one command that actually fixes it.
+    """
+    with pytest.raises(ConfigError) as caught:
+        adapters.base_model_family("sim_openpi", "openpi")
+
+    message = str(caught.value)
+    assert "pip install -U openroboto" in message
+    assert message.index("pip install -U") < message.index("init --refresh")
+    # And it says what this build does know, so the mismatch is visible at once.
+    assert "pi0.5" in message
