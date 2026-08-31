@@ -104,11 +104,34 @@ def resolve_context(explicit: str = "", profile: str = adapters.OPENPI) -> str:
     return str(runner_context(profile))
 
 
-def build_command(image: str, context: str, no_cache: bool = False) -> list[str]:
-    """Assemble the `docker build` command."""
+def build_command(
+    image: str, context: str, no_cache: bool = False, code: str = ""
+) -> list[str]:
+    """Assemble the `docker build` command.
+
+    `code` is `repo@revision` for the model source this season builds against,
+    out of `params.training.code`. It reaches the Dockerfile as build args, which
+    **already exist** there -- until 2026-08-31 nothing ever passed them, so the
+    pinned defaults inside the image were the only answer and moving to a new
+    commit took a CLI release.
+
+    ⚠️ Empty means the season names none, and then the Dockerfile's own pins
+    apply -- byte-for-byte the behaviour every workspace had before this field.
+    """
     command = ["docker", "build", "-t", image]
     if no_cache:
         command.append("--no-cache")
+    if code:
+        repo, _, revision = code.partition("@")
+        # 🔴 `CODE_REPO` / `CODE_REF` are the same two names in **both** runner
+        #    contexts, deliberately: this function does not know which base model
+        #    the season uses, and a build arg that matches nothing is **silently
+        #    ignored by docker build** -- the image would come out on its default
+        #    pin with nothing anywhere saying so.
+        if repo:
+            command += ["--build-arg", f"CODE_REPO={repo}"]
+        if revision:
+            command += ["--build-arg", f"CODE_REF={revision}"]
     command.append(context)
     return command
 
@@ -124,6 +147,19 @@ def competition_image(config_path: str) -> str:
         return ""
     training = Settings.load(config_path).competition_params.get("training") or {}
     return str(training.get("image") or "") if isinstance(training, dict) else ""
+
+
+def competition_code(config_path: str) -> str:
+    """`params.training.code` -- `repo@revision` for the model source, or `""`.
+
+    Same shape and same tolerance as `competition_image()`: a workspace without a
+    config is not an error here, it just names nothing and the Dockerfile's own
+    pins apply.
+    """
+    if not Path(config_path).is_file():
+        return ""
+    training = Settings.load(config_path).competition_params.get("training") or {}
+    return str(training.get("code") or "") if isinstance(training, dict) else ""
 
 
 def competition_adapter(config_path: str) -> str:
@@ -220,7 +256,9 @@ def run(args: argparse.Namespace) -> int:
     if not args.context and not local_runner_context(profile).is_dir():
         hint(f"Building from the image definition inside the package ({context})")
 
-    command = build_command(image, context, args.no_cache)
+    command = build_command(
+        image, context, args.no_cache, code=competition_code(args.config)
+    )
     say(f"🐳 {' '.join(command)}")
     if args.dry_run:
         # Checking that the right image name comes out otherwise means really

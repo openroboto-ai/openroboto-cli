@@ -150,10 +150,17 @@ RUN uv pip install --python /opt/venv/bin/python \
 # ⚠️ When this moves, re-run `scripts/verify_lingbot_runner.py`: it compares
 # the real signatures against what train_runner.py passes, which is the failure
 # this pin exists to make loud.
-ARG LINGBOT_REF=951475ae1b1d87553e7dc47c97b53a3d695c0d13
-ARG LINGBOT_REPO=https://github.com/Robbyant/lingbot-vla-v2.git
-RUN git clone --filter=blob:none "${LINGBOT_REPO}" /app/lingbot-vla-v2 \
-    && git -C /app/lingbot-vla-v2 checkout --detach "${LINGBOT_REF}"
+# 🔴 Named CODE_REPO / CODE_REF in **both** runner contexts on purpose.
+#    `openroboto build` passes them without knowing which base model this
+#    season uses, and a build arg whose name matches nothing is *silently
+#    ignored* by docker -- the image would come out on its default pin with
+#    nothing anywhere saying so.
+#    The defaults below stay: a season that names no source builds exactly
+#    what it built before this was wired up.
+ARG CODE_REF=951475ae1b1d87553e7dc47c97b53a3d695c0d13
+ARG CODE_REPO=https://github.com/Robbyant/lingbot-vla-v2.git
+RUN git clone --filter=blob:none "${CODE_REPO}" /app/lingbot-vla-v2 \
+    && git -C /app/lingbot-vla-v2 checkout --detach "${CODE_REF}"
 
 COPY train_runner.py /app/train_runner.py
 

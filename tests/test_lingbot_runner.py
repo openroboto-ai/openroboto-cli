@@ -26,6 +26,7 @@ import pytest
 from openroboto import adapters, runner_context
 
 LINGBOT_CONTEXT = runner_context(adapters.LINGBOT)
+RUNNER_CONTEXT = runner_context(adapters.OPENPI)
 OPENPI_CONTEXT = runner_context(adapters.OPENPI)
 
 
@@ -208,10 +209,15 @@ def test_the_dockerfile_pins_lingbots_code_to_a_commit() -> None:
     branch that renames an argument turns a pinned CLI release into a container
     that cannot build a model."""
     dockerfile = (LINGBOT_CONTEXT / "Dockerfile").read_text(encoding="utf-8")
-    ref = re.search(r"ARG LINGBOT_REF=(\S+)", dockerfile)
-    assert ref, "the Dockerfile does not pin LINGBOT_REF at all"
+    # ⚠️ The arg was called `LINGBOT_REF` until 2026-08-31; both runner contexts
+    #    now use `CODE_REF` so that `openroboto build` can pass a season's pin
+    #    without knowing which base model it is (an unmatched build arg is
+    #    silently ignored by docker, which would leave the image on its default).
+    ref = re.search(r"ARG CODE_REF=(\S+)", dockerfile)
+    assert ref, "the Dockerfile does not pin CODE_REF at all"
     assert re.fullmatch(r"[0-9a-f]{40}", ref.group(1)), (
-        f"LINGBOT_REF={ref.group(1)!r} is not a commit"
+        f"CODE_REF={ref.group(1)!r} is not a commit -- a branch would mean the "
+        f"image drifts under a pinned CLI release"
     )
 
 
@@ -246,3 +252,19 @@ def test_the_flash_attn_wheel_matches_the_torch_and_python_pins() -> None:
         f"the wheel is built for {wheel.group(1)}, the venv is "
         f"python{python_pin.group(1)}.{python_pin.group(2)}"
     )
+
+
+def test_both_runner_contexts_use_the_same_build_arg_names() -> None:
+    """🔴 `openroboto build` passes `CODE_REPO` / `CODE_REF` **without knowing
+    which base model the season uses**, so both Dockerfiles have to answer to
+    the same two names.
+
+    Docker does not complain about a build arg that matches nothing: it ignores
+    it. So a mismatch here is not a build failure -- the image comes out on its
+    built-in default, `docker images` lists it, `train` runs it, and the miner
+    trains against a source the season did not name. Nothing anywhere says so.
+    """
+    for context in (RUNNER_CONTEXT, LINGBOT_CONTEXT):
+        dockerfile = (context / "Dockerfile").read_text(encoding="utf-8")
+        assert "ARG CODE_REPO=" in dockerfile, f"{context.name}: no CODE_REPO"
+        assert "ARG CODE_REF=" in dockerfile, f"{context.name}: no CODE_REF"

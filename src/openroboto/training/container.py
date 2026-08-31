@@ -67,6 +67,8 @@ def build_docker_command(
     custom_train_script: str | None = None,
     visible_devices: str = "",
     image: str | None = None,
+    base_weights: str = "",
+    processor: str = "",
 ) -> list[str]:
     """Assemble the complete argument list for `docker run ...`.
 
@@ -114,6 +116,7 @@ def build_docker_command(
         if checkpoint_path.startswith("gs://"):
             # A GCS path is downloaded by the openpi inside the container itself.
             command += ["-e", f"CHECKPOINT_PATH={checkpoint_path}"]
+
         else:
             # 🔴 **Mounted at `/data/cache`, which is `OPENPI_DATA_HOME`.**
             #
@@ -132,6 +135,21 @@ def build_docker_command(
                 "-v", f"{checkpoint.parent}:/data/cache",
                 "-e", f"CHECKPOINT_PATH=/data/cache/{checkpoint.name}",
             ]  # fmt: skip
+
+    # 🔴 The season's addresses, not the miner's settings -- and empty means
+    #    "this season did not name one", which the image reads as "use the base I
+    #    was built around". That is why they are separate parameters rather than
+    #    fields on `TrainParams`: those are the miner's own hyperparameters out of
+    #    `miner.yaml`, and blurring the two is how a season's base model ends up
+    #    looking like something a miner gets to choose.
+    #
+    # ⚠️ Each carries `repo@revision` in **one** string. Two variables would let
+    #    them drift apart, and "right repository, another version's commit" is
+    #    precisely the failure this exists to prevent.
+    if base_weights:
+        command += ["-e", f"BASE_WEIGHTS={base_weights}"]
+    if processor:
+        command += ["-e", f"PROCESSOR={processor}"]
 
     if val_data_path:
         command += ["-e", f"VAL_DATA=/data/input/{os.path.basename(val_data_path)}"]
@@ -272,6 +290,8 @@ def run_training(
     hotkey: str = "unknown",
     custom_train_script: str | None = None,
     image: str = "",
+    base_weights: str = "",
+    processor: str = "",
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Run the training container once and return (metrics, proof).
 
@@ -316,6 +336,8 @@ def run_training(
             # is untouched (red line #2): this only picks which image the same
             # `docker run` line names.
             image=image or None,
+            base_weights=base_weights,
+            processor=processor,
         )
         logger.info("🐳 Starting openpi-runner: %s", " ".join(command))
 

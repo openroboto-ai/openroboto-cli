@@ -345,14 +345,18 @@ def build_policy(cfg: dict, init_device: str = "cuda"):
     from lingbotvla.utils.arguments import ModelArguments, TrainingArguments
     from lingbotvla.utils.lora_utils import add_lora_to_model, freeze_parameters
 
+    weights_repo, weights_rev = _addressed(
+        "BASE_WEIGHTS", BASE_MODEL_REPO, BASE_MODEL_REVISION
+    )
     base_weights = resolve_weights(
-        BASE_MODEL_REPO,
-        BASE_MODEL_REVISION,
+        weights_repo,
+        weights_rev,
         cfg["checkpoint_path"],
         "lingbot-vla-v2-6b",
     )
+    processor_repo, processor_rev = _addressed("PROCESSOR", PROCESSOR_REPO, "")
     processor_path = resolve_weights(
-        PROCESSOR_REPO, "", cfg["checkpoint_path"], "Qwen3-VL-4B-Instruct"
+        processor_repo, processor_rev, cfg["checkpoint_path"], "Qwen3-VL-4B-Instruct"
     )
 
     # The vendor's own two lines: `config_kwargs = {**vars(args.model),
@@ -815,6 +819,33 @@ def run_training(cfg: dict) -> tuple:
         logger.info("🔧 Using custom training script: %s", custom_train)
         return _run_custom(cfg, custom_train)
     return _run_default(cfg)
+
+
+def _addressed(env: str, repo: str, revision: str) -> tuple[str, str]:
+    """`repo@revision` out of the environment, falling back to the built-in pair.
+
+    🔴 **The season's row wins; the constants below it are the fallback.** Those
+    constants used to be the only answer, which meant changing LingBot's base
+    model took a CLI release and a rebuild on every miner's machine -- while a
+    π0.5 season could do the same thing by editing one field. The addresses now
+    ride in on `BASE_WEIGHTS` / `PROCESSOR`, set by `openroboto train` from
+    `params.training`.
+
+    ⚠️ **Empty is the normal case for older workspaces**, and it has to keep
+    meaning exactly what it meant before: use the base this image was built
+    around. Anything else would break every config written before the field
+    existed.
+
+    ⚠️ One string, split here rather than carried as two variables. `repo@rev`
+    cannot drift; a pair of variables can, and "right repository, another
+    version's commit" is the failure being avoided -- it trains happily and is
+    judged against something else.
+    """
+    value = os.getenv(env, "").strip()
+    if not value:
+        return repo, revision
+    name, _, rev = value.partition("@")
+    return name or repo, rev
 
 
 def _run_custom(cfg: dict, custom_script: str) -> tuple:

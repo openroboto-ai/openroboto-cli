@@ -36,8 +36,18 @@ ENV PYTHONDONTWRITEBYTECODE=1
 
 # ─── Install openpi only (numpy<2.0) ──────────────────
 ENV GIT_LFS_SKIP_SMUDGE=1
+# 🔴 Same two names as the LingBot context, and for the same reason: `openroboto
+#    build` passes them without knowing which base model this season uses, and an
+#    unmatched build arg is *silently ignored*.
+#
+# ⚠️ The default is `main` -- **unpinned**, which is what it has always been. That
+#    means two miners building on different days can get different openpi, and
+#    the season row has no idea. Pinning it is a decision for whoever sets
+#    `params.training.code`; this only makes it possible to.
+ARG CODE_REPO=https://github.com/Physical-Intelligence/openpi.git
+ARG CODE_REF=main
 RUN uv pip install --python /opt/venv/bin/python \
-    git+https://github.com/Physical-Intelligence/openpi.git@main
+    "git+${CODE_REPO}@${CODE_REF}"
 
 COPY train_runner.py /app/train_runner.py
 
