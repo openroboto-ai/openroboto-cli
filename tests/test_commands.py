@@ -1197,6 +1197,38 @@ def test_build_command_assembly() -> None:
     ]  # fmt: skip
 
 
+def test_the_seasons_code_pin_reaches_docker_build() -> None:
+    """🔴 **Changing which commit the image builds from must not need a release.**
+
+    Until 2026-08-31 the source repository and its revision were pinned only
+    inside the Dockerfiles, so moving to a new commit meant cutting a CLI version
+    and having every miner rebuild. The pin now rides in from
+    `params.training.code` as `repo@revision`.
+
+    ⚠️ The two arg names are the same in **both** runner contexts on purpose:
+    this function does not know which base model the season uses, and docker
+    **silently ignores** a build arg that matches nothing -- the image would come
+    out on its built-in default with nothing anywhere saying so.
+    """
+    command = build_command.build_command(
+        "img", "ctx", code="https://github.com/Robbyant/lingbot-vla-v2.git@951475ae"
+    )
+    assert "--build-arg" in command
+    assert "CODE_REPO=https://github.com/Robbyant/lingbot-vla-v2.git" in command
+    assert "CODE_REF=951475ae" in command
+    assert command[-1] == "ctx", "the context has to stay last"
+
+
+def test_a_season_with_no_code_pin_builds_exactly_as_before() -> None:
+    """⚠️ **Empty is the normal case**, not an edge case: every workspace written
+    before this field exists names nothing, and for them the command has to come
+    out byte-for-byte as it did -- the Dockerfile's own pins then apply.
+    """
+    assert build_command.build_command("img", "ctx", code="") == [
+        "docker", "build", "-t", "img", "ctx",
+    ]  # fmt: skip
+
+
 # ─── build / train: which image, and whether there is one ────
 
 

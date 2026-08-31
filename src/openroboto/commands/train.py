@@ -225,6 +225,20 @@ def run(args: argparse.Namespace) -> int:
             # competition rather than fixed here, so that building one image and
             # training in another is not a thing that can happen quietly.
             image=competition_image(args.config),
+            # 🔴 **The season's addresses, from the season's own row.**
+            #
+            # These used to live only as constants inside the LingBot image
+            # (`runner/lingbot/train_runner.py`), which meant changing a base
+            # model required a CLI release and every miner rebuilding -- while
+            # π0.5 could do the same thing by editing one field. Two seasons on
+            # the same client behaving differently is the shape this closes.
+            #
+            # ⚠️ Empty is meaningful and common: the season names nothing, the
+            #    image falls back to the base it was built around, and the
+            #    behaviour is byte-for-byte what it was before this existed.
+            #    That is what keeps older workspaces working.
+            base_weights=str(snapshot.training.get("base_weights") or ""),
+            processor=str(snapshot.training.get("processor") or ""),
         )
 
     if not outcome.metrics.get("final_loss"):

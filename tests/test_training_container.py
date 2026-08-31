@@ -209,3 +209,58 @@ def test_every_bind_mount_source_is_an_absolute_path(tmp_path: Path) -> None:
             f"docker will either treat it as a named volume or refuse to start; "
             f"neither is what you want."
         )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# The season's addresses reach the container
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_the_seasons_addresses_are_passed_in() -> None:
+    """🔴 **Changing a base model must not need a CLI release.**
+
+    Until 2026-08-31 LingBot's weights, revision and processor lived only as
+    constants inside the image, so moving to a new base meant cutting a release
+    and having every miner rebuild -- while a π0.5 season did the same thing by
+    editing one field on its row. Two seasons on the same client behaving
+    differently is what this closes.
+    """
+    command = build_docker_command(
+        train_data_path="/tmp/x/train.json",
+        output_dir="/tmp/out",
+        base_weights="robbyant/lingbot-vla-v2-6b@11c703bf",
+        processor="Qwen/Qwen3-VL-4B-Instruct@ebb281ec",
+    )
+    assert "BASE_WEIGHTS=robbyant/lingbot-vla-v2-6b@11c703bf" in command
+    assert "PROCESSOR=Qwen/Qwen3-VL-4B-Instruct@ebb281ec" in command
+
+
+def test_a_season_that_names_no_address_changes_nothing() -> None:
+    """⚠️ **Empty is the normal case, not an edge case.**
+
+    Every workspace written before these fields existed sends nothing, and for
+    them the command has to come out byte-for-byte as it did — the image then
+    falls back to the base it was built around. A stray `-e BASE_WEIGHTS=`
+    would reach the container as an empty string and be read as an address.
+    """
+    command = build_docker_command(
+        train_data_path="/tmp/x/train.json", output_dir="/tmp/out"
+    )
+    assert not [part for part in command if part.startswith("BASE_WEIGHTS")]
+    assert not [part for part in command if part.startswith("PROCESSOR")]
+
+
+def test_the_address_stays_one_string() -> None:
+    """`repo@revision` travels as **one** variable.
+
+    🔴 Two variables can drift apart, and "right repository, another version's
+    commit" is the failure being avoided: it trains happily and is then judged
+    against a different base. One string cannot half-update.
+    """
+    command = build_docker_command(
+        train_data_path="/tmp/x/train.json",
+        output_dir="/tmp/out",
+        base_weights="repo/name@deadbeef",
+    )
+    passed = [part for part in command if part.startswith("BASE_WEIGHTS=")]
+    assert passed == ["BASE_WEIGHTS=repo/name@deadbeef"]
