@@ -1,11 +1,14 @@
 # Miner Guide — LingBot-VLA 2.0 (simulation competition)
 
-> **Status**: ⚠️ **partially operable — the competition is not open yet.** ·
-> **Updated**: 2026-08-26 · **Audience**: miners moving from the π0.5 competition
+> **Status**: ✅ **live — the competition opened 2026-09-01 and takes submissions.**
+> The official training container is still pending (§5); training is
+> bring-your-own for now. ·
+> **Updated**: 2026-09-01 · **Audience**: miners moving from the π0.5 competition
 > **Scope**: install → base model → check → upload → fee → chain announcement.
-> **Note**: the π0.5 guide is [MINER.md](./MINER.md); machine setup is
-> [MINER_DEPLOY.md](./MINER_DEPLOY.md); every `miner.yaml` field is
-> [CONFIG.md](./CONFIG.md).
+> **Note**: the π0.5 simulation season is archived — its final board stays on the
+> site (season switcher on the leaderboard). [MINER.md](./MINER.md) remains for
+> reference; machine setup is [MINER_DEPLOY.md](./MINER_DEPLOY.md); every
+> `miner.yaml` field is [CONFIG.md](./CONFIG.md).
 
 Every command below was run before it was written down. The ones that do not work
 today say so, in place, with what they are waiting on — so that when one stops you,
@@ -13,42 +16,38 @@ you know it is not your machine.
 
 ## 0. What works today, and what does not
 
-Measured 2026-08-26 against `https://api.openroboto.ai` and against
-`openroboto 1.0.0 (openroboto-protocol 0.9.0)`.
+Measured 2026-09-01 against `https://api.openroboto.ai` and against
+`openroboto 1.1.0 (openroboto-protocol 0.9.0)`. **Upgrade first**: this
+competition needs `openroboto >= 1.1.0` — older clients speak the retired
+round vocabulary and cannot resolve this season.
 
 | Step | Today | Blocked on |
 |---|---|---|
-| `pip install openroboto` | ✅ works | — |
+| `pip install -U openroboto` | ✅ works (Python ≥ 3.11) | — |
 | `openroboto --version` | ✅ works | — |
-| **`openroboto init`** | ❌ **`Not Found`, writes nothing** | the backend has no competition catalogue deployed — see below |
-| Downloading the LingBot base model | ✅ works | — |
-| **Training** | ⛔ **not written yet** | the LingBot training container. §5 is deliberately empty |
-| `openroboto build` / `openroboto train` | ❌ both refuse for this competition | same container |
+| `openroboto init` | ✅ **works** — lists both open competitions, writes a LingBot workspace (`cid=2`) | — |
+| Downloading the base model | ⚠️ official repo is publishing — see §4 | weights finishing upload to `openroboto-ai/lingbot-vla-v2-6b-libero` |
+| **Training** | ⛔ **official container not released.** §5 stays empty; 1.1.0 ships an *unverified* build context for the brave | the LingBot training container |
+| `openroboto build` / `openroboto train` | ❌ refuse for this competition unless you bring `--context` | same container |
 | `openroboto check` | ✅ works | — |
 | `openroboto doctor` | ✅ works | — |
-| `openroboto submit` | ❌ refuses to pay | the same catalogue as `init` |
+| `openroboto submit` | ✅ unblocked — resolves the season, confirms the 0.1 TAO fee against the backend before paying | — |
 | `openroboto status` | ✅ works | — |
 
-**Why `init` and `submit` are blocked, in one number.** Both read
-`GET /api/v1/competitions`. The deployed backend answers `404` there, because the
-competitions table arrives in migration `0003` and production is still on `0002`:
+The catalogue blocker from the 2026-08-26 revision of this page is gone —
+production serves the competitions list and `init` was re-run against it for
+this revision:
 
 ```bash
-curl -s https://api.openroboto.ai/readyz
-# {"ready":true, … "alembic_version":"0002","expected_head":"0002"}
-
 curl -s https://api.openroboto.ai/api/v1/competitions
-# {"detail":"Not Found","code":"NOT_FOUND","request_id":"…"}
+# … "id":2,"track":"sim","seq":2,"label":"LingBot-VLA 2.0","status":"active" …
+
+openroboto init my-miner
+# Competitions taking submissions:
+#   1. xArm 6 · π0.5 (real/1 · cid=3)
+#   2. LingBot-VLA 2.0 (sim/2 · cid=2)
+# Which one? [1-2]
 ```
-
-So the LingBot competition does not exist on the network yet. Nothing you do
-today can enter it, and **nothing you do today can lose you TAO on it either** —
-the client refuses to pay rather than guessing which competition it is paying
-for. Re-run the two commands above; when the first prints `0003` or higher and
-the second returns a list, this page is live.
-
-Until then, the useful half is real: you can install the client, fetch the base
-model, and run `openroboto check` on any checkpoint you produce yourself.
 
 ---
 
@@ -101,35 +100,25 @@ openroboto --version
 Expect the client and the protocol package on one line:
 
 ```
-openroboto 1.0.0 (openroboto-protocol 0.9.0)
+openroboto 1.1.0 (openroboto-protocol 0.9.0)
 ```
 
-Only pre-releases are published so far, and `pip install openroboto` picks
-`1.0.0` on its own — pip falls back to pre-releases when a project has no
-stable release. You do not need `--pre`.
+**1.1.0 is the minimum for this competition.** It is the release that resolves
+seasons by competition id and model name; a 1.0.x client speaks the retired
+round vocabulary and stops at the season lookup. Already installed? `pip
+install -U openroboto`.
 
 Machine preparation (NVIDIA driver, Docker, the container toolkit, systemd) has
 not changed: [MINER_DEPLOY.md](./MINER_DEPLOY.md) §1 and §8.
 
 ---
 
-## 3. Create the workspace — ⛔ blocked
+## 3. Create the workspace
 
 ```bash
 openroboto init my-miner && cd my-miner
+# Which one? [1-2]  → pick "LingBot-VLA 2.0 (sim/2 · cid=2)"
 ```
-
-**This does not work today.** It prints:
-
-```
-❌ Not Found
-  error code: NOT_FOUND
-  Retrying will not give a different result -- fix the reason above first.
-  request_id: …
-```
-
-and writes **no files at all** — that is on purpose, so a failed `init` cannot
-leave you with a workspace that has no competition in it.
 
 `init` asks the backend which competitions are open, you pick one, and the whole
 spec of that season is written into `miner.yaml`: base model and revision,
@@ -137,9 +126,14 @@ training image, checkpoint layout rules, entry fee, deadlines. Every later comma
 reads that snapshot off disk, which is why `build` / `train` / `check` never need
 the network.
 
-Waiting on: **the competition catalogue reaching the deployed backend** (§0). There
-is no `--track` flag and no new subcommand — which competition you mine is a value
-in your config, not something you type each time.
+There is no `--track` flag and no new subcommand — which competition you mine is
+a value in your config, not something you type each time.
+
+**One thing to watch this week**: the season's pinned base model is moving to the
+official LIBERO fine-tune as its upload completes (§4). `openroboto submit`
+compares your workspace's `(base_repo, base_revision)` snapshot against the
+backend before paying, so a stale snapshot is refused, not charged. If your
+workspace predates the repin, refresh it: `openroboto init --refresh`.
 
 > Running an older `miner.yaml` with no `competition:` section keeps working
 > exactly as it did, on the π0.5 path. It does not become a LingBot workspace by
@@ -152,12 +146,30 @@ in your config, not something you type each time.
 π0.5's checkpoint was fetched by the training container. LingBot's is not: you
 fetch it, once, and point your training at it.
 
+**The official base model is `openroboto-ai/lingbot-vla-v2-6b-libero`** —
+LingBot-VLA 2.0 already fine-tuned on LIBERO, published with its training
+configs, normalization stats, and per-suite scores. The repository exists and
+its weights are finishing upload at the time of this revision (2026-09-01); the
+id is final. Once it is complete the season record repins to it — check what
+your season currently pins before you burn GPU time:
+
 ```bash
-hf download robbyant/lingbot-vla-v2-6b \
-  --revision 11c703bf6a5c1f45b3b69168482da11fdbba53d7
+curl -s https://api.openroboto.ai/api/v1/competitions | python3 -m json.tool
+# … "base_repo": …, "base_revision": … for sim/2
 ```
 
-The repository is **public and not gated** — no token, no access request.
+```bash
+hf download openroboto-ai/lingbot-vla-v2-6b-libero   # add --revision from above
+```
+
+Its upstream parent, `robbyant/lingbot-vla-v2-6b`, is the raw LingBot-VLA 2.0
+release, untrained on LIBERO — on this benchmark it starts from close to zero,
+so starting there means rebuilding skills the official base already has. The
+size figures below were measured on the upstream repo; the official fine-tune
+carries the same 6.38 B-parameter weights, so budget the same 25 GB class and
+run `--dry-run` for exact numbers.
+
+Both repositories are **public and not gated** — no token, no access request.
 
 `hf` is the HuggingFace CLI, installed with `openroboto` as part of
 `huggingface_hub`. On `huggingface_hub` 1.x the older `huggingface-cli` name is
@@ -226,6 +238,10 @@ What is decided and will not change:
   competition's name can already exist on your machine from an older release, with
   openpi inside it, and training in it would finish with no error at all on the
   wrong base model.
+- 1.1.0 ships an **unverified** LingBot build context (`runner/lingbot/`), and
+  `build`'s refusal message tells you how to drive it with `--context` if you
+  have a GPU and accept that nobody has validated a full run on it yet. That is
+  an escape hatch, not a release.
 - Whatever you train with, `openroboto check` and `openroboto submit` work on a
   checkpoint this CLI did not produce. Train it your own way and come back at §6.
 - **There is no `openroboto merge`, and there will not be one.** Exporting a full
