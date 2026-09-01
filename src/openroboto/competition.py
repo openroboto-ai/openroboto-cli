@@ -409,17 +409,24 @@ def judge(
             + REFRESH_HINT
         )
 
-    if (live.base_repo, live.base_revision) != snapshot.base:
-        was_repo, was_revision = snapshot.base
-        raise PrecheckFailed(
-            f"{_name(live)} changed its base model after you trained.\n"
-            f"  miner.yaml: {was_repo}@{was_revision}\n"
-            f"  backend:    {live.base_repo}@{live.base_revision}\n"
-            f"  A checkpoint trained on the old base is judged against the new "
-            f"one, so paying now buys an evaluation of the wrong model.\n"
-            f"  → `openroboto init --refresh`, then train again "
-            f"(docs/MIGRATION.md)"
-        )
+    # 🔴 **`base_repo` 变了**不**拦付款**（2026-09-01 拿掉的一道闸）。
+    #
+    # 这里原来比 `(base_repo, base_revision)`，理由写的是「你在旧底座上训的
+    # checkpoint 会被拿新底座去评判，付了钱买的是一次评错模型的评测」。
+    # **那句话不成立**，而且这个文件自己的 `Competition.training` docstring
+    # 就写着为什么：`base_repo` 是**榜单 `delta_vs_base` 的参照**，
+    # 矿工训练的起点是 `params.training`（π0.5 那期两个地址明显不同）。
+    # 换基线只改 Δ 列拿谁比，不改这份 checkpoint 怎么被评。
+    #
+    # 2026-09-01 真咬到人：运营把灵波的基线换成带评测结果的那个仓库
+    # （纯展示参照），于是**每个已经 init 过的矿工付不了款**，而报错告诉他
+    # 「要重新训练」—— 一句假话，代价是一轮白训。
+    #
+    # ⚠️ **真正该拦的那件事没有消失**：训练起点被换了确实作废一次训练。
+    # 但那个值在 `params.training`（`base_weights` / `checkpoint`），不在这两列。
+    # 这里不顺手补上，是因为**加一道会拒绝付款的闸门要单独想清楚**：拦错的
+    # 代价是矿工白训一轮，而这次的教训恰恰是「闸门盯错了字段」。
+    # 记在 `08-31-competition-is-the-only-source` 的待办里。
 
     return Verdict(live=live, fee=live_fee, window=window)
 

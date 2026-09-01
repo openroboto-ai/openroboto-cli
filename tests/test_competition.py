@@ -356,13 +356,30 @@ def test_a_changed_amount_shows_both_numbers() -> None:
     assert "9.0 TAO" in str(raised.value)
 
 
-def test_a_changed_base_model_says_to_train_again() -> None:
+def test_a_changed_baseline_does_not_block_payment() -> None:
+    """🔴 **2026-09-01 翻转。** 这里原来断言「换了底座就拒绝付款、让他重新训练」。
+
+    那道闸盯错了字段。`base_repo` 是**榜单 `delta_vs_base` 的参照**
+    （`Competition.training` 的 docstring 就写着这一条，还举了 π0.5 那期
+    两个地址明显不同为例）；矿工训练的起点在 `params.training`。
+    换基线只改 Δ 列拿谁比，**不改这份 checkpoint 怎么被评**。
+
+    当天真咬到人：运营把灵波的基线换成带评测结果的那个仓库（纯展示参照），
+    于是每个已经 `init` 过的矿工付不了款，而报错告诉他「要重新训练」——
+    一句假话，代价是一轮白训。
+
+    ⚠️ **真正该拦的那件事没有消失**：训练起点被换了确实作废一次训练，
+    但那个值在 `params.training`，不在这两列。补那道闸要单独想清楚 ——
+    拦错的代价是矿工白训一轮，而这次的教训正是「闸门盯错了字段」。
+    """
     trained_on = _competition(base_repo="robbyant/lingbot", base_revision="c0ffee")
-    now_serving = _competition(base_repo="robbyant/lingbot", base_revision="deadbee")
-    with pytest.raises(PrecheckFailed) as raised:
-        judge(_snapshot(trained_on), [now_serving], NOW)
-    assert "MIGRATION" in str(raised.value)
-    assert "c0ffee" in str(raised.value)
+    now_serving = _competition(
+        base_repo="openroboto-ai/lingbot-libero", base_revision="deadbee"
+    )
+
+    verdict = judge(_snapshot(trained_on), [now_serving], NOW)
+
+    assert verdict.live.base_repo == "openroboto-ai/lingbot-libero"
 
 
 # ─── the whole gate, including the prompt ────────────────────

@@ -1,6 +1,6 @@
 [project]
 name = "openroboto"
-version = "1.1.0"
+version = "1.1.1"
 description = "OpenRoboto subnet (Bittensor netuid 80) CLI — everything a miner or external validator types."
 readme = "README.md"
 license = "MIT"
@@ -209,6 +209,10 @@ testpaths = ["tests"]
 # the gate and reality is not safety margin, it is permission for exactly that many
 # points of silent regression. Raise it whenever a real run comes in higher.
 #
+# 80.04 as of dropping the base_repo precheck (2026-09-01). It went down because
+# the deleted branch was covered; the test that covered it now asserts the
+# opposite and is two lines shorter.
+#
 # 80.06 as of the season's addresses moving out of the runner's constants
 # (2026-08-31). It went *down* first: `_addressed()` is the only new line in
 # `runner/lingbot/train_runner.py` that a machine with no GPU can reach, and
@@ -220,6 +224,6 @@ testpaths = ["tests"]
 # ~100% covered by construction, so it reports about 12 points higher — 82.38 rather
 # than 70.26. That number was briefly committed here and CI rejected the very commit
 # that introduced it. The gate is not the place to find out you measured differently.
-fail_under = 80.06
+fail_under = 80.04
 precision = 2
 show_missing = true
