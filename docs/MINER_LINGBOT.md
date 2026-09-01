@@ -26,7 +26,7 @@ round vocabulary and cannot resolve this season.
 | `pip install -U openroboto` | ✅ works (Python ≥ 3.11) | — |
 | `openroboto --version` | ✅ works | — |
 | `openroboto init` | ✅ **works** — lists both open competitions, writes a LingBot workspace (`cid=2`) | — |
-| Downloading the base model | ⚠️ official repo is publishing — see §4 | weights finishing upload to `openroboto-ai/lingbot-vla-v2-6b-libero` |
+| Downloading the base model | ✅ works — `openroboto-ai/lingbot-vla-v2-6b-libero`, 75 files, 25.5 GB (§4) | — |
 | **Training** | ⛔ **official container not released.** §5 stays empty; 1.1.0 ships an *unverified* build context for the brave | the LingBot training container |
 | `openroboto build` / `openroboto train` | ❌ refuse for this competition unless you bring `--context` | same container |
 | `openroboto check` | ✅ works | — |
@@ -129,10 +129,10 @@ the network.
 There is no `--track` flag and no new subcommand — which competition you mine is
 a value in your config, not something you type each time.
 
-**One thing to watch this week**: the season's pinned base model is moving to the
-official LIBERO fine-tune as its upload completes (§4). `openroboto submit`
-compares your workspace's `(base_repo, base_revision)` snapshot against the
-backend before paying, so a stale snapshot is refused, not charged. If your
+**One thing to watch this week**: the official base model finished uploading on
+2026-09-01 and the season record is being repinned to it (§4). `openroboto
+submit` compares your workspace's `(base_repo, base_revision)` snapshot against
+the backend before paying, so a stale snapshot is refused, not charged. If your
 workspace predates the repin, refresh it: `openroboto init --refresh`.
 
 > Running an older `miner.yaml` with no `competition:` section keeps working
@@ -147,11 +147,13 @@ workspace predates the repin, refresh it: `openroboto init --refresh`.
 fetch it, once, and point your training at it.
 
 **The official base model is `openroboto-ai/lingbot-vla-v2-6b-libero`** —
-LingBot-VLA 2.0 already fine-tuned on LIBERO, published with its training
-configs, normalization stats, and per-suite scores. The repository exists and
-its weights are finishing upload at the time of this revision (2026-09-01); the
-id is final. Once it is complete the season record repins to it — check what
-your season currently pins before you burn GPU time:
+LingBot-VLA 2.0 already fine-tuned on LIBERO. Upload completed 2026-09-01:
+75 files carrying the sharded weights, tokenizer and processor configs, the
+exact training configs and `norm_stats.json` under `training/`, per-suite
+evaluation results under `evaluation/`, and `SHA256SUMS` with provenance
+records. The pinned revision is
+`ce6a322157acc7a03d0ca71bb84423c7f2e124d7` — confirm it against what your
+season pins before you burn GPU time:
 
 ```bash
 curl -s https://api.openroboto.ai/api/v1/competitions | python3 -m json.tool
@@ -159,15 +161,13 @@ curl -s https://api.openroboto.ai/api/v1/competitions | python3 -m json.tool
 ```
 
 ```bash
-hf download openroboto-ai/lingbot-vla-v2-6b-libero   # add --revision from above
+hf download openroboto-ai/lingbot-vla-v2-6b-libero \
+  --revision ce6a322157acc7a03d0ca71bb84423c7f2e124d7
 ```
 
 Its upstream parent, `robbyant/lingbot-vla-v2-6b`, is the raw LingBot-VLA 2.0
 release, untrained on LIBERO — on this benchmark it starts from close to zero,
-so starting there means rebuilding skills the official base already has. The
-size figures below were measured on the upstream repo; the official fine-tune
-carries the same 6.38 B-parameter weights, so budget the same 25 GB class and
-run `--dry-run` for exact numbers.
+so starting there means rebuilding skills the official base already has.
 
 Both repositories are **public and not gated** — no token, no access request.
 
@@ -185,6 +185,18 @@ then rather than after a week of GPU time.
 ### How much disk
 
 Check before you start, not at 90%:
+
+```bash
+hf download openroboto-ai/lingbot-vla-v2-6b-libero \
+  --revision ce6a322157acc7a03d0ca71bb84423c7f2e124d7 --dry-run
+# [dry-run] Will download 75 files (out of 75) totalling 25.5G.
+```
+
+That 25.5 GB (23.8 GiB) is the six fp32 weight shards — 6.38 B parameters —
+plus kilobyte-scale configs. Nothing to trim: the official repo does not carry
+the upstream's distillation teachers.
+
+Fetching the **upstream parent** too? Its numbers, measured the same way:
 
 ```bash
 hf download robbyant/lingbot-vla-v2-6b \
