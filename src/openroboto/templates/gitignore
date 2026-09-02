@@ -16,7 +16,8 @@ validator.yaml
 state/
 
 # ─── Big things and generated things ────────────────────────
-cache/                  # π0.5 base checkpoint cache, several GB
+cache/                  # base checkpoints, one directory per base
+                        # model, several GB each
 tmp/                    # training output root
                         # (tmp/robot_train_vla_miner/competition_<id>)
 logs/

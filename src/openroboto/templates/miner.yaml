@@ -33,7 +33,6 @@ subnet:
                                    # the CLI refuses to touch the chain without
                                    # it, because a wrong netuid burns real TAO on
                                    # the wrong subnet.
-  subtensor_endpoint: ""           # optional WS endpoint override
   wallet_path: ""                  # empty = Bittensor SDK default (~/.bittensor/wallets)
   coldkey: default
   hotkey: default

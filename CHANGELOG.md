@@ -22,6 +22,7 @@ be guessed from a directory listing.
 | `tmp/robot_train_vla_miner/round_N/` | `tmp/robot_train_vla_miner/competition_<id>/` | Nothing, unless a script hard-codes the path. |
 | `round_info.json` in the uploaded checkpoint | `run_info.json` | Nothing. Nothing reads it, and the model fingerprint excludes it either way. |
 | `payment:` in `miner.yaml` | — | Delete it if you like; it is ignored. It never decided what you paid. |
+| `subnet.subtensor_endpoint` in `miner.yaml` / `validator.yaml` | — | Delete it. It parsed but was never read, so it has never overridden anything; leaving it in place would keep promising that it does. The chain connection takes `subnet.network`. |
 | `urls.control_json` in `miner.yaml` | — | Delete it if you like; it is ignored. It remains a **validator** setting in `validator.yaml`. |
 
 🔴 **Mid-submission when you upgrade?** Rename
@@ -38,6 +39,16 @@ and **pays again**.
   submissions are now listed for every competition, because rows rejected during
   the chain scan carry no competition at all — filtering them by a number the
   rejected payload may itself have got wrong hid the row you came to find.
+- **`training_proof.json` names your season's base model.** It stated
+  `"model": "pi05"` for every season, so a LingBot checkpoint shipped to your
+  public repository with a proof claiming a π0.5 base. The `config` key is gone
+  with it: the training config name lives inside the image and the container
+  does not report it, so the host cannot state one without inventing it.
+- **Base checkpoints cache per base model** (`cache/<base>`, was always
+  `cache/pi05_base`). One directory shared by every season reports a cache hit
+  on another base model's weights — the container skips the download and trains
+  against the wrong base. An existing `cache/pi05_base` is still a hit, so
+  nothing re-downloads.
 - **Status words are shown as the backend sends them.** The mapping that
   rewrote a retired worker vocabulary could only ever rewrite words that cannot
   arrive, and would have hidden one that did.

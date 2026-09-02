@@ -102,12 +102,6 @@ class Settings:
 
     # ─── Bittensor ─────────────────────────────────────
     network: str = "finney"
-    # ⚠️ This field currently **has no effect**: the chain connection goes through
-    # `bt.Subtensor(network=...)`, which only accepts a network name. It stays
-    # inert on purpose rather than being wired up to "connect to the node you
-    # configured" — that would change which node transactions are sent to.
-    # Whether to really support a custom endpoint needs a separate decision.
-    subtensor_endpoint: str = ""
     # 0 = not configured. **No default netuid**, deliberately: any default (313 on
     # testnet, 80 on mainnet) means a miner.yaml that forgets the field sends the
     # burn to whichever subnet that default names, and the TAO really is burned. A
@@ -335,9 +329,6 @@ class Settings:
 
         subnet = _section(data, "subnet")
         cfg.network = subnet.get("network", cfg.network)
-        cfg.subtensor_endpoint = subnet.get(
-            "subtensor_endpoint", cfg.subtensor_endpoint
-        )
         cfg.netuid = int(subnet.get("netuid", cfg.netuid) or 0)
         cfg.wallet_path = subnet.get("wallet_path", cfg.wallet_path)
         # coldkey / hotkey may be parsed as numbers in YAML (a wallet named `123`),

@@ -1626,6 +1626,55 @@ def test_train_starts_from_the_checkpoint_this_season_names(
     assert ran[0]["checkpoint_path"] == "cache/pi05_base"
 
 
+def test_each_base_model_gets_its_own_checkpoint_cache(tmp_path: Path) -> None:
+    """🔴 One cache directory shared by every season is a cache that reports a
+    hit on **another base model's weights**.
+
+    The container finds the directory populated, skips the download and trains
+    against the wrong base -- a week of GPU time on a checkpoint that cannot
+    score, with nothing on screen to say so. Seasons on the same base model
+    still share, which is what a cache is for.
+    """
+    import os
+
+    from openroboto.training.run import resolve_checkpoint
+
+    cwd = os.getcwd()
+    os.chdir(tmp_path)
+    try:
+        pi05 = resolve_checkpoint("gs://openpi-assets/checkpoints/pi05_base")
+        other = resolve_checkpoint("gs://some-vendor/checkpoints/lingbot_base")
+        # unchanged for pi0.5, so a cache already on a miner's disk stays a hit
+        assert pi05 == "cache/pi05_base"
+        assert other == "cache/lingbot_base"
+        assert pi05 != other
+        # same base model, same directory -- still one download
+        assert resolve_checkpoint("gs://openpi-assets/checkpoints/pi05_base") == pi05
+    finally:
+        os.chdir(cwd)
+
+
+def test_the_training_proof_names_the_season_base_model_not_pi05(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """🔴 `training_proof.json` ships in the miner's public repository.
+
+    A constant `"pi05"` is written next to a LingBot checkpoint just as readily
+    as next to a π0.5 one, which makes the file a false claim about the artifact
+    it sits in rather than a gap.
+    """
+    ran = _fake_training(monkeypatch, [])
+    args = _train_workspace(
+        tmp_path,
+        monkeypatch,
+        base_model_family="lingbot-vla-2.0",
+        training={"dataset": DATASET},
+    )
+
+    assert train_command.run(args) == 0
+    assert ran[0]["base_model"] == "lingbot-vla-2.0"
+
+
 def test_train_leaves_the_base_to_the_image_when_the_season_names_none(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -315,6 +315,12 @@ The image name is not a constant: it comes from the season, as
 `competition.params.training.image` in your `miner.yaml`. `openroboto build` builds
 it from the build context this package ships for the season's base model.
 
+`pi05_base` above is likewise this season's base model, not a fixed path.
+`openroboto train` names the cache directory after the checkpoint it holds
+(`cache/<base>`, mounted as `/data/cache`), so seasons on different base models
+never share one — a shared directory reports a cache hit on the wrong weights and
+the container skips the download.
+
 ## Directory layout
 
 ```

@@ -90,7 +90,6 @@ openroboto init my-miner    # miner.yaml + train_strategy.py + README.md + .giti
 | `huggingface` | `token`, `username` | Local Hugging Face upload credentials |
 | `huggingface` | `repo_id` | Optional, used verbatim when set. Empty = `<username>/<base_model_family>-<last 12 of hotkey>`, i.e. **one repository per season**. 🔴 Set it to keep a repository you already upload to — miners who started before 2026-09-02 have a `<username>/pi05-…`, and leaving this empty makes the next upload create a new repository and re-push several GB |
 | `huggingface` | `merged_model_id` | Optional, informational; nothing in the submission path reads it |
-| `subnet` | `subtensor_endpoint` | Accepted and **currently has no effect**: the chain connection takes a network *name*, exactly as the old code did. Left in place rather than silently changed, because changing it would change which node transactions are sent to |
 | root | `custom_train_script` | Optional miner-owned training strategy path |
 | `training` | `epochs`, `batch_size`, `learning_rate`, `lora_r`, `lora_alpha` | **Yours to tune** — that is the competition. They reach the container as `EPOCHS` / `BATCH_SIZE` / `LR` / `LORA_R` / `LORA_ALPHA`, which your strategy script reads out of `cfg`. Defaults are `3 / 4 / 1e-4 / 32 / 64`. ⚠️ Write the learning rate `1.0e-4`, not `1e-4` — YAML reads the second as text |
 | root | `log_level`, `log_dir` | Local logging |

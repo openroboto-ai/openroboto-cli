@@ -230,6 +230,10 @@ def run(args: argparse.Namespace) -> int:
             #    what keeps older workspaces working.
             base_weights=str(snapshot.training.get("base_weights") or ""),
             processor=str(snapshot.training.get("processor") or ""),
+            # Named in `training_proof.json`, which ships in the public
+            # repository. Same source as `run_info.json`'s -- one season, one
+            # answer to "which base model is this".
+            base_model=settings.competition_base_model_family,
         )
 
     if not outcome.metrics.get("final_loss"):
