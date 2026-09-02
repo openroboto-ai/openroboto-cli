@@ -4,7 +4,7 @@
 > **Scope**: Every `miner.yaml` / `validator.yaml` field: meaning, unit, and what breaks if it is wrong.
 > **Note**: Season-scoped values (fee, dataset, base checkpoint) are **not** here
 > either — `openroboto init` copies them into the `competition:` section of this
-> same file, from the backend. They no longer come from `control.json`; see
+> same file, from the backend. For the one field validators read, see
 > [VALIDATOR.md](./VALIDATOR.md) for the one field validators still read.
 
 Real configuration files are local-only. Copy an example, fill its placeholders, and keep the resulting YAML outside Git.
@@ -92,7 +92,7 @@ openroboto init my-miner    # miner.yaml + train_strategy.py + README.md + .giti
 | `huggingface` | `merged_model_id` | Optional, informational; nothing in the submission path reads it |
 | `subnet` | `subtensor_endpoint` | Accepted and **currently has no effect**: the chain connection takes a network *name*, exactly as the old code did. Left in place rather than silently changed, because changing it would change which node transactions are sent to |
 | root | `custom_train_script` | Optional miner-owned training strategy path |
-| `training` | `epochs`, `batch_size`, `learning_rate`, `lora_r`, `lora_alpha` | **Yours to tune** — that is the competition. They reach the container as `EPOCHS` / `BATCH_SIZE` / `LR` / `LORA_R` / `LORA_ALPHA`, which your strategy script reads out of `cfg`. Defaults `3 / 4 / 1e-4 / 32 / 64` are the values the subnet used to hand everybody. ⚠️ Write the learning rate `1.0e-4`, not `1e-4` — YAML reads the second as text |
+| `training` | `epochs`, `batch_size`, `learning_rate`, `lora_r`, `lora_alpha` | **Yours to tune** — that is the competition. They reach the container as `EPOCHS` / `BATCH_SIZE` / `LR` / `LORA_R` / `LORA_ALPHA`, which your strategy script reads out of `cfg`. Defaults are `3 / 4 / 1e-4 / 32 / 64`. ⚠️ Write the learning rate `1.0e-4`, not `1e-4` — YAML reads the second as text |
 | root | `log_level`, `log_dir` | Local logging |
 
 Nothing in this file is fetched. `openroboto train` opens no URL beyond the

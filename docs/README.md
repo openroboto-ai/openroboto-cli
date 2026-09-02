@@ -18,7 +18,7 @@ you find the same rule stated in two files, that is a bug — report it.
 | understand what this subnet rewards and how | [SUBNET_OVERVIEW.md](./SUBNET_OVERVIEW.md) |
 | get from nothing to a first submission on the **π0.5** competition | [MINER.md](./MINER.md) |
 | do the same on the **LingBot-VLA 2.0** competition | [MINER_LINGBOT.md](./MINER_LINGBOT.md) |
-| move off `python rt.py` / `python miner.py`, or move from the π0.5 base to LingBot | [MIGRATION.md](./MIGRATION.md) |
+| train against this season's base model | [MIGRATION.md](./MIGRATION.md) |
 | set up a real machine (GPU, Docker, systemd) | [MINER_DEPLOY.md](./MINER_DEPLOY.md) |
 | know what every `miner.yaml` field does | [CONFIG.md](./CONFIG.md) |
 | know exactly what the evaluation fee costs me and when it is wasted | [PAYMENT.md](./PAYMENT.md) |
@@ -63,7 +63,7 @@ Recorded here rather than left to be discovered by a miner losing money:
   deliberately thin.** The container and the runner ship, but this repository has no
   LingBot training configuration template yet, so the export step is described rather
   than handed to you — an invented procedure there costs a week of GPU time.
-- **Where a document names a fee, a round or a dataset URL, the competition row
+- **Where a document names a fee, a season or a dataset URL, the competition row
   wins.** Those are published per season on `GET /api/v1/competitions` and copied into
   your `miner.yaml` by `openroboto init`; `control.json` is only read by external
   validators, for `public_key`.

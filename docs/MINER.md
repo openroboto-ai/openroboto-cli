@@ -58,12 +58,12 @@
 **Two-stage workflow**: `openroboto train` does prep + training. After it
 completes, `openroboto submit` does upload → check the layout → pay → announce.
 
-Run `openroboto doctor` before the first round and `openroboto check` before
+Run `openroboto doctor` before you start and `openroboto check` before
 paying — both exist so that "paid the entry fee, then found out the model was
 wrong" stops happening.
 
 `openroboto submit` judges the layout itself as well, between the upload and the
-payment, so skipping `openroboto check` no longer means skipping the rules. It
+payment, so skipping `openroboto check` does not mean skipping the rules. It
 reads the file listing of your HuggingFace repository — the same listing the
 subnet reads after the fee — and stops without paying if that listing would not
 earn a score. There is no flag to switch it off: past that point a rejection is
@@ -94,7 +94,7 @@ openroboto init my-miner && cd my-miner
 # 3. Check the environment before anything costs money
 openroboto doctor
 
-# 4. Build the training image, then train one round
+# 4. Build the training image, then train
 openroboto build
 openroboto train
 
@@ -199,7 +199,7 @@ outcome of each step:
 1. the announcement step builds the payload (including `block_hash` for the seed reveal) and
    publishes it as a chain commitment, **waiting for inclusion in a block**
 2. Confirmed → `✅ commitment on chain | ref=<block>-<index> fee=… TAO`
-3. State is saved to `state/round_N.json` — re-running skips completed steps
+3. State is saved to `state/competition_<id>.json` — re-running skips completed steps
 
 **The CLI distinguishes three outcomes, and they are not the same thing:**
 

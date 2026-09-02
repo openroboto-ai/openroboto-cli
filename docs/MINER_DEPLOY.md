@@ -1,7 +1,7 @@
 # Miner Deployment Guide
 
 > **Status**: current · **Updated**: 2026-08-19 · **Audience**: miners running on their own hardware
-> **Scope**: Machine preparation, install, training image, running a round, systemd.
+> **Scope**: Machine preparation, install, training image, training, systemd.
 > **Note**: The conceptual guide is [MINER.md](./MINER.md). This document assumes you have read it.
 
 > For miners running on Ubuntu 22.04/24.04 with NVIDIA GPU.
@@ -91,11 +91,11 @@ log_level: INFO
 ```
 
 > **The nested layout above is the only one that parses.** Every key lives under
-> a section (`subnet:`, `urls:`, `huggingface:`, …). Older guides showed a flat
-> `[DEFAULT]` / `key = value` form — that no longer loads, and it fails *quietly*:
-> the file parses, every field falls back to its default, and you find out when a
-> command complains about a missing `netuid`. Run `openroboto doctor` after
-> editing; it names every field that is missing or unusable.
+> a section (`subnet:`, `huggingface:`, …). A flat `[DEFAULT]` / `key = value`
+> form fails *quietly*: the file parses, every field falls back to its default,
+> and you find out when a command complains about a missing `netuid`. Run
+> `openroboto doctor` after editing; it names every field that is missing or
+> unusable.
 
 Payment fields are deliberately absent, and adding them changes nothing: the
 entry fee is the season's `competition.params.fee`, confirmed against the backend
@@ -221,10 +221,10 @@ offline.
 ### Train
 
 ```bash
-openroboto train        # one round, then exits
+openroboto train        # trains once, then exits
 ```
 
-After training completes, state is saved to `state/round_N.json`.
+After training completes, state is saved to `state/competition_<id>.json`.
 
 ### Validate the model locally — before paying
 
@@ -232,8 +232,7 @@ After training completes, state is saved to `state/round_N.json`.
 openroboto check
 ```
 
-Same format rules the evaluator applies. This used to require cloning a second
-repository; it is now built in.
+Same format rules the evaluator applies, built in — no second repository to clone.
 
 > **⚠️ What gets evaluated is a complete checkpoint at the top of the output
 > directory.** A bare LoRA adapter is rejected, and so is a checkpoint buried
@@ -260,7 +259,7 @@ openroboto submit       # full pipeline, resumable
 > submission that is already doomed.
 
 `submit` is resumable: re-running it skips steps already recorded in
-`state/round_N.json` and **reuses a fee already paid instead of paying twice**.
+`state/competition_<id>.json` and **reuses a fee already paid instead of paying twice**.
 
 ### Check what the backend made of it
 
@@ -310,7 +309,7 @@ tail -f /home/robot-train/my-miner/logs/*.log
 
 > This unit only **trains**. It deliberately does not run `submit`: that step
 > burns TAO, and an unattended service that pays money on a timer is how a
-> misconfigured round turns into a string of wasted burns. Run `openroboto submit`
+> misconfigured workspace turns into a string of wasted burns. Run `openroboto submit`
 > yourself after checking `openroboto check`.
 
 ## Troubleshooting
@@ -330,7 +329,7 @@ openroboto status --hotkey <your-hotkey-ss58>
 
 Give the scanner a cycle (it polls every 60 s) before concluding anything. If
 `status` still shows nothing several minutes later, the commitment did not land —
-re-run `openroboto submit`, which resumes from `state/round_N.json` and sends only
+re-run `openroboto submit`, which resumes from `state/competition_<id>.json` and sends only
 the commitment.
 
 ### Training container fails
@@ -344,9 +343,9 @@ docker run --rm --gpus all -v /data:/data <that-image>:latest nvidia-smi
 
 ## Important Notes
 
-- `openroboto train` runs **once per round** then exits. No polling loop.
+- `openroboto train` runs **once** then exits. No polling loop.
 - `openroboto submit` runs the post-training pipeline (upload → pay the entry fee → announce).
-- State is saved to `state/round_N.json` — re-running `openroboto submit` resumes from the last completed step and reuses an existing burn instead of paying twice.
+- State is saved to `state/competition_<id>.json` — re-running `openroboto submit` resumes from the last completed step and reuses an existing burn instead of paying twice.
 - Backend scanner picks up submissions within ~60 seconds.
 - The entry fee comes from the season (`competition.params.fee.amount_tao`), and nowhere else. An amount says how much, never which competition, so a number typed into `miner.yaml` is not a way to pay: `openroboto submit` confirms the fee against the backend in the moment before paying, and refuses a workspace with no `competition` section instead of guessing. A wrong amount is rejected by the backend and the TAO is not refunded.
 - Backend verifies burn tx using **strict exact match** (no `startswith` prefix matching).

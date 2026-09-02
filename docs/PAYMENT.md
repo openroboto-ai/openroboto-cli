@@ -8,7 +8,7 @@
 
 Each evaluated submission may require a public entry fee. **It is published on the competition row, as `params.fee`**, and `openroboto submit` confirms it against the backend in the second before it is paid. The fee creates an economic cost for queue usage.
 
-> ⚠️ The `payment` block in `control.json` (shown below, still published) is one rate for a subnet that now runs several seasons at once, and **this CLI no longer reads it**. A number that says how much but not which competition is not a way to pay: paid that way, a submission is filed under whichever season the backend defaults to, non-refundably.
+> ⚠️ The fee comes from the competition row and nowhere else. A number that says how much but not which competition is not a way to pay: paid that way, a submission is filed under whichever season the backend defaults to, non-refundably.
 
 ## Two fee kinds
 
@@ -87,8 +87,6 @@ Public APIs report each submission with a unified status:
 | `eval_failed` | Evaluation failed | **Yes** |
 | `rejected` | Rejected (for example, duplicate model hash or invalid commitment fields) | **Yes** |
 | `superseded` | A newer submission for the same `(hotkey, competition)` pushed this one out | **Yes** |
-
-Older API responses may use the legacy vocabulary: `done` → `evaluated`, `failed` → `eval_failed`, `enqueued` → `pending`, `waiting` → `evaluating`.
 
 ## Safety
 

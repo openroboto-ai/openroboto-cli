@@ -15,7 +15,7 @@ Held-out evaluation inputs, the scoring-service deployment, databases, and subne
 | Component | Where | Responsibility |
 |---|---|---|
 | CLI entry point | `src/openroboto/cli.py` | Command assembly; one module per command under `commands/` |
-| Training | `commands/train.py`, `training/` | Read public round data, download training resources, run training in Docker |
+| Training | `commands/train.py`, `training/` | Read the season spec from `miner.yaml`, download training resources, run training in Docker |
 | Submission | `commands/submit.py` | Upload a model, pay the entry fee, announce on chain. The three steps live in `commands/{upload,burn,announce}.py` as functions — they stopped being commands in 1.0, because running one alone is how a fee gets paid for a submission that is never announced |
 | Pre-flight | `commands/doctor.py`, `commands/check.py`, `preflight.py` | Everything checkable **before** money is spent |
 | Chain access | `chain/`, `payment/` | Commitments, and the burn / transfer extrinsics that pay the entry fee |
@@ -49,7 +49,7 @@ openroboto submit -> Hugging Face commit -> season re-checked against the backen
                      -> layout gate -> entry fee (burn or transfer) -> chain commitment
 ```
 
-The chain commitment binds the miner hotkey, model repository and commit, round number, competition id, payment reference, and commitment block information.
+The chain commitment binds the miner hotkey, model repository and commit, season ordinal, competition id, payment reference, and commitment block information.
 
 ## Evaluation and seed flow
 
@@ -67,7 +67,7 @@ commitment block hash + competition id + drand randomness
 ```
 
 🔴 The second input is the **competition id**, not the payload's `r` and not the
-round number the API displays — see [SEED_GENERATION.md](./SEED_GENERATION.md), which
+season ordinal an API response displays — see [SEED_GENERATION.md](./SEED_GENERATION.md), which
 is the authority on this.
 
 The formula is deterministic and public. The block hash and drand value become available after submission, which prevents pre-submission adaptation to a future seed. The seed randomizes public evaluation mechanics; it does not reveal held-out task data.

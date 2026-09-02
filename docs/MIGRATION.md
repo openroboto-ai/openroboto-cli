@@ -1,194 +1,25 @@
-# Migration
+# Base model: LingBot-VLA 2.0
 
-Two migrations live in this file. They are independent — read the one that applies
-to you, or both.
-
-| Migration | Who it affects |
-|---|---|
-| [`python rt.py` → `openroboto`](#1-python-rtpy--openroboto) | Miners who cloned this repository before 2026-08-19 |
-| [π0.5 → LingBot base model](#2-π05--lingbot-base-model) | **Every miner.** Your current model does not carry over |
-
----
-
-# 1. `python rt.py` → `openroboto`
-
-> **Status**: current · **Updated**: 2026-08-19 · **Audience**: miners who cloned this
-> repository before 2026-08-19
-> **Scope**: what changed, what your old commands map to, and what to do if you are
-> mid-round right now.
-> **Note**: If you installed with `pip install openroboto` you were never on the old
-> path and nothing here affects you.
-
-## What changed
-
-The old entry points are **deleted**, not deprecated:
-
-`rt.py` · `miner.py` · `payment.py` · `validator.py` · `miner/` · `utils/` ·
-`protocol/` · `download_checkpoint.py` · `download_checkpoint.sh` ·
-`requirements.txt` · `miner.example.yaml` · `validator.example.yaml`
-
-If you `git pull`, `python miner.py` and `python rt.py submit` stop working. There is
-no `rt` alias — an abbreviation nobody can read is the naming this repository set out
-to remove, and shipping an alias would keep it alive indefinitely.
-
-Everything those files did is in the `openroboto` command, installed from PyPI. You no
-longer clone anything.
-
-## Install
-
-```bash
-python3.11 -m venv .venv && source .venv/bin/activate
-pip install openroboto
-openroboto --version          # CLI version + protocol package version
-```
-
-## Command map
-
-| Before | Now |
-|---|---|
-| `bash download_checkpoint.sh` | *(gone)* — the training container fetches the base checkpoint into `cache/pi05_base` itself |
-| `cp miner.example.yaml miner.yaml` | `openroboto init my-miner` — a whole workspace: `miner.yaml` (subnet constants pre-filled), `train_strategy.py`, a `README.md`, and a `.gitignore` that keeps your wallet password out of git |
-| `cp validator.example.yaml validator.yaml` | `openroboto init --validator` |
-| `docker build -t robot-train-openpi:latest openpi-runner/` | `openroboto build` |
-| `python miner.py --config miner.yaml` | `openroboto train` |
-| *(nothing — you cloned a second repo)* | `openroboto check` — checkpoint format verdict, locally, **before** you pay |
-| `python rt.py submit --config miner.yaml --round 1` | `openroboto submit --round 1` |
-| `python rt.py upload --config miner.yaml --round 1` | `openroboto submit` |
-| `python rt.py burn --config miner.yaml` | `openroboto submit` |
-| `python rt.py announce --config miner.yaml --round 1` | `openroboto submit` |
-| *(nothing — you read the website)* | `openroboto status` — your submissions and the exact rejection reason |
-| `python validator.py --config validator.yaml` | `openroboto validator run` |
-| `docker compose up --build miner` | `openroboto train` — see below |
-
-`--config miner.yaml` is the default everywhere, so you can drop it.
-
-### About `docker compose up --build miner`
-
-That command did two things at once, and only one of them was ever about you.
-
-It built an image containing the **miner code**, and that code then started a
-**second** container to do the actual training — openpi needs `numpy<2.0` while
-bittensor needs `numpy>=2.0`, so training has always run in its own container.
-
-Now the CLI runs on the host (`pip install openroboto`) and starts the training
-container for you. `openroboto train` is the whole replacement:
-
-```bash
-openroboto build     # build the training image, once
-openroboto train     # runs it, with your data and strategy mounted in
-```
-
-The training image definition ships inside the package, so there is nothing to
-clone and nothing to keep in sync. You still need Docker on the host — that has
-not changed and cannot.
-
-If what you actually wanted was to keep the CLI itself off your host Python,
-that is still possible but it is a repository-level thing, not a miner
-workflow — see "Running the CLI in a container" in the repository README.
-
-## `miner.yaml` changes
-
-**No field was renamed** — that was a hard constraint, because renaming a key
-silently breaks every miner's file. But one section was **added and made
-required**, so an untouched file does not submit any more.
-
-Three things to know:
-
-0. 🔴 **You must add a `competition:` section.** `openroboto submit` refuses a file
-   without one before it uploads anything: a fee paid with no season attached is
-   filed under whichever season the backend defaults to, and it is not refunded.
-   `openroboto init --refresh` writes that section from the backend and leaves every
-   other line byte for byte as it is (the previous version is kept as
-   `miner.yaml.bak`).
-
-1. **The flat `[DEFAULT]` / `key = value` form is not supported** and never really
-   was by this parser. It fails *quietly*: the file loads, every field falls back to a
-   default, and the first symptom is an unrelated complaint about a missing `netuid`.
-   If your file looks like that, run `openroboto init` into a scratch directory and
-   copy your values into the nested layout.
-
-2. **`payment.burn_rate_tao` does nothing; delete it.** The fee is the entering
-   season's `competition.params.fee.amount_tao`, confirmed against the backend in
-   the moment before it is paid. A number here says how much, never which
-   competition, so it is not a way to pay — `openroboto submit` refuses a
-   workspace that has no `competition` section instead of charging it a
-   subnet-wide rate. Run `openroboto init --refresh` to write that section.
-
-Run this after any edit:
-
-```bash
-openroboto doctor      # names every field that is missing or unusable
-```
-
-## If you are mid-round right now
-
-`state/round_N.json` is unchanged and still read. Finish the round with the new
-commands:
-
-- **Trained but not submitted** → `openroboto check`, then `openroboto submit`.
-- **Paid but not announced** → `openroboto submit` again. It resumes from your state
-  file: the upload is not repeated and the payment recorded there is reused, so **you
-  do not pay twice**. Note the payment→commitment window is 50 blocks (~10 minutes) —
-  if more time has passed, `submit` tells you the payment has expired rather than
-  charging you another fee for a submission that would be rejected.
-- **Announced** → `openroboto status`.
-
-## Behaviour that changed on purpose
-
-These are not renames; the CLI now does something different, and in each case the old
-behaviour could cost you TAO:
-
-| | Old | Now |
-|---|---|---|
-| Fee cannot be fetched | Fell back to a built-in `0.01`, while the network publishes `0.1` — you burned a tenth of the fee and were rejected | **Refuses to burn.** No built-in amount to fall back to |
-| Payment is too old to attach | Announced anyway; the backend rejected it and the fee was gone | `submit` **refuses to announce**, and says how many blocks have passed |
-| Commitment submitted | Printed a block reference even when nothing had confirmed | Waits for inclusion. Prints a block reference **only** when the chain returned one; otherwise says so and tells you to check `openroboto status` before retrying |
-
-## Getting the old files back
-
-Nothing is lost — they are in this repository's git history:
-
-```bash
-git log --diff-filter=D --oneline -- rt.py     # find the deleting commit
-git show <commit>^:rt.py > rt.py               # recover one file
-```
-
-They are unmaintained from 2026-08-19 and will not receive fixes.
-
----
-
-# 2. π0.5 → LingBot base model
-
-> **Status**: current · **Completed**: 2026-08-31 · **Audience**: every miner on the
-> simulation competition.
->
-> The switch happened. The π0.5 simulation competition is archived, the LingBot-VLA
-> 2.0 one is open and taking submissions, the CLI is released, both training images
-> ship in the wheel, and `GET /api/v1/competitions` serves the season list. Nothing on
-> this page is waiting on anything.
+> **Status**: current · **Audience**: every miner on the simulation competition.
+> **Scope**: what the simulation season expects of your checkpoint, and why a
+> π0.5 one is refused.
 
 ## The three things you actually need to know
 
 | Question | Answer |
 |---|---|
-| **Do I have to change anything?** | Yes. CLI **1.2.0 or newer**, and you have to **retrain from a new base model**. Nothing you have trained so far carries over. |
-| **By when?** | Done: the switch was performed on 2026-08-31. The π0.5 competition no longer takes submissions. |
-| **What if I don't?** | Everything you submit after the switch is **rejected on format**, and the evaluation fee for a rejected submission is **not refunded**. |
+| **What do I need?** | CLI **1.2.0 or newer**, and a checkpoint trained from **LingBot-VLA 2.0**. |
+| **Does a π0.5 checkpoint work?** | No. The layout rules the backend applies come from the season's base model, and a π0.5 tree does not match. |
+| **What does that cost?** | A submission rejected on format is **not refunded**. `openroboto check` applies the same rules locally, for free, before you pay. |
 
-## What is changing
+## What the season expects
 
-The simulation competition swaps its base model: **π0.5 (openpi) → LingBot-VLA 2.0**.
-The exam is the same — the same LIBERO task suites in simulation — but the textbook is
-different: different training code, different weight files, different checkpoint
-layout.
+The simulation competition runs on **LingBot-VLA 2.0**: different training code,
+different weight files, different checkpoint layout from π0.5. The exam is the same —
+the same LIBERO task suites in simulation — but the textbook is different.
 
-Because scores from the two base models are not comparable, they are not merged:
-
-- The π0.5 competition becomes a **read-only archive**. Its leaderboard stays visible.
-- The new competition starts from zero. **The current champion does not carry over.**
-- A π0.5 checkpoint submitted to the new competition **fails admission** — the layout
-  rules the backend applies come from the competition's base model, and yours will not
-  match.
+Scores from two base models are not comparable, so each season is scored on its own
+and starts from zero.
 
 ## What you must do
 
@@ -207,9 +38,8 @@ openroboto check              # must pass before you pay. Free, local, no GPU
 openroboto submit
 ```
 
-> **`openroboto build` and `openroboto train` work for this competition** — this
-> paragraph used to say they refuse. `adapters.ADAPTERS["sim_lingbot"]` was flipped
-> to `DOCKER` on 2026-08-26, on the evidence of a real run:
+> **`openroboto build` and `openroboto train` work for this competition.**
+> `adapters.ADAPTERS["sim_lingbot"]` is `DOCKER` on the evidence of a real run:
 > `scripts/verify_lingbot_runner.py` on an A100-SXM4-80GB, all stages green (the
 > container builds, the model loads with every parameter filled from the released
 > checkpoint, LoRA attaches, merge-and-export writes a flat checkpoint root). The
@@ -241,12 +71,11 @@ towards the new competition, and there is no conversion path from a π0.5 fine-t
 a LingBot one. To keep mining you have to train again, from the new base, following
 the workflow above.
 
-**Since 1.2.0 the default is a new repository, one per season.** The name is
+**The default is one repository per season.** The name is
 `{username}/{base_model_family}-{last 12 of your hotkey}`, e.g.
-`kyleab/lingbot-vla-2.0-qXgcGfvRk2Xp`; it used to be a fixed `pi05-` prefix and one
-repository for a miner's whole career, which meant every repository still said `pi05`
-while holding a LingBot model, and `upload_folder` never deletes, so leftovers from an
-earlier season became `LEFTOVER_UPLOAD_STATE` at admission — a terminal rejection with
+`kyleab/lingbot-vla-2.0-qXgcGfvRk2Xp`. One repository across seasons does not work:
+`upload_folder` never deletes, so leftovers from another season become
+`LEFTOVER_UPLOAD_STATE` at admission — a terminal rejection with
 the fee gone.
 
 **To keep the repository you already use, set `huggingface.repo_id` in `miner.yaml`**
@@ -263,10 +92,8 @@ the burn.
 
 ### 1. The HuggingFace export runs by default — and lands somewhere unusable
 
-> **Corrected 2026-08-26.** This section previously said the export is off by
-> default, that you must add `save_hf_weights: true` yourself, and that the
-> conversion is "asynchronous and best-effort" with failures logged to
-> `async_hf_failures.jsonl`. **All three are wrong**, read off the vendor's
+> ⚠️ **Do not add `save_hf_weights: true`** — it is already on, and the export is
+> synchronous, not best-effort. The facts below are read off the vendor's
 > source at `github.com/Robbyant/lingbot-vla-v2@main`:
 > `TrainingArguments.save_hf_weights` defaults to **`True`** and
 > `TrainingArguments.async_save_hf_weights` defaults to **`False`**
@@ -361,14 +188,13 @@ money you are about to spend buy you a score".
   adapter is rejected; exporting a full merged checkpoint is part of training, and
   `openroboto check` catches an unmerged upload before you pay.
 
-## Changed: what the bundled training strategies leave behind
+## What the bundled training strategies leave behind
 
-`templates/simple`, `templates/example` and the container's default flow used to
-write a fabricated LoRA adapter into `<output_dir>/adapter/`. They no longer write
-anything under `adapter/`, and they no longer fabricate weights at all — the export
-step is marked and left for you, and both `train` and `check` say so plainly.
+`templates/simple`, `templates/example` and the container's default flow write
+nothing under `adapter/` and fabricate no weights — the export step is marked and
+left for you, and both `train` and `check` say so plainly.
 
-Nothing breaks that was working: that adapter was never a submittable artifact
+A bare adapter is not a submittable artifact
 (`openroboto check` rejected it as `bare_lora_adapter`, and so did admission), and
 nothing in the pipeline read the `adapter/` directory. **If your own
 `train_strategy.py` writes into `<output_dir>/adapter/`, move the export up to
@@ -380,7 +206,7 @@ The same rule catches the LingBot exporter's layout: it writes
 two. `openroboto train` now names that directory when it finds the weights there,
 and `openroboto check` prints the `--output-dir` you should submit instead.
 
-## New: the CLI tells you what you are paying for, before it pays
+## The CLI tells you what you are paying for, before it pays
 
 Shipped; released 2026-08-31.
 
@@ -394,19 +220,5 @@ If any of that does not line up, or the backend cannot be reached, **it refuses 
 pay**. There is no flag to skip it: a payment cannot be undone, and a rejected
 submission is not refunded.
 
-## If you keep running the old client after the switch
-
-An older client cannot say which competition it is submitting to, so the submission is
-attributed to whichever simulation competition is running at that moment — the LingBot
-one. Your π0.5 checkpoint then fails that competition's format check, the submission is
-rejected, and **the fee is gone**. This is the single most expensive way to ignore this
-page.
-
-## Timetable
-
-**Completed 2026-08-31.** The announcement went out, the client is on PyPI, the switch
-was performed, the π0.5 competition stopped taking submissions, and the first LingBot
-round opened. Nothing on this page is scheduled; it is a record of what happened.
-
-⚠️ **Use 1.2.0 or newer.** 1.1.x still names repositories `pi05-…` regardless of the
-season, which is what 1.2.0 fixed.
+⚠️ **Use 1.2.0 or newer.** Earlier clients name every repository `pi05-…`
+regardless of the season.

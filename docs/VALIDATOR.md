@@ -59,6 +59,6 @@ The process polls every 60 seconds and applies `weight_interval_min` before each
 ## Security properties
 
 - no import from a scoring-service or owner package;
-- no scoring, payment-management, round-control, or dataset-management operation;
+- no scoring, payment-management, season-control, or dataset-management operation;
 - no write credential for the result service;
 - chain writes are limited to the validator wallet's Bittensor `set_weights` call.

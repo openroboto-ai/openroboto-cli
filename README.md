@@ -15,15 +15,8 @@ pip install openroboto
 ```
 
 [Docs index](docs/README.md) · [How the subnet works](docs/SUBNET_OVERVIEW.md) ·
-[Migrating from `rt.py`](docs/MIGRATION.md) ·
+[This season's base model](docs/MIGRATION.md) ·
 [Evaluation toolkit](https://github.com/openroboto-ai/openroboto-evaluation)
-
-> **Upgrading from a clone of this repository?** `python miner.py` and
-> `python rt.py submit` were removed on 2026-08-19. See
-> [docs/MIGRATION.md](docs/MIGRATION.md) for the command map. Your
-> `state/round_N.json` still works, but a `miner.yaml` with no `competition:`
-> section does not: `openroboto init --refresh` writes that section from the
-> backend and leaves the rest of the file untouched.
 
 ---
 
@@ -50,7 +43,7 @@ $EDITOR miner.yaml                # hotkey_ss58, HF token + username
 # 2. Check everything BEFORE anything costs money
 openroboto doctor                 # config, season + fee, HF permissions, balance, Docker, GPU
 
-# 3. Build the training image, then train one round
+# 3. Build the training image, then train
 openroboto build
 openroboto train
 
@@ -79,10 +72,10 @@ Real-machine setup, systemd, custom strategies: [docs/MINER_DEPLOY.md](docs/MINE
 | `openroboto init [DIR] [-s simple\|example] [--validator] [--refresh] [--backend-url URL] [--force]` | Create a working workspace: config, a training strategy to edit, a README with the exact next commands, and a `.gitignore` that keeps your wallet password out of git. ⚠️ **This is the one command that needs the network**: the open competitions come from `GET /api/v1/competitions`, and if that cannot be reached it writes **no file at all** rather than guessing a season. `--refresh` rewrites only the `competition:` section of an existing `miner.yaml`; `--backend-url` says which backend to ask (and the whole workspace is then written to match it); `--force` overwrites existing files |
 | `openroboto doctor` | Environment check: Python, config, the season's own spec, Docker, GPU, image, HF token, wallet balance against **this season's** fee |
 | `openroboto build` | Build the training image from the build context shipped inside the package (no clone, no network). Refuses for a competition this client has no image for, rather than filling that competition's image name with the π0.5 one |
-| `openroboto train [-s script.py]` | Run one round; your strategy script is mounted into the container |
+| `openroboto train [-s script.py]` | Train once; your strategy script is mounted into the container |
 | `openroboto check [PATH]` | Verify checkpoint layout with the rules the evaluator uses — **no GPU, no network, no second repository** |
-| `openroboto submit [--config] [--round N] [--output-dir] [--force]` | Upload → re-check the season against the backend → check the repository layout → pay the entry fee → announce on chain. Resumable from `state/round_N.json`: an upload already done is not repeated and a fee already paid is not paid again |
-| `openroboto status [--hotkey]` | Submission history and scanner rejection reasons (no API key needed) |
+| `openroboto submit [--config] [--output-dir] [--force]` | Upload → re-check the season against the backend → check the repository layout → pay the entry fee → announce on chain. Resumable from `state/competition_<id>.json`: an upload already done is not repeated and a fee already paid is not paid again |
+| `openroboto status [--hotkey] [--competition]` | Submission history and scanner rejection reasons (no API key needed) |
 | `openroboto validator run` | External validator: read published weights, set them on chain |
 | `openroboto --version` | CLI version and protocol package version |
 
@@ -153,7 +146,7 @@ pip install openroboto-protocol
 from openroboto_protocol.seed import derive_seed
 
 # The middle argument is the competition id, not the payload's `r` and not the
-# round number the API displays. The parameter is still spelled `round_num`.
+# season ordinal the API displays. It is passed by position.
 seed = derive_seed(block_hash, competition_id, drand_randomness)
 ```
 
@@ -236,10 +229,10 @@ version pinned in `pyproject.toml`. To work against unreleased protocol changes,
 override it in your environment only —
 `uv pip install -e ../openroboto-protocol` — and do not commit a
 `[tool.uv.sources]` path entry. A path source **bypasses the version constraint**,
-which is how the pin once read `==1.0.0` while every local and CI run was actually
-using `0.2.0`.
+A path source that disagrees with the pin leaves every local and CI run green while
+resolving a different version than the one published.
 
-`--locked` is deliberate: it fails when `uv.lock` no longer matches `pyproject.toml`
+`--locked` is deliberate: it fails when `uv.lock` does not match `pyproject.toml`
 instead of silently resolving a different dependency tree. The interpreter is pinned to
 Python 3.11 by `.python-version` — the version miners run.
 
@@ -287,11 +280,6 @@ no miner lands on one by accident.
 | `docs/` | Miner, validator and reproducibility documentation — index at [docs/README.md](docs/README.md) |
 | `tests/` | Mirrors `src/`; needs no GPU, chain or network |
 | `Dockerfile`, `docker-compose.yml` | Optional containerised way to run the CLI |
-
-The old flat layout (`rt.py`, `miner.py`, `payment.py`, `validator.py`, `miner/`,
-`utils/`, `protocol/`) was removed on 2026-08-19; the package replaces all of it. It
-remains in git history, and [docs/MIGRATION.md](docs/MIGRATION.md) maps every old
-command to its replacement.
 
 Local configuration, runtime state, logs, caches and model weights are excluded by
 `.gitignore`.

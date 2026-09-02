@@ -2,7 +2,7 @@
 
 > **Status**: current · **Updated**: 2026-09-02 · **Audience**: miners, external validators, auditors
 > **Scope**: What the subnet rewards, and every rule that decides whether a submission counts.
-> **Note**: Numbers named here (fee, round, dataset URLs) are published **per season on the
+> **Note**: Numbers named here (fee, season, dataset URLs) are published **per season on the
 > competition row** — `GET /api/v1/competitions`, copied into your `miner.yaml` by
 > `openroboto init`. Where this document names a number, that row wins.
 
@@ -80,9 +80,7 @@ A submission moves through these states (unified status model, defined in `backe
 | `rejected` | Payment or format verification failed, or plagiarism detected; never enqueued | **Yes** |
 | `superseded` | A newer submission for the same `(hotkey, competition)` pushed this one out | **Yes** |
 
-**Old status mapping** (backward compatible): `done` → `evaluated`, `failed` → `eval_failed`, `enqueued` → `pending`, `waiting` → `evaluating`.
-
-One commitment per hotkey per round. Re-submitting overwrites the previous entry and resets it to the start of the pipeline.
+One commitment per hotkey per season. Re-submitting overwrites the previous entry and resets it to the start of the pipeline.
 
 ### What the uploaded repo must contain
 
@@ -145,7 +143,7 @@ Each task's evaluation seed is derived from **two independent public beacons**, 
 seed = uint32( last 4 bytes of SHA256( "{block_hash}:{competition_id}:{drand_randomness}" ) )
 ```
 
-🔴 The middle input is the **competition id** — `competitions.id`, the season your submission was admitted to. It is **not** the `r` field of your commitment payload (§11), which you write yourself and which nothing validates once `cid` is present, and it is **not** the round number an API response displays (that is the season's `seq`, which restarts per track). The parameter of `derive_seed` is still spelled `round_num` for compatibility; the formula concatenates by position. [SEED_GENERATION.md](./SEED_GENERATION.md) is the authority here.
+🔴 The middle input is the **competition id** — `competitions.id`, the season your submission was admitted to. It is **not** the `r` field of your commitment payload (§11), which you write yourself and which nothing validates once `cid` is present, and it is **not** the season ordinal an API response displays (that is the season's `seq`, which restarts per track). `derive_seed` concatenates by position; in the pinned protocol release its second parameter is still named `round_num`. [SEED_GENERATION.md](./SEED_GENERATION.md) is the authority here.
 
 The seed is unpredictable before submission, frozen after it, and reproducible by anyone: the API exposes `block_hash`, `drand_round`, `drand_random`, and the derived `seed` for every task, and the drand value can be checked byte-for-byte at `https://api.drand.sh/public/{round}`. Even if one beacon were compromised, the other still guarantees unpredictability.
 
@@ -155,9 +153,9 @@ Full derivation and verification code lives in [SEED_GENERATION.md](./SEED_GENER
 
 ## 6. Evaluation
 
-Submissions are evaluated in MuJoCo on the LIBERO task suites. The current round scores six: `libero_spatial`, `libero_object`, `libero_goal`, `libero_10`, plus two perturbation variants, `libero_object_swap` and `libero_spatial_swap`.
+Submissions are evaluated in MuJoCo on the LIBERO task suites. The current season scores six: `libero_spatial`, `libero_object`, `libero_goal`, `libero_10`, plus two perturbation variants, `libero_object_swap` and `libero_spatial_swap`.
 
-The swap suites earn their place: an internal red-team study showed the four base suites alone could be saturated for roughly $50 of GPU time by memorizing public demonstrations. The swap perturbations showed zero transfer from that attack — an attacker has to pay separately for each perturbation dimension — which is what makes the composition defensible. Any change to the scoring composition lands as a new round, never silently mid-round.
+The swap suites earn their place: an internal red-team study showed the four base suites alone could be saturated for roughly $50 of GPU time by memorizing public demonstrations. The swap perturbations showed zero transfer from that attack — an attacker has to pay separately for each perturbation dimension — which is what makes the composition defensible. Any change to the scoring composition lands as a new season, never silently mid-season.
 
 The worker loads the exact HF revision pinned in the commitment, so the artifact under evaluation is frozen at submission time. Scores are pushed back over an authenticated, fail-closed endpoint (`POST /api/v1/benchmark/task/{id}/score`, admin key): unauthenticated score submission is rejected, and a failed evaluation (`eval_failed`) writes no scores and creates no ranking entry.
 
@@ -180,7 +178,7 @@ The subnet does not rank by raw score alone; it uses a challenge system designed
 4. If it fails, the challenger **does not appear on the board at all**.
 5. The board is capped at **Top 3**, with emission weights **70 / 20 / 10**.
 
-Consequences worth noting: copying the current champion's weights cannot dethrone it (an identical copy ties, and a tie is a failed challenge); and a settled round's champion is **held** until someone clears the bar in a later round.
+Consequences worth noting: copying the current champion's weights cannot dethrone it (an identical copy ties, and a tie is a failed challenge); and a settled season's champion is **held** until someone clears the bar in a later season.
 
 ## 8. Weights on chain
 
@@ -194,7 +192,7 @@ btcli subnet metagraph --netuid 80 --network finney
 
 | Attack | Countermeasure |
 |---|---|
-| Flood the queue with junk submissions | Per-submission entry fee (§4); one commitment per hotkey per round (§3) |
+| Flood the queue with junk submissions | Per-submission entry fee (§4); one commitment per hotkey per season (§3) |
 | Overfit to a known evaluation seed | Seed derived from block hash + drand, unknowable pre-submission (§5); seed_failed retry instead of silent failure |
 | Memorize public demos to saturate suites | Swap-perturbation suites with zero attack transfer (§6) |
 | Swap model weights after scoring | Commitment pins the exact HF commit hash; changing weights changes the hash and resets the submission (§3, §11) |
@@ -212,10 +210,10 @@ Live at **`https://api.openroboto.ai`** — the endpoints below are public, **no
 | Endpoint | Returns |
 |---|---|
 | `GET /healthz` | Liveness, and the `netuid` the backend watches |
-| `GET /api/v1/rounds/current` | Active round, baseline model, champion |
+| `GET /api/v1/competitions/{id}` | One season: status, baseline model, champion |
 | `GET /api/v1/leaderboard` | Ranked rows with scores, delta vs baseline, audit links |
 | `GET /api/v1/queue/status` | Evaluation queue: per-task status (pending / evaluating / evaluated / eval_failed) |
-| `GET /api/v1/submissions/{task_id}` | Single-submission audit record (`task_id` = `task_{hotkey}_{round}`) |
+| `GET /api/v1/submissions/{task_id}` | Single-submission audit record (`task_id` = `task_{hotkey}_r{competition_id}_v{n}`) |
 
 The website renders the same data live: [openroboto.ai/#/benchmark](https://www.openroboto.ai/#/benchmark) (leaderboard) and [openroboto.ai/#/queue](https://www.openroboto.ai/#/queue) (queue).
 
@@ -242,7 +240,7 @@ The miner's announcement is a JSON payload stored on chain via Commitments (fits
   "s":  "<hotkey SS58, full>",
   "h":  "<block hash at announcement, hex, no 0x>",
   "c":  "<HF commit hash, 40 hex chars>",
-  "r":  <round number>,
+  "r":  <season ordinal>,
   "i":  "<HF repo id, e.g. user/lingbot-vla-2.0-xxxxxxxxxxxx>",
   "b":  "<payment tx hash, hex, no 0x>",
   "bb": <payment block number>,
@@ -253,17 +251,17 @@ The miner's announcement is a JSON payload stored on chain via Commitments (fits
 
 `cid` and `m` were added in protocol 0.7.0; a payload written before that carries the first seven keys only.
 
-This single payload binds together the miner's identity (`s`), the exact model artifact (`i` + `c`), the fee payment (`b` + `bb`), the season (`cid`) and the round (`r`). The backend's chain scanner decodes it, runs the §4 payment checks, and creates the evaluation task.
+This single payload binds together the miner's identity (`s`), the exact model artifact (`i` + `c`), the fee payment (`b` + `bb`), the season (`cid`) and its ordinal (`r`). The backend's chain scanner decodes it, runs the §4 payment checks, and creates the evaluation task.
 
 **Repo naming:** the CLI generates `{hf-username}/{base_model_family}-{last 12 characters of the hotkey SS58}` — one repository per season, named after the base model that season runs. It is a **default, not a rule**: any repository the miner can read is accepted, because the backend fetches whatever the commitment's `i` field points at. Set `huggingface.repo_id` to name it yourself.
 
-⚠️ This paragraph previously said the suffix was **required** and that it made "repo squatting and impersonation detectable at scan time". No such check exists in the backend or in `openroboto-protocol` (grepped 2026-09-02), and a submission named nothing like it has been scored on the live leaderboard. Stating an unimplemented rule is worse than stating none: it reads as a defence somebody may rely on.
+⚠️ The suffix is a convention, not a check: nothing in the backend or in `openroboto-protocol` enforces it, and a submission named nothing like it is scored normally. Do not treat it as a defence against impersonation.
 
 ⚠️ The prefix said `pi05-` until 2026-09-02. One repository serves a miner's whole career, so a base model's name in it outlives that base model — see `huggingface/repository.py` for what that cost.
 
 ## 12. Season configuration
 
-Everything about a season — its round, status, fee, dataset, base model and reference training parameters — is published on **the competition row**, served by `GET /api/v1/competitions`. `openroboto init` copies the row of the season you pick into your `miner.yaml`, so `build` / `train` / `check` never go online, and `openroboto submit` re-reads it from the backend in the moment before the fee is paid. There is no privileged channel between the operator and any miner.
+Everything about a season — its ordinal, status, fee, dataset, base model and reference training parameters — is published on **the competition row**, served by `GET /api/v1/competitions`. `openroboto init` copies the row of the season you pick into your `miner.yaml`, so `build` / `train` / `check` never go online, and `openroboto submit` re-reads it from the backend in the moment before the fee is paid. There is no privileged channel between the operator and any miner.
 
 `control.json` still exists and still must not 404, but **only external validators read it, and only for `public_key`**. Everything a season decides is a column on the competition row; see [VALIDATOR.md](./VALIDATOR.md#the-controljson-contract).
 

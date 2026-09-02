@@ -17,12 +17,9 @@ you know it is not your machine.
 
 ## 0. What works today, and what does not
 
-Measured 2026-09-02 against `https://api.openroboto.ai` and against
-`openroboto 1.2.0 (openroboto-protocol 0.9.0)`. **Upgrade first**: this
-competition needs `openroboto >= 1.2.0`. 1.0.x speaks the retired round vocabulary
-and cannot resolve this season at all; 1.1.x resolves it but still names your
-HuggingFace repository `pi05-…` whatever season you are on, which is what 1.2.0
-fixed.
+Measured against `https://api.openroboto.ai`. **Upgrade first**: this competition
+needs `openroboto >= 1.3.0`. Earlier clients either cannot resolve this season at
+all, or name your HuggingFace repository `pi05-…` whatever season you are on.
 
 | Step | Today | Blocked on |
 |---|---|---|
@@ -65,14 +62,14 @@ If you have mined the π0.5 competition, this is the part to read first.
 | The exam | **LIBERO**, the same task suites in simulation. Only the textbook changed | [SUBNET_OVERVIEW.md](./SUBNET_OVERVIEW.md) §6 |
 | What you deliver | Upload to HuggingFace, then announce on chain. Two artefacts, same order | `commands/submit.py::run` |
 | Your repository name | `{hf-username}/lingbot-vla-2.0-{last 12 chars of your hotkey}` — one repository per season. Already have a `pi05-…` one? Put it in `huggingface.repo_id` and keep using it. | `huggingface/repository.py::build_repo_id` |
-| One repository per **season** | Within this season, round N is uploaded on top of rounds 1..N-1 — `upload_folder` never deletes. It is no longer one repository for your whole career | `huggingface/upload.py::push_model`, `huggingface/repository.py` |
+| One repository per **season** | Within this season, each attempt is uploaded on top of the last — `upload_folder` never deletes | `huggingface/upload.py::push_model`, `huggingface/repository.py` |
 | Entry fee | **0.1 TAO**, and this season's `params.fee.kind` is `burn` — destroyed, not transferred. (The real-hardware track transfers instead; see [PAYMENT.md](./PAYMENT.md)) | competition row `sim/2` in `0003_competitions.sql` |
 | Chain announcement | Same encoder, **≤512 bytes**, burn→announce within **50 blocks** | `preflight.py::check_burn_window`, `openroboto_protocol.commitment.MAX_COMMITMENT_BYTES` = 512, `constants.BURN_BLOCK_WINDOW` = 50 |
 | Command sequence | `init → build → train → check → submit` | unchanged |
 | 10 MB floor · ≤2 levels of nesting · the leftover-file rules | Identical, rule for rule, to the π0.5 checker | `openroboto_protocol.model_format`: `MIN_TOTAL_SIZE_BYTES`, `MAX_CHECKPOINT_NESTING_DEPTH`, `_scan_files` |
 
 Your wallet, your hotkey, your HuggingFace account, your `miner.yaml` field names,
-your `state/round_N.json` — none of it is touched.
+your `state/competition_<id>.json` — none of it is touched.
 
 ### What does change
 
@@ -89,14 +86,12 @@ backend which competition the fee is for, what the fee is, and who receives it,
 before it asks you to confirm. If the backend cannot be reached, it **refuses to
 pay** rather than paying on an assumption.
 
-> 🔴 **`submit` does not compare `(base_repo, base_revision)`, and four places on
-> this page used to say it did.** That gate was removed on 2026-09-01 (1.1.1) because
-> it watched the wrong field: `base_repo` is the **leaderboard baseline** that
-> `delta_vs_base` is measured against, not where your training starts (that is
-> `params.training`). When operations repointed the baseline at the repository
-> carrying the evaluation results, every already-initialised miner was blocked from
-> paying — and told to retrain, which was false. What genuinely does invalidate a
-> training run is a changed *starting point*, and no gate watches that yet.
+> 🔴 **`submit` does not compare `(base_repo, base_revision)`.** Those name the
+> **leaderboard baseline** that `delta_vs_base` is measured against, not where your
+> training starts (that is `params.training`), so a gate on them would block
+> already-initialised miners from paying every time operations repointed the
+> baseline. What genuinely invalidates a training run is a changed *starting
+> point*, and no gate watches that yet.
 
 ---
 
@@ -114,10 +109,9 @@ Expect the client and the protocol package on one line:
 openroboto 1.2.0 (openroboto-protocol 0.9.0)
 ```
 
-**1.2.0 is the minimum for this competition.** 1.1.0 was the release that resolves
-seasons by competition id and model name — a 1.0.x client speaks the retired round
-vocabulary and stops at the season lookup — but 1.1.x still derives the HuggingFace
-repository name as `{username}/pi05-{hotkey suffix}` no matter which season it is
+**1.3.0 is the minimum for this competition.** Earlier clients stop at the season
+lookup, or derive the HuggingFace repository name as
+`{username}/pi05-{hotkey suffix}` no matter which season it is
 on. That name outlived the base model it was named after: on 2026-09-02 eight queued
 submissions all read `<user>/pi05-…` while every one of them held a LingBot model,
 and three people in a row concluded miners had submitted the wrong base. 1.2.0 names
@@ -197,9 +191,8 @@ gone; if you have it in your notes, it now answers
 
 **Pin the revision.** The backend records which base model and which commit this
 competition is measured against, and a mismatch is a scoring problem, not a payment
-one: ⚠️ **nothing refuses payment over it** — the gate that used to is gone (1.1.1,
-see §1). Getting the revision right is on you, and it is worth the two seconds
-before a week of GPU time.
+one: ⚠️ **nothing refuses payment over it.** Getting the revision right is on you,
+and it is worth the two seconds before a week of GPU time.
 
 ### How much disk
 
@@ -327,7 +320,7 @@ really there anyway, with §6 — it is free.
 ## 6. Check the checkpoint — free, local, no GPU, no network
 
 ```bash
-openroboto check                     # this round's output directory
+openroboto check                     # this season's output directory
 openroboto check path/to/checkpoint  # or point it somewhere
 ```
 
@@ -411,8 +404,8 @@ One command, three steps, resumable:
 
 1. **Upload** — pushes your checkpoint directory verbatim as your HuggingFace
    repository root, to `{username}/{base_model_family}-{last 12 of hotkey}`: one
-   repository per **season**, shared by every round *within* this season.
-   `upload_folder` never deletes, so this round is laid on top of the last one.
+   repository per **season**, shared by every attempt *within* this season.
+   `upload_folder` never deletes, so each attempt is laid on top of the last one.
    Keeping an existing repository instead? Set `huggingface.repo_id`.
 2. **Pay** — **0.1 TAO**, and this season's `fee.kind` is `burn`, so it is
    destroyed rather than transferred. The amount comes from the competition and is
@@ -426,9 +419,9 @@ it — `--force` does not skip them either:
 
 - **the layout gate**, which judges the *file listing of your HuggingFace
   repository* at the commit you just pushed — not your local directory. Those are
-  not the same files: a `.cache/` left behind by an earlier round is
+  not the same files: a `.cache/` left behind by an earlier attempt is
   `LEFTOVER_UPLOAD_STATE` to the subnet and invisible to any check that only looks
-  at this round's output;
+  at this attempt's output;
 - **the competition check**, which prints which competition the fee is for, how
   long until submissions close, the amount, how it is collected and to whom, and
   only then asks you to confirm. ⚠️ It does **not** compare `(base_repo,
@@ -438,10 +431,10 @@ If HuggingFace is unreachable and the listing cannot be read, it **refuses to
 pay**. Stopping there costs you one command — the upload is already recorded, and
 re-running `submit` re-transmits nothing.
 
-Recovering a specific round is the same command with the round named:
+Recovering an interrupted submission is the same command:
 
 ```bash
-openroboto submit --round 1
+openroboto submit
 ```
 
 > **⚠️ There is no way to split payment and announcement, and that is the point.**
@@ -471,10 +464,9 @@ openroboto status
 Your submissions, the exact rejection reason if there is one, and your position on
 the entry list. No API key needed.
 
-One rough edge today: on a hotkey that already has π0.5-era submissions, the
-deployed backend returns rows with fields this client's schema does not accept,
-and `status` prints a shape-mismatch error instead of your history. A hotkey with
-no legacy rows prints normally. This clears when the backend deploys.
+One rough edge today: on some hotkeys the deployed backend returns rows with
+fields this client's schema does not accept, and `status` prints a shape-mismatch
+error instead of your history. This clears when the backend deploys.
 
 ---
 
