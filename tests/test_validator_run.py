@@ -273,7 +273,7 @@ def test_hotkeys_missing_from_the_metagraph_are_dropped(one_cycle: Any) -> None:
 def test_a_rotated_public_key_is_picked_up_without_a_restart(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """control.json rotates `public_key` each round, and the loop follows it.
+    """control.json rotates `public_key`, and the loop follows it.
 
     Without this the key rotation is an outage: every fetch answers 401, the
     validator sets no weights, and the only way back is somebody restarting a
@@ -310,9 +310,9 @@ def test_a_rotated_public_key_is_picked_up_without_a_restart(
                 "etag": "e1",
                 "control": {
                     "public_key": "rotated-key",
-                    # Production still publishes this block, and it is not this
-                    # process's business: a validator never burns anything. The
-                    # loop used to apply it to `Settings` on every cycle.
+                    # Production still publishes this block. It is not this
+                    # process's business -- a validator never burns anything --
+                    # and `Settings` has nowhere to put it.
                     "payment": {"burn_rate_tao": 0.1, "limit_price_rao": 5},
                 },
             },
@@ -324,11 +324,9 @@ def test_a_rotated_public_key_is_picked_up_without_a_restart(
 
     assert seen_keys == ["rotated-key"], "the loop kept using the stale key"
     assert "public_key in control.json has been updated" in caplog.text
-    # `public_key` is the whole of what this loop takes from that file. The
-    # payment block above went nowhere, which is the point: a validator that
-    # carries a burn rate around is one refactor away from acting on it.
-    assert cfg.burn_rate_tao is None
-    assert cfg.limit_price_rao == 0
+    # `public_key` is the whole of what this loop takes from that file; the
+    # payment block above has no field to land in.
+    assert not hasattr(cfg, "burn_rate_tao")
 
 
 def test_without_once_the_loop_keeps_going(monkeypatch: pytest.MonkeyPatch) -> None:

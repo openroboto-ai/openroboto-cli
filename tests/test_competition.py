@@ -508,20 +508,6 @@ def test_a_malformed_snapshot_cannot_escape_as_a_different_exception(
         _gate(settings, snapshot, NOW)
 
 
-def test_the_fee_never_comes_from_the_subnet_wide_rate(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """`control.json`'s `payment` block is one number for the whole subnet.
-    Comparing a season's fee against it is not a comparison."""
-    live = _competition()
-    _backend(monkeypatch, [live])
-    _answer(monkeypatch, "y")
-
-    settings = Settings()
-    settings.burn_rate_tao = 0.1
-    assert _gate(settings, _snapshot(live), NOW).amount_tao == 2.0
-
-
 def test_an_unreachable_backend_says_so_instead_of_exiting_silently(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

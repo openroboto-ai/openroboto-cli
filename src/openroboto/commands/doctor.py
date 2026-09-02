@@ -250,26 +250,9 @@ def check_settings(settings: Settings) -> list[CheckResult]:
 def check_competition(settings: Settings) -> CheckResult:
     """Which season this workspace mines, and what entering it costs.
 
-    This replaced a `control.json` check on 2026-08-26. That file answered the
-    same three questions -- round, status, rate -- for a subnet that ran one
-    season at a time, and every one of its answers is now either wrong or
-    narrower than the workspace's own:
-
-    * its `round` is a single subnet-wide counter, and it reads `1` while the
-      real track's first season and the simulation track's second are both open;
-    * its `status` only ever says `active`, where a season has three
-      (`draft` / `active` / `archived`);
-    * its `burn_rate_tao` is the subnet-wide rate, and `real/1` charges 2 TAO --
-      see `_entry_fee` for the wallet that was ticked green at 0.5 TAO.
-
-    It is also the only check here that needed the network, which made an
-    unreachable host look like a broken workspace. The season snapshot is
-    written into `miner.yaml` by `init` and is what `submit` confirms against,
-    so reading it offline is both truer and cheaper.
-
-    🔴 The file itself is **not** retired: external validators still read
-    `public_key` out of it to get a rate-limit token, and that URL must not 404.
-    What went away is the miner's reason to fetch it.
+    Offline: the season snapshot is written into `miner.yaml` by `init` and is
+    what `submit` confirms against, so this check needs no network and an
+    unreachable host cannot make a sound workspace look broken.
     """
     snapshot = load_snapshot(settings)
     if snapshot is None:
@@ -512,13 +495,11 @@ def check_wallet(settings: Settings) -> CheckResult:
 def _entry_fee(settings: Settings) -> tuple[str, Fee] | None:
     """What entering this workspace's competition costs, and which one that is.
 
-    🔴 **Not `settings.burn_rate_tao`.** That is control.json's subnet-wide rate,
-    and the subnet runs several seasons at once: on `real/1` it reads 0.1 while
-    that season's own `params.fee` is 2 TAO, so a wallet holding 0.5 TAO was
-    ticked green here and ran out at `submit` -- after the upload, and with no
-    hint anywhere in the report that the two numbers were about different things.
-    The season's `params.fee` is the amount `submit` actually confirms and pays,
-    so it is the one to hold a balance against.
+    🔴 **The season's own `params.fee`, never a subnet-wide rate.** The subnet
+    runs several seasons at once and they charge different amounts, so a rate
+    that is not this season's would tick a wallet green here and run out at
+    `submit` -- after the upload. `params.fee` is what `submit` confirms and
+    pays, so it is the one to hold a balance against.
 
     `None` means there is nothing to compare with, and both ways of getting there
     are real: a workspace with no `competition:` section (which cannot pay at all

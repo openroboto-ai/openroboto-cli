@@ -2152,12 +2152,11 @@ def test_doctor_python_check_matches_the_supported_floor() -> None:
 
 
 def test_doctor_reads_the_fee_from_the_season_not_the_subnet_rate() -> None:
-    """The season's own `params.fee`, never `settings.burn_rate_tao`.
+    """The fee is the season's own `params.fee`, and nothing else can supply it.
 
-    That field is control.json's subnet-wide rate, and the subnet runs several
-    seasons at once: on `real/1` it reads 0.1 while that season charges 2 TAO.
-    A wallet holding 0.5 was ticked green here and ran out at `submit` -- after
-    the upload had already gone out.
+    The subnet runs several seasons at once and they charge different amounts,
+    so a figure that is not this season's would tick a wallet green here and
+    run out at `submit` -- after the upload had already gone out.
     """
     settings = Settings.from_mapping(
         {
@@ -2170,7 +2169,6 @@ def test_doctor_reads_the_fee_from_the_season_not_the_subnet_rate() -> None:
                     "fee": {"kind": "transfer", "amount_tao": 2, "coldkey": "5x"}
                 },
             },
-            "payment": {"burn_rate_tao": 0.1},
         }
     )
     result = doctor_command.check_competition(settings)
@@ -2233,7 +2231,6 @@ def test_doctor_balance_check_does_not_crash_on_an_unknown_rate(
     monkeypatch.setattr(doctor_command, "_coldkey_address", lambda settings: "5abc")
 
     settings = Settings.from_mapping({"subnet": {"netuid": 80}})
-    assert settings.burn_rate_tao is None
 
     result = doctor_command.check_wallet(settings)
     assert result.ok is False

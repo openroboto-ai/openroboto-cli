@@ -22,11 +22,10 @@ backend just served.
 
 ## Why the fee is never read from anywhere else
 
-`params.fee` belongs to one season. `control.json`'s `payment` block and
-`Settings.burn_rate_tao` are subnet-wide, and comparing a season's fee against
-a subnet-wide number is not a comparison at all. Once a config has a
-competition section, this module is the only source of the amount and the
-address.
+`params.fee` belongs to one season, and the subnet runs several at once. A
+figure that is not this season's answers "how much" while answering nothing
+about which competition is being paid for, so this module is the only source of
+the amount and the address.
 """
 
 from __future__ import annotations
@@ -154,10 +153,8 @@ class Snapshot:
     def status(self) -> str:
         """`draft` | `active` | `archived`, frozen at the moment `init` ran.
 
-        control.json only ever had one word here (`active`), so a workspace
-        reading this instead of that file gains two: `archived` is a season that
-        has finished, `draft` one whose spec is not published yet. Neither is
-        something to train against.
+        `archived` is a season that has finished, `draft` one whose spec is not
+        published yet. Neither is something to train against.
 
         🔴 This is the **snapshot's** copy, so it answers "which season did I
         sign up for", not "is that season still open". The live answer is bought

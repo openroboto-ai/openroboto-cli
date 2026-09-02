@@ -1,30 +1,16 @@
-"""`openroboto burn` -- burn TAO to pay a competition's entry fee (the old
-`rt.py burn`).
+"""`openroboto burn` -- burn TAO to pay a competition's entry fee.
 
 This is the only command that **spends money and cannot be undone**, so what it
 refuses to do matters more than what it does. The amount has exactly one source:
-the `Verdict` that `competition.resolve_competition()` returns, which carries both the
-figure and the season it was quoted for, and which exists only if the backend was
-asked in this run. `perform_burn` does not run without one.
+the `Verdict` that `competition.resolve_competition()` returns, which carries
+both the figure and the season it was quoted for, and which exists only if the
+backend was asked in this run. `perform_burn` does not run without one.
 
-## Two sources this deliberately no longer has
-
-🔴 **`control.json`.** Its `payment.burn_rate_tao` is one number for the whole
-subnet, and the subnet runs several seasons at once -- `sim/1` charges 0.1 TAO
-while `real/1` charges 2. A subnet-wide rate is therefore not an answer to "what
-does this submission cost"; it is right for whichever season happens to match and
-silently wrong for the rest. It stayed reachable here for workspaces with no
-`competition:` section, and `openroboto init` has not produced such a workspace
-since seasons existed, so that branch served only installs from before the
-rebuild -- which are not supported (ADR 05).
-
-🔴 **`payment.burn_rate_tao` in `miner.yaml`.** An amount typed by hand satisfies
-"there is a number" while answering nothing about *which competition* is being
-paid for. That gap was payable: a hand-filled rate skipped the season check, so
-no `competition_id` reached the checkpoint, so `announce` sent a payload with no
-`cid`, so the backend filed the submission under the archived π0.5 season -- the
-fee spent, the commitment on chain, the backend acknowledging it, all of it
-landing on the wrong competition without one error printed anywhere.
+🔴 **An amount on its own is not a way to pay.** A number says how much, never
+which competition, so a fee paid from one is filed under whichever season the
+backend defaults to -- spent, on chain, acknowledged, and against the wrong
+competition without one error printed anywhere. That is why the verdict is a
+required argument rather than an optional override: the signature is the gate.
 
 ## Why `openroboto burn` on its own refuses
 
@@ -83,7 +69,6 @@ def perform_burn(
             wallet=wallet,
             netuid=settings.netuid,
             amount_tao=amount_tao,
-            limit_price_rao=settings.limit_price_rao,
         )
     finally:
         subtensor.close()

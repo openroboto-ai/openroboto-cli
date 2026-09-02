@@ -85,10 +85,7 @@ def check_weight_interval(minutes: int) -> list[str]:
 
 @dataclass
 class Settings:
-    """The full content of one config file.
-
-    Mutable — `apply_control()` overwrites the payment section in place.
-    """
+    """The full content of one config file."""
 
     #: Which subnet + backend this config talks to: `mainnet` | `dev`.
     #:
@@ -235,24 +232,6 @@ class Settings:
     # ─── Validator ─────────────────────────────────────
     backend_url: str = "https://api.openroboto.ai"
     backend_public_key: str = ""
-
-    # ─── Payment (miner.yaml only; nothing overrides it) ─
-    #: How much TAO to burn this round. **There is no default, and that is
-    #: deliberate.**
-    #:
-    #: It used to default to `0.01` while production has always been `0.1` — a
-    #: factor of ten. When control.json could not be fetched, `refresh_burn_rate`
-    #: would fall back to this value and burn anyway, so one network hiccup made
-    #: the miner burn ten times too little, the backend checked against the amount
-    #: and rejected it outright, and **the TAO is not refunded**. This is in the
-    #: known-defects table in AGENTS.md §6 (`docs/control_json_example.json` said
-    #: 0.01).
-    #:
-    #: Now: neither control.json nor miner.yaml gave a value → **refuse to burn**,
-    #: do not guess. Burning is irreversible, and fail-closed is the only
-    #: acceptable default (AGENTS.md §4).
-    burn_rate_tao: float | None = None
-    limit_price_rao: int = 0
 
     #: How many blocks are allowed between burn and announce. Going over means the
     #: backend marks it `rejected`, and the TAO is not refunded.
@@ -429,15 +408,6 @@ class Settings:
         backend = _section(data, "backend")
         cfg.backend_url = backend.get("url", cfg.backend_url)
         cfg.backend_public_key = backend.get("public_key", cfg.backend_public_key)
-
-        # The payment section in miner.yaml is the only writer of these two
-        # fields: control.json is no longer read on the payment path, and the fee
-        # that is actually paid comes from the competition row (`params.fee`).
-        payment = _section(data, "payment")
-        if payment.get("burn_rate_tao") is not None:
-            cfg.burn_rate_tao = float(payment["burn_rate_tao"])
-        if payment.get("limit_price_rao") is not None:
-            cfg.limit_price_rao = int(payment["limit_price_rao"])
 
         return cfg
 

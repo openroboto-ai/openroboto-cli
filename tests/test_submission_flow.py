@@ -224,13 +224,11 @@ def test_announce_failure_tells_the_miner_not_to_burn_again(
 def test_the_payment_cannot_be_called_without_a_confirmed_season() -> None:
     """🔴 The gate is the **signature**, which is why it is asserted on directly.
 
-    `verdict` used to default to `None`, and every caller that forgot it fell
-    through to a subnet-wide rate: control.json's, or whatever had been typed
-    into `payment.burn_rate_tao`. Either one is an amount with no season attached
-    to it, and a fee paid that way is filed under whichever season the backend
-    defaults to -- non-refundably. Give this parameter a default again and that
-    hole reopens with no test failing anywhere else, because the failure is a
-    call that *type-checks*.
+    A default here lets a caller pay with an amount and no season attached, and
+    a fee paid that way is filed under whichever season the backend defaults to
+    -- non-refundably. Give this parameter a default and that hole reopens with
+    no test failing anywhere else, because the failure is a call that
+    *type-checks*.
     """
     import inspect
 
@@ -898,9 +896,8 @@ def test_the_fee_that_is_burned_is_the_one_the_verdict_carries(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """The amount reaching the chain comes from the row the backend just served,
-    and it is **not** written back onto `Settings` on the way -- that field holds
-    the subnet-wide rate, and a season's figure sitting in it is a number nobody
-    downstream can attribute."""
+    and stays a local on the way -- a season's figure parked on `Settings` is a
+    number nobody downstream can attribute to a competition."""
     monkeypatch.chdir(tmp_path)
     settings = _season_settings()
     monkeypatch.setattr(burn_command, "get_subtensor", lambda network: _FakeSubtensor())
@@ -918,7 +915,7 @@ def test_the_fee_that_is_burned_is_the_one_the_verdict_carries(
 
     assert burn_command.perform_burn(settings, 9, state, verdict=_verdict(0.25)) is True
     assert burned["amount_tao"] == 0.25
-    assert settings.burn_rate_tao is None
+    assert not hasattr(settings, "burn_rate_tao")
 
 
 def test_the_transfer_goes_to_the_address_the_verdict_carries(
@@ -1204,49 +1201,6 @@ def test_neither_burn_nor_submit_opens_control_json(
     args = argparse.Namespace(config="miner.yaml", round=21, output_dir="", force=False)
     assert submit_command.run(args) == 0
     assert burned["amount_tao"] == 0.25  # it really did get as far as paying
-
-
-def test_a_rate_typed_into_miner_yaml_cannot_lower_what_submit_pays(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """🔴 What a miner types cannot decide what a miner pays.
-
-    `payment.burn_rate_tao` is still a field in `miner.yaml`. Nothing on the
-    payment path reads it: the amount comes from the season fetched seconds
-    earlier, so setting it to a tenth of the fee changes nothing about what
-    leaves the wallet.
-
-    This is the half that survives `openroboto burn` being removed. The other
-    half -- paying with an amount and *no season at all* -- is now impossible
-    to express, so it is no longer tested here (see the note below).
-    """
-    monkeypatch.chdir(tmp_path)
-    settings = _season_settings()
-    settings.burn_rate_tao = 0.01  # a tenth of what the season charges
-    save_state(9, _uploaded_state())
-    _, paid = _submitting(monkeypatch, settings)
-
-    args = argparse.Namespace(config="miner.yaml", round=9, output_dir="", force=False)
-    assert submit_command.run(args) == 0
-
-    assert len(paid) == 1
-    assert paid[0] == 0.25, "the hand-typed rate reached the wallet"
-
-
-# 🔴 **Two tests were removed here on 2026-08-28, with `openroboto burn`.**
-#
-#    They pinned that `burn` on its own refuses -- once because it cannot
-#    obtain a verdict, once because a hand-typed `payment.burn_rate_tao`
-#    supplies an amount but not a season (fee spent, commitment on chain,
-#    filed under whichever season the backend defaults to, no error anywhere).
-#
-#    That hole is now closed by construction rather than by a guard: there is
-#    no entry point that reaches a payment except `submit`, and `submit` gets
-#    its amount from the live season it just confirmed. A test asserting that a
-#    deleted command refuses would go green by import error.
-#
-#    ⚠️ The half that is still reachable is still tested:
-#    `test_a_rate_typed_into_miner_yaml_cannot_lower_what_submit_pays` below.
 
 
 # ─── the layout gate before the money ────────────────────────
