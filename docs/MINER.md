@@ -158,6 +158,7 @@ The tracks differ in three things and nothing else:
 | Evaluated on | LIBERO, our GPUs | an xArm 6 in our workshop |
 | Fee | burned | transferred to the season's published address |
 | Layout judged before paying | yes | no — the real track's base model is not fixed yet |
+| Rewards | validator weight to the reigning champion | a per-season prize pool with a claim period — [REAL_TRACK.md](./REAL_TRACK.md) |
 
 `openroboto submit` reads the season's `params.fee` and pays accordingly. You do
 not choose, and there is no separate command for it.

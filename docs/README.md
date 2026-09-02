@@ -22,6 +22,7 @@ you find the same rule stated in two files, that is a bug — report it.
 | set up a real machine (GPU, Docker, systemd) | [MINER_DEPLOY.md](./MINER_DEPLOY.md) |
 | know what every `miner.yaml` field does | [CONFIG.md](./CONFIG.md) |
 | know exactly what the evaluation fee costs me and when it is wasted | [PAYMENT.md](./PAYMENT.md) |
+| know how the **real-robot** track pays — prize pool, claim period, challenges | [REAL_TRACK.md](./REAL_TRACK.md) |
 | verify my evaluation seed was not rigged | [SEED_GENERATION.md](./SEED_GENERATION.md) |
 | run an external weight-setting validator | [VALIDATOR.md](./VALIDATOR.md) |
 | write my own training logic | [custom-training.md](./custom-training.md) |

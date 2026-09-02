@@ -188,6 +188,11 @@ The backend resolves the ranking and exposes it via the API. A lightweight valid
 btcli subnet metagraph --netuid 80 --network finney
 ```
 
+Validator weight is how the **simulation** track pays its champion. The **real-robot**
+track is paid differently: its 20% share accrues to a dedicated prize-pool hotkey and is
+settled once per season, with a claim period during which the rewarded model must stay
+public and anyone can challenge it — see [REAL_TRACK.md](./REAL_TRACK.md).
+
 ## 9. Anti-gaming summary
 
 | Attack | Countermeasure |
@@ -274,7 +279,7 @@ Everything about a season — its ordinal, status, fee, dataset, base model and 
 | Public queue | <https://www.openroboto.ai/#/queue> |
 | API health | <https://api.openroboto.ai/healthz> |
 | Open Data Pool | <https://huggingface.co/buckets/openroboto-ai/datapool> |
-| Base model, current season (LingBot-VLA 2.0) | <https://huggingface.co/robbyant/lingbot-vla-v2-6b-robotwin> |
+| Base model, current season (LingBot-VLA 2.0, fine-tuned on LIBERO) | <https://huggingface.co/openroboto-ai/lingbot-vla-v2-6b-libero> |
 | Base model, archived season (openpi π0.5) | <https://github.com/Physical-Intelligence/openpi> |
 | LIBERO benchmark | <https://github.com/Lifelong-Robot-Learning/LIBERO> |
 | drand beacon | <https://drand.love> |
@@ -283,4 +288,5 @@ Everything about a season — its ordinal, status, fee, dataset, base model and 
 | Seed derivation spec | [SEED_GENERATION.md](./SEED_GENERATION.md) |
 | control.json contract (validators) | [VALIDATOR.md](./VALIDATOR.md#the-controljson-contract) |
 | Evaluation fee rules | [PAYMENT.md](./PAYMENT.md) |
+| Real-robot track rules (prize pool, claim period, challenges) | [REAL_TRACK.md](./REAL_TRACK.md) |
 | Doc index | [README.md](./README.md) |
