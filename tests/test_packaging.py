@@ -45,16 +45,16 @@ def test_package_does_not_vendor_the_protocol() -> None:
     )
 
 
-def test_the_installed_protocol_is_not_the_one_the_compat_baseline_was_taken_on() -> (
-    None
-):
-    """Half of "0.6.0 and 0.7.0 encode the same commitment bytes, to the byte".
+def test_the_installed_protocol_matches_the_pinned_version() -> None:
+    """Half of "0.6.0 and today's release encode the same commitment bytes".
 
     The other half lives in the backward-compatibility task: its baseline was
     recorded on 0.6.0 (`tests/fixtures/baseline/PROTOCOL_VERSION`) and every run
     compares it against what this environment encodes today. If this environment
     were 0.6.0 as well, that comparison would be 0.6.0 against itself -- green,
-    and proving nothing about the upgrade a miner is being asked to make.
+    and proving nothing about the upgrade a miner is being asked to make. So the
+    assertion is an equality against the number written above, and reading it
+    tells you at a glance that the two versions differ.
 
     So the resolved version is written down here rather than left to whatever
     happened to be installed. Yes, that is a second copy of the number in

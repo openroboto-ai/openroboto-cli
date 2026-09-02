@@ -409,24 +409,32 @@ def judge(
             + REFRESH_HINT
         )
 
-    # 🔴 **`base_repo` 变了**不**拦付款**（2026-09-01 拿掉的一道闸）。
+    # 🔴 **A changed `base_repo` does not block the payment** (a gate removed on
+    # 2026-09-01).
     #
-    # 这里原来比 `(base_repo, base_revision)`，理由写的是「你在旧底座上训的
-    # checkpoint 会被拿新底座去评判，付了钱买的是一次评错模型的评测」。
-    # **那句话不成立**，而且这个文件自己的 `Competition.training` docstring
-    # 就写着为什么：`base_repo` 是**榜单 `delta_vs_base` 的参照**，
-    # 矿工训练的起点是 `params.training`（π0.5 那期两个地址明显不同）。
-    # 换基线只改 Δ 列拿谁比，不改这份 checkpoint 怎么被评。
+    # This used to compare `(base_repo, base_revision)`, on the stated grounds
+    # that "a checkpoint you trained on the old base will be judged against the
+    # new one, so the fee buys an evaluation of the wrong model". **That is not
+    # true**, and this file's own `Competition.training` docstring says why:
+    # `base_repo` is the **leaderboard's `delta_vs_base` reference**, while the
+    # miner's training starting point is `params.training` (on the π0.5 season
+    # the two were plainly different addresses). Changing the baseline only
+    # changes what the Δ column compares against, not how this checkpoint is
+    # judged.
     #
-    # 2026-09-01 真咬到人：运营把灵波的基线换成带评测结果的那个仓库
-    # （纯展示参照），于是**每个已经 init 过的矿工付不了款**，而报错告诉他
-    # 「要重新训练」—— 一句假话，代价是一轮白训。
+    # It bit for real on 2026-09-01: operations pointed LingBot's baseline at the
+    # repository that carries the evaluation results (a display-only reference),
+    # and **every miner who had already run `init` could no longer pay** -- with
+    # an error telling them to retrain, which was a falsehood that costs a round.
     #
-    # ⚠️ **真正该拦的那件事没有消失**：训练起点被换了确实作废一次训练。
-    # 但那个值在 `params.training`（`base_weights` / `checkpoint`），不在这两列。
-    # 这里不顺手补上，是因为**加一道会拒绝付款的闸门要单独想清楚**：拦错的
-    # 代价是矿工白训一轮，而这次的教训恰恰是「闸门盯错了字段」。
-    # 记在 `08-31-competition-is-the-only-source` 的待办里。
+    # ⚠️ **The thing that really should be gated has not gone away**: a changed
+    # *training starting point* does invalidate a training run. But that value
+    # lives in `params.training` (`base_weights` / `checkpoint`), not in these
+    # two columns. It is deliberately not added here on the way past: a gate that
+    # refuses payment has to be thought through on its own, because refusing
+    # wrongly costs a miner a whole round of training -- and the lesson of this
+    # incident is precisely a gate watching the wrong field. Tracked in
+    # `08-31-competition-is-the-only-source`.
 
     return Verdict(live=live, fee=live_fee, window=window)
 

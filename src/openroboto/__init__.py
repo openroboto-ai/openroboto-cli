@@ -81,9 +81,10 @@ def runner_context(profile: str = DEFAULT_RUNNER_PROFILE) -> Path:
     *not* ship, with `openroboto build` falling back to docker's remote git
     context. That was broken in two ways:
 
-    1. The repository is private until launch, so the anonymous fetch that
+    1. The repository was private at the time, so the anonymous fetch that
        `docker build <git-url>` performs returned **HTTP 401** -- for every miner
-       who installed from PyPI, `openroboto build` could not work at all.
+       who installed from PyPI, `openroboto build` could not work at all. (It is
+       public now; shipping the context is what makes that irrelevant.)
     2. It pinned `#main`, so a miner on a pinned CLI version would build the
        image from whatever `main` happened to be. The container interface
        (mount points, env var names, the `train(cfg, episodes, policy)`

@@ -24,7 +24,9 @@ resident is the intended mode.
 ## What it does each pass
 
 1. Reads `control.json` to refresh the public read credential.
-2. Fetches current weights from the read-only `/api/weights` endpoint.
+2. Fetches current weights from the read-only `/api/v1/weights` endpoint
+   (falling back to the pre-v1 `/api/weights` on a backend that has not
+   migrated).
 3. Maps hotkeys to current metagraph UIDs.
 4. Normalizes positive weights to the Bittensor range.
 5. Calls `set_weights`.
@@ -44,5 +46,5 @@ subnet.
 ## Reference
 
 - Validator guide and the weight-setting contract:
-  <https://github.com/openroboto-ai/openroboto-cli/tree/main/docs/VALIDATOR.md>
+  <https://github.com/openroboto-ai/openroboto-cli/blob/main/docs/VALIDATOR.md>
 - `openroboto validator run --help`

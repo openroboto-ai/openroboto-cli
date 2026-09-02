@@ -1,8 +1,9 @@
 """Red-line guard: u16 weight normalisation.
 
-This is the last conversion deciding where emissions go. The three steps of the old
-`validator.py` (keep positive weights only -> normalise to sum=1.0 -> truncate with
-`int(w * 65535)`) are preserved word for word, and pinned down here.
+This is the last conversion deciding where emissions go. The three steps (keep
+positive weights only -> normalise to sum=1.0 -> truncate with `int(w * 65535)`)
+came from the old `validator.py` and are preserved exactly; the implementation
+now lives in `openroboto.chain.weights`, and this file pins the arithmetic.
 """
 
 from __future__ import annotations

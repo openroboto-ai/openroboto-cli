@@ -53,10 +53,18 @@ def test_documented_seed_example_still_reproduces() -> None:
     are gone: change one character of the seed formula and every historical evaluation
     becomes irreproducible -- and miners use these values to verify we are not picking
     seeds targeted at anyone. The protocol package has its own golden-vector tests;
-    this one pins **the number printed in the docs**.
+    this one pins the number **printed in `docs/SEED_GENERATION.md`**.
+
+    ⚠️ The inputs and the result are hardcoded here rather than parsed out of the
+    document, so this test cannot notice the document being edited. It is the
+    other way round: the document has to match these three lines, and it says so
+    next to its own copy of them. The middle input is the **competition id**, not
+    the payload's `r` -- for the first simulation season they happen to be the
+    same number, which is why using the wrong one used to pass.
     """
     block_hash = "0x" + "11" * 32
-    assert pkg_seed.derive_seed(block_hash, 1, "22" * 32) == 3898936287
+    competition_id = 1
+    assert pkg_seed.derive_seed(block_hash, competition_id, "22" * 32) == 3898936287
 
 
 def test_no_vendored_protocol_copy_exists() -> None:

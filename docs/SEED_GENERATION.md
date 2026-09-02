@@ -21,7 +21,7 @@ seed    = big_endian_uint32(digest[-4:])
 ```
 
 The reference implementation is `openroboto_protocol.seed`
-(`pip install "openroboto-protocol==1.0.0"`):
+(`pip install "openroboto-protocol==0.9.0"` — the release this CLI pins):
 
 ```python
 import hashlib
@@ -90,11 +90,15 @@ A submission whose seed cannot be computed yet is reported with the non-terminal
 from openroboto_protocol.seed import derive_seed
 
 block_hash = "0x" + "11" * 32
-round_num = 1
+competition_id = 1        # the parameter is still spelled `round_num`
 drand_randomness = "22" * 32
 
-assert derive_seed(block_hash, round_num, drand_randomness) == 3898936287
+assert derive_seed(block_hash, competition_id, drand_randomness) == 3898936287
 ```
+
+⚠️ `tests/test_vendored_protocol.py::test_documented_seed_example_still_reproduces`
+holds the same three inputs and the same result. Change one of them here and the
+other has to move with it.
 
 ## From base seed to LIBERO initial states
 
@@ -110,10 +114,11 @@ This translation is deterministic and public. It randomizes the evaluation mecha
 
 ## Audit checklist
 
-- obtain the miner commitment and containing block hash from chain — including the
-  payload's `r`, which is the round number the formula takes;
+- obtain the miner commitment and containing block hash from chain, then the
+  **competition id** the submission was admitted to (`competition_id` on
+  `GET /api/v1/submissions/{task_id}`, or `id` on `GET /api/v1/competitions`) —
+  🔴 **not** the payload's `r`, see the warning above;
 - obtain the recorded drand round and randomness from the public beacon;
 - recompute the uint32 base seed with `openroboto_protocol.seed.derive_seed`;
 - recompute per-task seeds with the public validator toolkit;
 - rerun the pinned model commit against the documented benchmark configuration.
-

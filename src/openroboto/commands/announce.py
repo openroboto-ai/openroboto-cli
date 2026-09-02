@@ -38,7 +38,7 @@ def perform_announce(settings: Settings, round_num: int, state: dict[str, Any]) 
     hf_url = str(state.get("hf_url", ""))
     if not hf_repo_id or not hf_url:
         raise ConfigError(
-            "No HF repo info in the checkpoint -- run `openroboto upload` first"
+            "No HF repo info in the checkpoint -- run `openroboto submit` first"
         )
 
     # The same revision the layout gate in `submit` judged before the fee was
@@ -120,8 +120,9 @@ def perform_announce(settings: Settings, round_num: int, state: dict[str, Any]) 
             "   This may be only a wait timeout while the transaction did make"
             " it into a block, so check once first: `openroboto status`.\n"
             "   Once you have confirmed the backend did not receive it, run"
-            " `openroboto announce` again (the burn_tx in the checkpoint is"
-            " reused)"
+            " `openroboto submit` again: it resumes from the checkpoint -- the"
+            " upload is not repeated and the entry fee is not paid a second"
+            " time, only the commitment is sent"
         )
         return False
 

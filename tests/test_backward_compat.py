@@ -19,8 +19,8 @@ What survives that is the guarantee the file is actually for. `announce` is wher
 What it pins is one sentence:
 
 > A commitment encoded by `openroboto-protocol` **0.6.0** and one encoded by
-> **0.7.0** are byte-for-byte identical, as long as the miner's `miner.yaml`
-> has no competition section.
+> the release this repository pins today are byte-for-byte identical, as long as
+> the miner's `miner.yaml` has no competition section.
 
 Both halves of that sentence are nailed down, in two different files, because
 either half alone is a tautology:
@@ -28,10 +28,12 @@ either half alone is a tautology:
 - here: the baseline was recorded on 0.6.0
   (`tests/fixtures/baseline/PROTOCOL_VERSION`), and today's tree is compared
   against it;
-- in `tests/test_packaging.py`: what is installed today is 0.7.0.
+- in `tests/test_packaging.py`: what is installed today is the pinned release
+  (`PROTOCOL_VERSION` there, 0.9.0 at the time of writing).
 
-Regenerate the baseline in a 0.7.0 environment and this file starts comparing
-0.7.0 with 0.7.0 — green forever, guarding nothing, with no error to say so.
+Regenerate the baseline in today's environment and this file starts comparing
+that release with itself — green forever, guarding nothing, with no error to
+say so.
 `scripts/gen_baseline.sh` refuses to do it and the first test below catches it
 if someone writes the files by hand.
 
@@ -59,12 +61,16 @@ BASELINE = Path(__file__).resolve().parent / "fixtures" / "baseline"
 LEGACY_CONFIG = Path(__file__).resolve().parent / "fixtures" / "miner_legacy.yaml"
 
 #: The key set of every commitment written before 0.7.0. `cid` and `m` are the
-#: two keys 0.7.0 adds, and a legacy config must produce neither.
+#: two keys 0.7.0 added, and a legacy config must produce neither.
 LEGACY_KEYS = {"s", "h", "c", "r", "i", "b", "bb"}
 
-#: Everything the baseline is made of. Listed rather than globbed on purpose: a
+#: Every file the baseline is made of. Listed rather than globbed on purpose: a
 #: glob that finds nothing parametrizes zero cases and pytest reports a green
 #: run, which is the exact failure this file exists to prevent.
+#:
+#: ⚠️ Only `payload_announce.hex` is compared **byte for byte** (the whole point
+#: of this file). The rest are checked for existence and for not being empty --
+#: they are context for whoever reads a red run, not assertions.
 BASELINE_FILES = (
     "COMMIT",
     "PROTOCOL_VERSION",

@@ -127,8 +127,11 @@ ADAPTERS: Final = {
 DEFAULT_ADAPTER: Final = "sim_openpi"
 """A `miner.yaml` written before competitions existed has no adapter at all.
 It is the π0.5 simulation competition -- the same rule the chain side uses when
-a commitment carries no competition id, and the promise made in MIGRATION.md
-§2: a config without the section keeps working exactly as it did."""
+a commitment carries no competition id.
+
+⚠️ It does **not** mean such a workspace can still submit: `submit` refuses a
+config with no `competition:` section before it uploads anything (ADR 05). This
+default only decides how the offline commands read a file that old."""
 
 
 def resolve(adapter: str) -> Adapter:

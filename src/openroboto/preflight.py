@@ -136,22 +136,22 @@ def check_announce_ready(
 
     if not hf_repo_id:
         reasons.append(
-            "No hf_repo_id in the checkpoint state -- run `openroboto upload` first"
+            "No hf_repo_id in the checkpoint state -- run `openroboto submit` first"
         )
     if not hf_url:
         reasons.append(
-            "No hf_url in the checkpoint state -- run `openroboto upload` first"
+            "No hf_url in the checkpoint state -- run `openroboto submit` first"
         )
     if len(hf_commit) != HF_COMMIT_LEN:
         shown = hf_commit[:12] if hf_commit else "empty"
         reasons.append(
             f"Invalid hf_commit ({shown}, expected 40 hexadecimal characters) "
-            "-- run `openroboto upload` again"
+            "-- run `openroboto submit` again"
         )
     if not hotkey_ss58:
         reasons.append(
             "No hotkey_ss58 in the checkpoint state -- "
-            "add subnet.hotkey_ss58 to miner.yaml and run upload again"
+            "add subnet.hotkey_ss58 to miner.yaml and run `openroboto submit` again"
         )
 
     if hf_repo_id and hotkey_ss58:
@@ -181,14 +181,13 @@ def check_announce_ready(
 #: advice.
 _FIELD_ADVICE = {
     "c": "The HF commit in the checkpoint is not a commit SHA -- run "
-    "`openroboto upload` again",
+    "`openroboto submit` again",
     "cid": "This workspace mines a real-track competition, but the checkpoint "
-    "does not say which season the fee is for -- run `openroboto submit`, "
-    "which resolves it from the backend, rather than `openroboto burn` on "
-    "its own",
+    "does not say which season the fee is for -- run `openroboto submit`, which "
+    "resolves it from the backend before it pays",
     "m": "The model fingerprint for this round is missing or malformed. The "
     "real track needs it on chain because the repository may be private, so "
-    "the evaluator cannot compute it later -- run `openroboto upload` again",
+    "the evaluator cannot compute it later -- run `openroboto submit` again",
 }
 
 

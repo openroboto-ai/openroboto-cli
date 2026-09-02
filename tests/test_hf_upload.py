@@ -1,4 +1,5 @@
-"""What `openroboto upload` writes into the miner's own repository.
+"""What the upload step of `openroboto submit` writes into the miner's own
+repository.
 
 Everything here ends up on Hugging Face under the miner's account, so a wrong
 value is not an internal inconsistency -- it is a claim published in their name.

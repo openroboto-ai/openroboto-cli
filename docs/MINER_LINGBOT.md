@@ -1,9 +1,10 @@
 # Miner Guide — LingBot-VLA 2.0 (simulation competition)
 
 > **Status**: ✅ **live — the competition opened 2026-09-01 and takes submissions.**
-> The official training container is still pending (§5); training is
-> bring-your-own for now. ·
-> **Updated**: 2026-09-01 · **Audience**: miners moving from the π0.5 competition
+> `build` and `train` work for it; what this repository still does not ship is a
+> LingBot *training configuration* template, so the export step is described rather
+> than handed to you (§5). ·
+> **Updated**: 2026-09-02 · **Audience**: miners moving from the π0.5 competition
 > **Scope**: install → base model → check → upload → fee → chain announcement.
 > **Note**: the π0.5 simulation season is archived — its final board stays on the
 > site (season switcher on the leaderboard). [MINER.md](./MINER.md) remains for
@@ -16,10 +17,12 @@ you know it is not your machine.
 
 ## 0. What works today, and what does not
 
-Measured 2026-09-01 against `https://api.openroboto.ai` and against
-`openroboto 1.1.0 (openroboto-protocol 0.9.0)`. **Upgrade first**: this
-competition needs `openroboto >= 1.1.0` — older clients speak the retired
-round vocabulary and cannot resolve this season.
+Measured 2026-09-02 against `https://api.openroboto.ai` and against
+`openroboto 1.2.0 (openroboto-protocol 0.9.0)`. **Upgrade first**: this
+competition needs `openroboto >= 1.2.0`. 1.0.x speaks the retired round vocabulary
+and cannot resolve this season at all; 1.1.x resolves it but still names your
+HuggingFace repository `pi05-…` whatever season you are on, which is what 1.2.0
+fixed.
 
 | Step | Today | Blocked on |
 |---|---|---|
@@ -27,8 +30,8 @@ round vocabulary and cannot resolve this season.
 | `openroboto --version` | ✅ works | — |
 | `openroboto init` | ✅ **works** — lists both open competitions, writes a LingBot workspace (`cid=2`) | — |
 | Downloading the base model | ✅ works — `openroboto-ai/lingbot-vla-v2-6b-libero`, 75 files, 25.5 GB (§4) | — |
-| **Training** | ⛔ **official container not released.** §5 stays empty; 1.1.0 ships an *unverified* build context for the brave | the LingBot training container |
-| `openroboto build` / `openroboto train` | ❌ refuse for this competition unless you bring `--context` | same container |
+| **Training** | ✅ the container builds and runs (verified on an A100-SXM4-80GB, 2026-08-26). What is still missing is a **training configuration template** in this repository, so §5 tells you what to get right rather than handing you a config | a LingBot training config template |
+| `openroboto build` / `openroboto train` | ✅ work — `runner/lingbot/` ships in the wheel and is selected by `competition.base_model_family` | — |
 | `openroboto check` | ✅ works | — |
 | `openroboto doctor` | ✅ works | — |
 | `openroboto submit` | ✅ unblocked — resolves the season, confirms the 0.1 TAO fee against the backend before paying | — |
@@ -59,11 +62,11 @@ If you have mined the π0.5 competition, this is the part to read first.
 
 | | Still true | Where it is decided |
 |---|---|---|
-| The exam | **LIBERO**, the same task suites in simulation. Only the textbook changed | `openroboto-backend/docs/业务说明-换底座与真机赛道.md` §1 |
+| The exam | **LIBERO**, the same task suites in simulation. Only the textbook changed | [SUBNET_OVERVIEW.md](./SUBNET_OVERVIEW.md) §6 |
 | What you deliver | Upload to HuggingFace, then announce on chain. Two artefacts, same order | `commands/submit.py::run` |
 | Your repository name | `{hf-username}/lingbot-vla-2.0-{last 12 chars of your hotkey}` — one repository per season. Already have a `pi05-…` one? Put it in `huggingface.repo_id` and keep using it. | `huggingface/repository.py::build_repo_id` |
-| One miner, one repository | Round N is uploaded on top of rounds 1..N-1. `upload_folder` never deletes | `huggingface/upload.py::push_model` |
-| Entry fee | **0.1 TAO, burned**, not transferred | competition row `sim/2` in `0003_competitions.sql` |
+| One repository per **season** | Within this season, round N is uploaded on top of rounds 1..N-1 — `upload_folder` never deletes. It is no longer one repository for your whole career | `huggingface/upload.py::push_model`, `huggingface/repository.py` |
+| Entry fee | **0.1 TAO**, and this season's `params.fee.kind` is `burn` — destroyed, not transferred. (The real-hardware track transfers instead; see [PAYMENT.md](./PAYMENT.md)) | competition row `sim/2` in `0003_competitions.sql` |
 | Chain announcement | Same encoder, **≤512 bytes**, burn→announce within **50 blocks** | `preflight.py::check_burn_window`, `openroboto_protocol.commitment.MAX_COMMITMENT_BYTES` = 512, `constants.BURN_BLOCK_WINDOW` = 50 |
 | Command sequence | `init → build → train → check → submit` | unchanged |
 | 10 MB floor · ≤2 levels of nesting · the leftover-file rules | Identical, rule for rule, to the π0.5 checker | `openroboto_protocol.model_format`: `MIN_TOTAL_SIZE_BYTES`, `MAX_CHECKPOINT_NESTING_DEPTH`, `_scan_files` |
@@ -78,14 +81,22 @@ your `state/round_N.json` — none of it is touched.
 | Files you submit | weights + `assets/physical-intelligence/libero/norm_stats.json` | weights (sharded) + `config.json` + `model.safetensors.index.json`. **No `norm_stats`** — nothing looks for it |
 | Who downloads the base model | the CLI's training container does it for you | **you do**, by hand — see §4 |
 | Gate before payment | none; `openroboto check` was voluntary | **mandatory and unskippable.** A warning also refuses |
-| Base model changed after you trained | no such mechanism | the season check compares `(base_repo, base_revision)` against the backend and **refuses to pay** if they differ |
 
-The last two are worth a sentence each, because they change what a mistake costs.
-`submit` now judges your HuggingFace file listing *before* it burns, and there is
+The last one is worth a paragraph, because it changes what a mistake costs.
+`submit` judges your HuggingFace file listing *before* it pays, and there is
 no `--skip-check`; `--force` does not skip it either. And it confirms with the
 backend which competition the fee is for, what the fee is, and who receives it,
 before it asks you to confirm. If the backend cannot be reached, it **refuses to
 pay** rather than paying on an assumption.
+
+> 🔴 **`submit` does not compare `(base_repo, base_revision)`, and four places on
+> this page used to say it did.** That gate was removed on 2026-09-01 (1.1.1) because
+> it watched the wrong field: `base_repo` is the **leaderboard baseline** that
+> `delta_vs_base` is measured against, not where your training starts (that is
+> `params.training`). When operations repointed the baseline at the repository
+> carrying the evaluation results, every already-initialised miner was blocked from
+> paying — and told to retrain, which was false. What genuinely does invalidate a
+> training run is a changed *starting point*, and no gate watches that yet.
 
 ---
 
@@ -100,13 +111,18 @@ openroboto --version
 Expect the client and the protocol package on one line:
 
 ```
-openroboto 1.1.0 (openroboto-protocol 0.9.0)
+openroboto 1.2.0 (openroboto-protocol 0.9.0)
 ```
 
-**1.1.0 is the minimum for this competition.** It is the release that resolves
-seasons by competition id and model name; a 1.0.x client speaks the retired
-round vocabulary and stops at the season lookup. Already installed? `pip
-install -U openroboto`.
+**1.2.0 is the minimum for this competition.** 1.1.0 was the release that resolves
+seasons by competition id and model name — a 1.0.x client speaks the retired round
+vocabulary and stops at the season lookup — but 1.1.x still derives the HuggingFace
+repository name as `{username}/pi05-{hotkey suffix}` no matter which season it is
+on. That name outlived the base model it was named after: on 2026-09-02 eight queued
+submissions all read `<user>/pi05-…` while every one of them held a LingBot model,
+and three people in a row concluded miners had submitted the wrong base. 1.2.0 names
+the repository after the season's base model. Already installed? `pip install -U
+openroboto`.
 
 Machine preparation (NVIDIA driver, Docker, the container toolkit, systemd) has
 not changed: [MINER_DEPLOY.md](./MINER_DEPLOY.md) §1 and §8.
@@ -129,15 +145,18 @@ the network.
 There is no `--track` flag and no new subcommand — which competition you mine is
 a value in your config, not something you type each time.
 
-**One thing to watch this week**: the official base model finished uploading on
-2026-09-01 and the season record is being repinned to it (§4). `openroboto
-submit` compares your workspace's `(base_repo, base_revision)` snapshot against
-the backend before paying, so a stale snapshot is refused, not charged. If your
-workspace predates the repin, refresh it: `openroboto init --refresh`.
+**One thing to watch**: the official base model finished uploading on 2026-09-01
+and the season record was repinned to it (§4). A workspace that predates the repin
+holds a stale snapshot — refresh it with `openroboto init --refresh`. ⚠️ Nothing
+refuses payment over it: the `(base_repo, base_revision)` comparison was removed in
+1.1.1 (see §1), and what those two columns hold is the leaderboard baseline, not
+your training starting point.
 
-> Running an older `miner.yaml` with no `competition:` section keeps working
-> exactly as it did, on the π0.5 path. It does not become a LingBot workspace by
-> upgrading the client.
+> 🔴 **An older `miner.yaml` with no `competition:` section does not work any
+> more.** `openroboto submit` refuses it before uploading anything, because a fee
+> paid with no season attached is filed under whichever season the backend defaults
+> to and is not refunded. `openroboto init --refresh` writes that section and leaves
+> every other line of the file byte for byte as it is.
 
 ---
 
@@ -177,10 +196,10 @@ gone; if you have it in your notes, it now answers
 `` `huggingface-cli` is deprecated and no longer works. Use `hf` instead. ``
 
 **Pin the revision.** The backend records which base model and which commit this
-competition is trained on, and `openroboto submit` compares them before it pays.
-Training on a different revision does not get you a low score — it gets you a
-refusal at the payment step, which is the cheap outcome, but only if you find out
-then rather than after a week of GPU time.
+competition is measured against, and a mismatch is a scoring problem, not a payment
+one: ⚠️ **nothing refuses payment over it** — the gate that used to is gone (1.1.1,
+see §1). Getting the revision right is on you, and it is worth the two seconds
+before a week of GPU time.
 
 ### How much disk
 
@@ -237,23 +256,33 @@ Check against your own training config before trimming — `depth/` and
 
 ---
 
-## 5. Train — ⛔ not written yet
+## 5. Train
 
-**This section is deliberately empty.** The LingBot training container is being
-built; until it lands, anything written here would be a guess, and a guess in this
-position costs a week of GPU time on the wrong shape.
+`openroboto build` and `openroboto train` work for this competition:
 
-What is decided and will not change:
+```bash
+openroboto build
+openroboto train
+```
 
-- `openroboto build` and `openroboto train` **refuse** for this competition today,
-  and say why. They do not quietly run the π0.5 image — an image carrying this
-  competition's name can already exist on your machine from an older release, with
-  openpi inside it, and training in it would finish with no error at all on the
-  wrong base model.
-- 1.1.0 ships an **unverified** LingBot build context (`runner/lingbot/`), and
-  `build`'s refusal message tells you how to drive it with `--context` if you
-  have a GPU and accept that nobody has validated a full run on it yet. That is
-  an escape hatch, not a release.
+The package ships two build contexts — `runner/` (π0.5) and `runner/lingbot/` — and
+which one is used follows `competition.base_model_family`, never the adapter name.
+The LingBot one was verified by a real run on an A100-SXM4-80GB (2026-08-26): the
+container builds, the model loads with every parameter filled from the released
+checkpoint, LoRA attaches to 396 real modules, and merge-and-export writes a flat
+checkpoint root. Seven of the vendor's own defaults had to be overridden to get
+there; each is commented at its call site in `runner/lingbot/train_runner.py`.
+
+⚠️ **Measured peak was 12.4 GiB — weights only, before any batch.** The 14–18 GiB
+figure is weights plus activations and remains arithmetic: the verification builds
+and exports, it does not run a training step. A 24 GB card has 11.6 GiB of headroom
+for activations, and whether that is enough is a number miners report back on.
+
+**What this repository still does not ship is a LingBot training *configuration*
+template**, so the two subsections below are the parts to get right yourself rather
+than a config to copy. An invented one here would cost a week of GPU time on the
+wrong shape.
+
 - Whatever you train with, `openroboto check` and `openroboto submit` work on a
   checkpoint this CLI did not produce. Train it your own way and come back at §6.
 - **There is no `openroboto merge`, and there will not be one.** Exporting a full
@@ -363,13 +392,13 @@ Also worth running before anything costs money:
 openroboto doctor
 ```
 
-It names every missing config field, checks your HF permissions and wallet, and —
-for this competition — tells you plainly that there is no training image yet
-rather than calling it ready.
+It names every missing config field, checks your HF permissions and your wallet
+balance **against this season's own fee**, and tells you whether the training image
+for this season is actually present rather than assuming it. It runs offline.
 
 ---
 
-## 7. Upload → burn → announce
+## 7. Upload → pay → announce
 
 **This is the part that has not changed.** If you have submitted to the π0.5
 competition, everything below should look exactly like what you already do.
@@ -381,12 +410,14 @@ openroboto submit
 One command, three steps, resumable:
 
 1. **Upload** — pushes your checkpoint directory verbatim as your HuggingFace
-   repository root, to `{username}/{base_model_family}-{last 12 of hotkey}`. Same repository as
-   every previous round; `upload_folder` never deletes, so this round is laid on
-   top of the last one.
-2. **Burn** — **0.1 TAO**, burned, not transferred. The amount comes from the
-   competition and is confirmed against the backend in the moment before it is
-   paid. It is not refundable.
+   repository root, to `{username}/{base_model_family}-{last 12 of hotkey}`: one
+   repository per **season**, shared by every round *within* this season.
+   `upload_folder` never deletes, so this round is laid on top of the last one.
+   Keeping an existing repository instead? Set `huggingface.repo_id`.
+2. **Pay** — **0.1 TAO**, and this season's `fee.kind` is `burn`, so it is
+   destroyed rather than transferred. The amount comes from the competition and is
+   confirmed against the backend in the moment before it is paid. It is not
+   refundable.
 3. **Announce** — publishes the chain commitment and waits for it to be included
    in a block.
 
@@ -399,38 +430,35 @@ it — `--force` does not skip them either:
   `LEFTOVER_UPLOAD_STATE` to the subnet and invisible to any check that only looks
   at this round's output;
 - **the competition check**, which prints which competition the fee is for, how
-  long until submissions close, the amount and the recipient, and only then asks
-  you to confirm. It also compares `(base_repo, base_revision)` against the
-  backend and refuses if the base model changed after you trained.
+  long until submissions close, the amount, how it is collected and to whom, and
+  only then asks you to confirm. ⚠️ It does **not** compare `(base_repo,
+  base_revision)` — that gate was removed in 1.1.1, see §1.
 
 If HuggingFace is unreachable and the listing cannot be read, it **refuses to
 pay**. Stopping there costs you one command — the upload is already recorded, and
 re-running `submit` re-transmits nothing.
 
-The individual steps exist for recovery only:
+Recovering a specific round is the same command with the round named:
 
 ```bash
 openroboto submit --round 1
 ```
 
-> **⚠️ Do not split burn and announce.** The subnet rejects any submission whose
-> burn is more than **50 blocks (~10 minutes)** from the chain commitment, and a
-> rejected submission's TAO is not refunded. `openroboto submit` runs the three
-> steps back to back precisely so you stay inside that window; `announce` refuses
-> to send once the window has passed, rather than charging you a commitment fee
-> for a submission that is already doomed.
+> **⚠️ There is no way to split payment and announcement, and that is the point.**
+> The subnet rejects any submission whose payment is more than **50 blocks
+> (~10 minutes)** from the chain commitment, and a rejected submission's TAO is not
+> refunded. `openroboto submit` runs the three steps back to back precisely so you
+> stay inside that window, and refuses to announce once the window has passed
+> rather than charging you a commitment fee for a submission that is already
+> doomed. `upload` / `burn` / `announce` stopped being separate commands in 1.0.
 
 Re-running `openroboto submit` after a failure resumes from the last completed
-step and **reuses the existing burn instead of paying twice**.
+step and **reuses the fee already paid instead of paying twice**.
 
 The full picture — the chain payload fields, the three confirmation outcomes and
 what to do about each, resume semantics — is [MINER.md](./MINER.md) §"Chain
 Submission Format" onward, and it is accurate for this competition too. What the
 fee buys and when it is wasted is [PAYMENT.md](./PAYMENT.md).
-
-**Today this whole section stops at the competition check**, which cannot reach a
-competition catalogue that is not deployed (§0). It refuses before spending
-anything.
 
 ---
 
@@ -450,11 +478,12 @@ no legacy rows prints normally. This clears when the backend deploys.
 
 ---
 
-## 9. If you keep mining π0.5 after the switch
+## 9. If you are still on a π0.5 workspace
 
-An older client cannot say which competition it is submitting to, so the
-submission is attributed to whichever simulation competition is running at that
-moment — the LingBot one. Your π0.5 checkpoint then fails that competition's
-format check, the submission is rejected, and **the fee is gone.**
+The switch already happened (2026-08-31). An older client cannot say which
+competition it is submitting to, so the submission is attributed to whichever
+simulation competition is running — the LingBot one. Your π0.5 checkpoint then fails
+that competition's format check, the submission is rejected, and **the fee is gone.**
 
-Upgrade the client and re-run `openroboto init --refresh` before the switch.
+Upgrade the client (`pip install -U openroboto`, 1.2.0 or newer) and re-run
+`openroboto init --refresh`.

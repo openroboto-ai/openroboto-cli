@@ -155,7 +155,9 @@ class Settings:
     # ─── Competition ───────────────────────────────────
     #: The `competition:` section verbatim -- the snapshot `openroboto init`
     #: wrote of the season this workspace mines. Empty = a config from before
-    #: competitions existed, which keeps working unchanged.
+    #: competitions existed, and `submit` refuses such a workspace outright
+    #: (`commands/submit.py::_no_season`): a fee paid with no season attached is
+    #: filed under whichever season the backend defaults to, and is not refunded.
     #:
     #: Stored raw because that is what it is: a copy of one backend row, read
     #: through `competition.Snapshot`. The two fields below are the parts the
@@ -234,7 +236,7 @@ class Settings:
     backend_url: str = "https://api.openroboto.ai"
     backend_public_key: str = ""
 
-    # ─── Payment (normally overridden by control.json) ─
+    # ─── Payment (miner.yaml only; nothing overrides it) ─
     #: How much TAO to burn this round. **There is no default, and that is
     #: deliberate.**
     #:
@@ -305,7 +307,7 @@ class Settings:
 
     @classmethod
     def from_yaml(cls, path: str) -> Settings:
-        """Read one YAML file. The key names match `miner.example.yaml` exactly."""
+        """Read one YAML file. The key names match `templates/miner.yaml` exactly."""
         try:
             with open(path, encoding="utf-8") as f:
                 raw = yaml.safe_load(f) or {}
@@ -428,8 +430,9 @@ class Settings:
         cfg.backend_url = backend.get("url", cfg.backend_url)
         cfg.backend_public_key = backend.get("public_key", cfg.backend_public_key)
 
-        # The payment section in miner.yaml is a local override; normally
-        # control.json overrides it.
+        # The payment section in miner.yaml is the only writer of these two
+        # fields: control.json is no longer read on the payment path, and the fee
+        # that is actually paid comes from the competition row (`params.fee`).
         payment = _section(data, "payment")
         if payment.get("burn_rate_tao") is not None:
             cfg.burn_rate_tao = float(payment["burn_rate_tao"])

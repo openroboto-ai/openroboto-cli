@@ -1,11 +1,12 @@
 # Documentation index
 
-> **Status**: current · **Updated**: 2026-08-19
+> **Status**: current · **Updated**: 2026-09-02
 > **Audience**: miners and external validators — the people who `pip install openroboto`
 > and are **not** on the team.
-> **Language**: these documents are English because the people who read them are not.
-> Internal documents in this repository (`AGENTS.md`, `SCOPE.md`, code comments) are
-> Chinese, per `AGENTS.md` §4.
+> **Language**: everything published in this repository — these documents, the code
+> comments and the docstrings — is English, because the people who read them are not
+> on the team (`AGENTS.md` §4). The untracked working notes (`AGENTS.md`, `CLAUDE.md`,
+> `.trellis/`) are the exception and are Chinese.
 
 Every document below answers one question and is the only place that answers it. If
 you find the same rule stated in two files, that is a bug — report it.
@@ -29,11 +30,11 @@ you find the same rule stated in two files, that is a bug — report it.
 
 ## Before you spend anything
 
-Burns are **not refundable**. Two commands exist purely so that a mistake costs you
-nothing:
+Entry fees are **not refundable** — burned or transferred. Two commands exist purely
+so that a mistake costs you nothing:
 
 ```bash
-openroboto doctor    # GPU, Docker, HF permissions, balance, config, control.json
+openroboto doctor    # config, competition + entry fee, HF permissions, balance, Docker, GPU, image
 openroboto check     # the evaluation format rules, applied locally
 ```
 
@@ -44,14 +45,14 @@ Run both before `openroboto submit`. The rules they enforce are documented in
 
 | Subject | Owner | Why not here |
 |---|---|---|
-| Backend HTTP endpoint contracts | `openroboto-backend` → `docs/specs/` | This package is public and miner-facing; it calls exactly four read-only endpoints (listed in `SUBNET_OVERVIEW.md` §10) and has no business documenting authenticated worker/admin routes |
+| Backend HTTP endpoint contracts | `openroboto-backend` → `docs/specs/` | This package is public and miner-facing; it calls seven read-only endpoints (listed in `SUBNET_OVERVIEW.md` §10) and has no business documenting authenticated worker/admin routes |
 | Seed derivation *implementation* | `openroboto-protocol` → `src/openroboto_protocol/seed.py` | One implementation, shared by backend and miners. [SEED_GENERATION.md](./SEED_GENERATION.md) explains how to **verify** it; the package **is** it |
 | Commitment encoding, shared constants | `openroboto-protocol` | Red line #1 in `AGENTS.md`: anything both sides must agree on lives in the package, never in a local copy |
 
 ## Archive
 
-[`archive/`](./archive/) holds superseded documents. They are kept rather than deleted
-(`SCOPE.md`: inherited files are not deleted) and each carries a header naming what
+[`archive/`](./archive/) holds superseded documents. They are kept because they are
+still referenced from outside this repository, and each carries a header naming what
 replaced it. **Do not treat anything in `archive/` as current.**
 
 | Archived | Replaced by |
@@ -71,14 +72,11 @@ Recorded here rather than left to be discovered by a miner losing money:
   the export step blank and say so, rather than writing an adapter nothing can use.
   Run `openroboto check` before paying — it catches a bare adapter and a checkpoint
   nested too deep, for free.
-- **[MIGRATION.md](./MIGRATION.md) §2 (π0.5 → LingBot) is a pre-release draft.** It
-  describes a client version that is not published yet and carries `<TBD>`
-  placeholders for every date. It is written down early so the announcement can quote
-  it — **not** so that anyone follows it today.
-- **The LingBot competition is not open on the network yet**, so
-  [MINER_LINGBOT.md](./MINER_LINGBOT.md) marks each step that does not work today and
-  what it is waiting on. Its §5 (training) is deliberately empty until the LingBot
-  training container lands — an invented procedure there costs a week of GPU time.
-- **These guides still describe the subnet as of 2026-08-19.** The fee, round number
-  and dataset URLs are published live in `control.json`; where a document names a
-  number, the live file wins.
+- **[MINER_LINGBOT.md](./MINER_LINGBOT.md) §5 (writing the training script) is
+  deliberately thin.** The container and the runner ship, but this repository has no
+  LingBot training configuration template yet, so the export step is described rather
+  than handed to you — an invented procedure there costs a week of GPU time.
+- **Where a document names a fee, a round or a dataset URL, the competition row
+  wins.** Those are published per season on `GET /api/v1/competitions` and copied into
+  your `miner.yaml` by `openroboto init`; `control.json` is only read by external
+  validators, for `public_key`.

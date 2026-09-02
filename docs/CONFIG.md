@@ -1,6 +1,6 @@
 # Public Configuration Reference
 
-> **Status**: current · **Updated**: 2026-08-26 · **Audience**: miners, external validators
+> **Status**: current · **Updated**: 2026-09-02 · **Audience**: miners, external validators
 > **Scope**: Every `miner.yaml` / `validator.yaml` field: meaning, unit, and what breaks if it is wrong.
 > **Note**: Season-scoped values (fee, dataset, base checkpoint) are **not** here
 > either — `openroboto init` copies them into the `competition:` section of this
@@ -42,8 +42,8 @@ urls:     { control_json: "http://localhost:8001/control.json" }
 
 Anything below the environment can still be set individually; the preset only
 supplies defaults. What the CLI will not do is let the pieces disagree —
-`openroboto doctor` reports a mismatch, and `burn` / `announce` / `validator run`
-refuse to touch the chain:
+`openroboto doctor` reports a mismatch, and `submit` / `validator run` refuse to
+touch the chain:
 
 ```
 ❌ environment: environment=mainnet means netuid 80, but the config says 313.
@@ -60,11 +60,6 @@ Two things it deliberately does **not** do:
   point at production, so `environment: local` with the URLs left unset would
   quietly talk to mainnet's backend while you believed you were testing locally.
   `local` refuses to run until you say where your backend is.
-
-> ⚠️ As of 2026-08-19 the deployed dev backend is still configured for mainnet
-> (`netuid: 80`) — it is a sandbox in name only. `environment: dev` describes where
-> dev is going, and will correctly refuse to pair with a mainnet netuid until the
-> rebuilt backend is deployed there pointed at 313.
 
 ## Miner
 
@@ -85,14 +80,20 @@ openroboto init my-miner    # miner.yaml + train_strategy.py + README.md + .giti
 | `subnet` | `wallet_path`, `coldkey`, `hotkey`, `hotkey_ss58` | Local wallet selection |
 | `subnet` | `wallet_password` | Optional local unlock value; never commit it |
 | `urls` | `control_json` | Where the subnet publishes `public_key`. Miners need nothing from it; external validators have no other way to get that key |
-| `competition` | the whole section | Which competition this workspace mines. **Written by `openroboto init`, rewritten by `openroboto init --refresh`** — the season's own spec, kept on disk so `build` / `train` / `check` never go online. Empty = the π0.5 simulation competition, as before |
+| `competition` | the whole section | Which competition this workspace mines. **Written by `openroboto init`, rewritten by `openroboto init --refresh`** — the season's own spec, kept on disk so `build` / `train` / `check` never go online. 🔴 Not optional: `openroboto submit` refuses a workspace without it, before uploading anything, because a fee paid with no season attached is filed under whichever season the backend defaults to |
 | `competition` | `track`, `seq` | The durable key. `id` is stored too, but it is local to one backend database and is re-resolved from `(track, seq)` before it is sent anywhere |
-| `competition` | `adapter` | Decides the rules `openroboto check` judges your checkpoint by (π0.5 and LingBot-VLA 2.0 accept different layouts) and whether `openroboto train` has a container for this season |
+| `competition` | `adapter` | `sim_openpi` \| `sim_lingbot` \| `real_xarm6`. Decides only whether **this package ships a container** `openroboto train` can run for the season. 🔴 It does **not** say which base model: `real_xarm6` names a robot arm |
+| `competition` | `base_model_family` | `pi0.5` \| `lingbot-vla-2.0`. Decides the rules `openroboto check` and the pre-payment layout gate judge your checkpoint by, which runner image `openroboto build` builds, and the default HF repository name. 🔴 **Without it `submit` refuses** rather than guessing — `openroboto init --refresh` writes it |
+| `competition` | `source` | The backend that served this season, written by `init`. It is what catches "the season came from one backend and the fee leaves on another one's chain", which the five self-describing fields above cannot see because they agree with each other |
+| `competition` | `base_repo`, `base_revision` | The **leaderboard baseline** `delta_vs_base` is measured against — display only. 🔴 Not where your training starts (that is `params.training`), and since 1.1.1 a change here does **not** block payment |
 | `competition` | `params` | The season's spec verbatim: `fee`, `training` (`image` / `dataset` / `checkpoint`), `strategy_template`, `format`. Read, never rewritten by us — a new season adding a key needs no new CLI |
 | `competition` | `params.training.dataset` | `{train, val}` — what this season trains on. `null` means the season has not published one, and `openroboto train` refuses rather than reaching for another season's data |
 | `competition` | `params.training.checkpoint` | Where this season's training **starts**. `null` = the training image uses the base it was built around. 🔴 Not `base_repo`: that is the **baseline** the leaderboard measures you against, and for π0.5 the two were different addresses |
 | `model` | `vla_checkpoint_path` | A base checkpoint you already have locally. Empty is normal; when the season names one, the season wins |
 | `huggingface` | `token`, `username` | Local Hugging Face upload credentials |
+| `huggingface` | `repo_id` | Optional, used verbatim when set. Empty = `<username>/<base_model_family>-<last 12 of hotkey>`, i.e. **one repository per season**. 🔴 Set it to keep a repository you already upload to — miners who started before 2026-09-02 have a `<username>/pi05-…`, and leaving this empty makes the next upload create a new repository and re-push several GB |
+| `huggingface` | `merged_model_id` | Optional, informational; nothing in the submission path reads it |
+| `subnet` | `subtensor_endpoint` | Accepted and **currently has no effect**: the chain connection takes a network *name*, exactly as the old code did. Left in place rather than silently changed, because changing it would change which node transactions are sent to |
 | root | `custom_train_script` | Optional miner-owned training strategy path |
 | `training` | `epochs`, `batch_size`, `learning_rate`, `lora_r`, `lora_alpha` | **Yours to tune** — that is the competition. They reach the container as `EPOCHS` / `BATCH_SIZE` / `LR` / `LORA_R` / `LORA_ALPHA`, which your strategy script reads out of `cfg`. Defaults `3 / 4 / 1e-4 / 32 / 64` are the values the subnet used to hand everybody. ⚠️ Write the learning rate `1.0e-4`, not `1e-4` — YAML reads the second as text |
 | root | `log_level`, `log_dir` | Local logging |
@@ -130,7 +131,7 @@ openroboto init --validator    # writes validator.yaml, no strategy script
 | `urls` | `control_json` | Public control document |
 | `backend` | `url` | Read-only result service base URL |
 | `backend` | `public_key` | Optional public read credential |
-| root | `weight_interval_min` | Weight submission interval |
+| root | `weight_interval_min` | Minutes between `set_weights` calls; default 60. Bounded on both sides by the chain and both bounds bite silently: below ~20 min (`weights_rate_limit`, 100 blocks) the extrinsic is rejected, and going quiet for more than ~16.7 h (`activity_cutoff`, 5000 blocks) makes the subnet treat your weights as absent |
 
 The weight-setting validator does not accept a scoring or management credential.
 
@@ -140,4 +141,3 @@ The weight-setting validator does not accept a scoring or management credential.
 - Keep example values empty or use explicit placeholders.
 - Prefer an interactive wallet prompt when practical.
 - Review `git status` and run the repository sensitive scan before publishing.
-

@@ -42,8 +42,9 @@ No write credential, private task payload, held-out mapping, wallet material, in
 
 The weight-setting validator fetches the URL configured as `urls.control_json`
 (ETag-cached) and follows `public_key` when it rotates -- **that key is the whole
-of what this client reads out of the file**. `openroboto doctor` also fetches it
-as a reachability check.
+of what this client reads out of the file**, and the validator loop is the only
+code that reads it at all. `openroboto doctor` stopped fetching it on 2026-08-26;
+it checks the competition section in `miner.yaml` instead, offline.
 
 🔴 **No payment path reads it any more** (2026-08-26). The payment path used to
 fall back to `payment.burn_rate_tao` when `miner.yaml` had no competition
@@ -64,8 +65,7 @@ reproduced here so the fields above and the shape below cannot drift apart.
 
 ⚠️ **The published file still carries all of the fields below, and nothing is
 being taken out of it.** They simply have no reader left in this client except
-`public_key` (and `payment` on the one path named above) — see the table
-further up for where each one moved. Removing keys from a file external
+`public_key` — see the table further up for where each one moved. Removing keys from a file external
 validators parse buys nothing and risks breaking a client we cannot see.
 
 ```json
@@ -107,4 +107,3 @@ miner-visible and validator-visible fields.
 > the backend in the second before it is paid. It is still published because
 > other clients parse it, and taking keys out of a document we do not control the
 > readers of buys nothing.
-

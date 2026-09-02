@@ -115,9 +115,13 @@ def fetch_control(url: str, etag: str = "") -> ControlFetch:
 def apply_control(settings: Settings, control: dict[str, Any]) -> None:
     """Overwrite settings with the one section control.json still decides.
 
-    `payment.burn_rate_tao` / `payment.limit_price_rao` — the subnet-wide rate,
-    which is now only reachable through `openroboto burn` on a workspace with no
-    competition section (`commands/burn.py`), and displayed by `doctor`.
+    `payment.burn_rate_tao` / `payment.limit_price_rao` — the subnet-wide rate.
+
+    ⚠️ **Nothing in production calls this any more.** The payment path reads the
+    fee off the competition row (`params.fee`), `doctor` shows that fee too, and
+    the workspace-with-no-competition-section fallback was removed with
+    `openroboto burn` itself. It is kept for its tests and for the moment
+    `Settings.burn_rate_tao` is retired with it; do not add a new caller.
 
     The `training` section used to land here as well
     (`vla_checkpoint_path` / `vla_model_id`), and that is gone: the base

@@ -11,7 +11,7 @@
 Custom training scripts are injected into the container through a **volume mount**, so you can replace the training logic without rebuilding the Docker image.
 
 ```
-host (miner)                          container (openpi-runner)
+host (miner)                          container (this season's image)
 ┌─────────────────┐              ┌─────────────────────────┐
 │                 │  -v mount    │                         │
 │ my_strategy.py  │ ─────────►  │ /data/scripts/my_       │
@@ -45,7 +45,10 @@ def train(cfg: dict, episodes: list, policy) -> tuple:
             - epochs: number of training epochs
             - batch_size: batch size
             - learning_rate: learning rate
-            - warmup_ratio: warmup ratio
+            - warmup_ratio: warmup ratio. ⚠️ Not passed down by
+              `openroboto train`: only EPOCHS / BATCH_SIZE / LR / LORA_R /
+              LORA_ALPHA reach the container, so this is always the runner's
+              own default (0.05)
             - lora_r: LoRA rank
             - lora_alpha: LoRA alpha
             - hotkey: miner hotkey
@@ -305,8 +308,12 @@ docker run --rm --gpus all \
   -e BATCH_SIZE=4 \
   -e LR=1e-4 \
   -e CUSTOM_TRAIN=/data/scripts/my_strategy.py \
-  robot-train-openpi
+  <this-season-training-image>
 ```
+
+The image name is not a constant: it comes from the season, as
+`competition.params.training.image` in your `miner.yaml`. `openroboto build` builds
+it from the build context this package ships for the season's base model.
 
 ## Directory layout
 

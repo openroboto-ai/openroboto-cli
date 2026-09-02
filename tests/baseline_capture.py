@@ -1,5 +1,9 @@
-"""Run the legacy commands that still have a legacy path, with the chain and
-HuggingFace faked, and record exactly what came out.
+"""Call the one step that still has a legacy path -- `perform_announce` -- with
+the chain and HuggingFace faked, and record exactly what came out.
+
+It is a *function*, not a command: `announce` stopped being one in 1.0. What is
+frozen is the bytes it hands the chain, which is what a miner's submission has
+to remain decodable as.
 
 Two callers, one implementation, and that is the point:
 
@@ -35,8 +39,9 @@ from typing import Any
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 LEGACY_CONFIG = FIXTURES / "miner_legacy.yaml"
 
-#: The commands AGENTS.md §1 says must not change behaviour **and that a config
-#: with no competition section can still reach**.
+#: The step whose behaviour must not change **and that a config with no
+#: competition section can still reach**. Named after the command it used to be,
+#: because that is what the fixture files are called.
 #:
 #: 🔴 `burn` and `submit` were here until 2026-08-26 and are not any more, which
 #: is a promise being retired rather than a fixture being tidied. Paying used to
@@ -166,8 +171,12 @@ def _faked_world(payloads: list[bytes]) -> Iterator[None]:
 
 
 def capture(command: str, workdir: Path) -> Capture:
-    """Run one command in `workdir` and record its output, exit code and (if it
-    has one) the exact bytes it would have written on chain."""
+    """Run one step in `workdir` and record its output, exit code and (if it has
+    one) the exact bytes it would have written on chain.
+
+    It calls `perform_announce` directly rather than going through the CLI: the
+    command it used to be does not exist any more, and the bytes are produced by
+    that function either way -- `submit` reaches them through it too."""
     from openroboto.commands.announce import perform_announce
     from openroboto.config import Settings
 

@@ -85,7 +85,8 @@ model:
 
 # ─── HuggingFace ────────────────────────────────────────────
 huggingface:
-  token: ""                        # write token; required by `openroboto upload`
+  token: ""                        # write token; `openroboto submit` pushes the
+                                   # checkpoint with it
   username: ""                     # your HF account name
   repo_id: ""                      # optional. Empty = openroboto uploads to
                                    # <username>/<base_model_family>-<last 12 of
@@ -129,13 +130,13 @@ log_dir: logs
 # There is no payment section here, and adding one changes nothing: the entry
 # fee comes from the season (`competition.params.fee`) and is confirmed against
 # the backend in the moment before it is paid. A number typed here says how
-# much, never which competition — so `openroboto burn` refuses instead of
-# paying it. Rejected burns are not refunded.
+# much, never which competition — so `openroboto submit` refuses instead of
+# paying it. Rejected payments are not refunded.
 #
 # Typical flow:
 #   openroboto doctor      # check GPU / Docker / config before spending anything
-#   openroboto build       # build the openpi-runner image
+#   openroboto build       # build this season's training image
 #   openroboto train       # train one round
 #   openroboto check       # verify the checkpoint layout BEFORE paying
-#   openroboto submit      # upload -> burn -> announce
+#   openroboto submit      # upload -> pay the entry fee -> announce
 #   openroboto status      # what the subnet thinks of your submission

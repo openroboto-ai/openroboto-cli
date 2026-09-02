@@ -1,9 +1,10 @@
 name: CI
 
-# Until now this repo had **no tests and no lint running in CI at all** — the 103 test
-# cases had only ever run on the author's own machine. For a package aimed at external
-# miners, breaking it does not get reported to us right away (see the warning at the
-# top of AGENTS.md); we would only see submissions drop.
+# Lint, types, the test suite and the coverage gate, all through the same commands a
+# developer runs locally. Before this workflow existed the tests had only ever run on
+# the author's own machine. For a package aimed at external miners, breaking it does
+# not get reported to us right away (see the warning at the top of AGENTS.md); we would
+# only see submissions drop.
 #
 # The trigger surface is aligned with protocol-guards.yml: a single branch, main is the
 # only long-lived branch, features go through PRs. A direct push to main runs it too —
@@ -15,8 +16,9 @@ on:
     branches: [main]
   # release.yml calls in via workflow_call — so **the gate has exactly one definition**.
   # Writing a separate set of "pre-release checks" in the release workflow would
-  # inevitably be weaker (nobody is going to retype lint, types, 127 test cases and the
-  # coverage threshold), and sooner or later only one of the two would be correct.
+  # inevitably be weaker (nobody is going to retype lint, types, the whole test suite
+  # and the coverage threshold), and sooner or later only one of the two would be
+  # correct.
   workflow_call:
 
 permissions:
@@ -50,7 +52,8 @@ jobs:
     # PyPI), `[tool.uv.sources]` and the second checkout were deleted together.
     #
     # The signal for a version mismatch is still there, and stronger: `uv.lock` pins
-    # `openroboto-protocol==0.2.0` with hashes, so when the protocol package ships a new
+    # `openroboto-protocol` at the exact version with hashes (0.9.0 today — read
+    # `pyproject.toml`, not this comment), so when the protocol package ships a new
     # version and the consumer has not caught up, `--locked` goes red on the spot —
     # there is no need to check out main to manufacture that signal.
     # ─────────────────────────────────────────────────────────────────────────
@@ -98,9 +101,9 @@ jobs:
       # argument assembly). So the one legitimate reason, "not present on the runner",
       # does not hold here — any skip goes red.
       #
-      # Measured today: 0 skips. What this step guards against is tomorrow: someone
-      # adding a `pytest.importorskip("bittensor")` that quietly switches tests off
-      # while CI stays green.
+      # Measured 2026-09-02: 449 passed, 0 skipped. What this step guards against is
+      # tomorrow: someone adding a `pytest.importorskip("bittensor")` that quietly
+      # switches tests off while CI stays green.
       # ───────────────────────────────────────────────────────────────────────
       - name: Skip audit
         run: |
@@ -203,8 +206,16 @@ jobs:
               "openroboto/templates/gitignore": "the workspace has no .gitignore, "
                                                 "so a miner commits the wallet password on the first git add",
               "openroboto/templates/README-miner.md": "the workspace has no documentation",
-              "openroboto/runner/Dockerfile": "openroboto build has no build context",
-              "openroboto/runner/train_runner.py": "the training image has no entrypoint script",
+              "openroboto/templates/README-validator.md": "openroboto init --validator fails: "
+                                                          "init.py reads this file unconditionally",
+              "openroboto/runner/Dockerfile": "openroboto build has no build context for pi0.5",
+              "openroboto/runner/train_runner.py": "the pi0.5 training image has no entrypoint script",
+              # The current season runs on LingBot-VLA 2.0, so these two are the ones
+              # `openroboto build` actually reaches today.
+              "openroboto/runner/lingbot/Dockerfile": "openroboto build has no build context "
+                                                      "for LingBot-VLA 2.0 — the current season",
+              "openroboto/runner/lingbot/train_runner.py": "the LingBot training image has no "
+                                                           "entrypoint script",
           }
           missing = {p: why for p, why in required.items() if p not in names}
           for path, why in missing.items():

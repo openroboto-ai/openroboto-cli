@@ -77,7 +77,8 @@ def fetch_tree(repo_id: str, revision: str, hf_token: str = "") -> list[Any]:
             f"Could not reach HuggingFace to list {repo_id}: {exc}\n"
             f"  Your upload is not affected -- this is the listing request, and "
             f"nothing has been paid.\n"
-            f"  → check your connection and run `openroboto upload` again"
+            f"  → check your connection and run `openroboto submit` again "
+            f"(it resumes: files already pushed are not pushed again)"
         ) from exc
     except json.JSONDecodeError as exc:
         raise TreeError(
@@ -134,7 +135,7 @@ def _http_advice(repo_id: str, revision: str, code: int) -> str:
             f"(HTTP 404).\n"
             f"  A private repository also answers 404 when the token cannot see "
             f"it, so this is either the repo name, the commit, or the token.\n"
-            f"  → run `openroboto upload` again and check "
+            f"  → run `openroboto submit` again and check "
             f"`huggingface.username` / `huggingface.token`"
         )
     return (

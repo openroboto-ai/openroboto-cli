@@ -13,9 +13,10 @@ $EDITOR miner.yaml         # subnet.hotkey_ss58, huggingface.token, huggingface.
 openroboto doctor
 ```
 
-`doctor` checks Python, config, `control.json` reachability, Docker, GPU, the
-training image, your HF token and your wallet balance. It exists so that
-"burned TAO, then found out the environment was wrong" cannot happen.
+`doctor` checks Python, the protocol package, config, the competition this
+workspace mines (and what entering it costs), your HF token, your wallet
+balance, Docker, GPU and the training image. It runs offline. It exists so that
+"paid the entry fee, then found out the environment was wrong" cannot happen.
 
 ## Each round
 
@@ -23,25 +24,37 @@ training image, your HF token and your wallet balance. It exists so that
 openroboto build           # once: build the training image (~20 min first time)
 openroboto train           # one round; writes tmp/robot_train_vla_miner/round_N/
 openroboto check           # verify the checkpoint format — free, do not skip
-openroboto submit          # upload → burn → announce
+openroboto submit          # upload → pay the entry fee → announce
 openroboto status          # what the subnet made of it, and why
 ```
 
-**`check` before `submit`, every time.** Training produces a LoRA adapter, and a
-bare adapter is **rejected** — the evaluator needs a complete merged checkpoint.
-`check` applies the evaluator's own rules locally, for free. `submit` burns TAO,
-and burns are **not refunded**.
+**`check` before `submit`, every time.** The bundled `train_strategy.py` does not
+train and **exports no checkpoint** — the export is the step marked for you to
+write, and it is the one that decides whether the round is worth anything. Two
+rules for it:
+
+- the training output directory **is the checkpoint root** (`submit` uploads it
+  verbatim as your HF repository root), so export at the top of it, not into a
+  subdirectory the evaluator will not descend into;
+- export the **full** checkpoint, not a LoRA adapter. There is **no `openroboto
+  merge` command** and the evaluator merges nothing either — that work belongs in
+  `train_strategy.py`, which runs in the training container where the model
+  libraries are.
+
+`openroboto train` tells you what the run actually left behind. `check` applies the
+evaluator's own rules locally, for free. `submit` spends the entry fee — burned
+or transferred, whichever this season charges — and it is **not refunded**.
 
 ## What is in here
 
 | Path | What it is |
 |---|---|
-| `miner.yaml` | Your configuration. Holds your wallet password and HF token — **never commit it** |
+| `miner.yaml` | Your configuration. Holds your wallet password and HF token — **never commit it**. The `environment` field at the top picks mainnet / dev / local as one setting |
 | `train_strategy.py` | Your training logic. This is the file to edit |
 | `.gitignore` | Keeps credentials, state and multi-GB caches out of version control |
-| `state/round_N.json` | Per-round progress. `submit` reads it to resume **and to reuse an existing burn instead of paying twice** |
+| `state/round_N.json` | Per-round progress. `submit` reads it to resume **and to reuse a fee already paid instead of paying twice** |
 | `tmp/robot_train_vla_miner/round_N/` | Training output — the checkpoint `check` and `submit` look at |
-| `cache/pi05_base/` | π0.5 base checkpoint, downloaded once (several GB) |
+| `cache/` | Base checkpoint for this season's base model, downloaded once (several GB) |
 | `logs/` | Log files |
 
 Only the first three are yours to edit. The rest are created as needed.
@@ -71,12 +84,13 @@ Want a more heavily commented starting point? `openroboto init -s example`.
 openroboto status          # rejection reasons, straight from the subnet
 ```
 
-- **Burned but not announced** → `openroboto announce --round N`. It reuses the
-  recorded burn; **do not burn again**. The burn must reach the chain commitment
-  within 50 blocks (~10 minutes), and `announce` will tell you if that window has
-  already closed instead of charging you another fee.
+- **Paid but not announced** → `openroboto submit --round N`. It resumes from
+  `state/round_N.json`: the upload is not repeated and the fee recorded there is
+  reused, so **you do not pay twice**. Only the on-chain commitment is sent. The
+  payment must reach that commitment within 50 blocks (~10 minutes), and `submit`
+  says so if the window has already closed instead of charging you again.
 - **`submit` interrupted** → just re-run it. Completed steps are skipped and the
-  existing burn is reused.
+  fee already paid is reused.
 - **`build` fails** → `openroboto doctor` first; it names the missing piece.
 
 ## Reference

@@ -2,18 +2,34 @@
 """
 RobotTrain — Simple Training Strategy
 
-A minimal training script that generates valid LoRA adapter files
-for testing the full pipeline (miner → HF → chain → backend → validator).
+The smallest script that satisfies the `train(cfg, episodes, policy)` contract,
+so the pipeline around it (miner → HF → chain → backend → validator) can be
+exercised end to end. **It does not train, and it exports no checkpoint**: the
+two lines you have to replace are marked below.
 
-Usage (miner sets CUSTOM_TRAIN_SCRIPT env var):
-    CUSTOM_TRAIN_SCRIPT=/path/to/simple_strategy.py python miner.py --config config.yaml
+Why it exports nothing rather than something placeholder-shaped: the file it
+would have to write to look like a checkpoint is `model.safetensors`, and
+`openroboto check` would then pass on a directory full of random numbers. That
+command is the one gate standing between a miner and a burn of TAO, and a green
+verdict on noise is more expensive than a red one on an empty directory.
 
-This script is mounted into the Docker container:
+Usage — point `openroboto train` at this file, either way:
+
+    openroboto train -s /path/to/simple_strategy.py
+
+or set it once in miner.yaml:
+
+    custom_train_script: /path/to/simple_strategy.py
+
+`openroboto train` mounts the file into the training container for you:
+
     -v /path/to/simple_strategy.py:/data/scripts/simple_strategy.py
     -e CUSTOM_TRAIN=/data/scripts/simple_strategy.py
+
+You do not run docker yourself; the two lines above are shown so that a failing
+run is diagnosable from `docker ps`.
 """
 
-import json
 import logging
 import os
 import time
@@ -23,8 +39,7 @@ logger = logging.getLogger(__name__)
 
 
 def train(cfg: dict, episodes: list, policy=None) -> tuple:
-    """Simple training flow: a fake loss loop plus generation of valid LoRA
-    adapter files.
+    """Simple training flow: a fake loss loop, and the export slot left empty.
 
     Args:
         cfg: config dict (checkpoint_path, epochs, batch_size, lr, lora_r, lora_alpha, hotkey, output_dir)
@@ -37,11 +52,9 @@ def train(cfg: dict, episodes: list, policy=None) -> tuple:
     """
     start = time.time()
     output_dir = cfg["output_dir"]
-    r = cfg.get("lora_r", 32)
-    alpha = cfg.get("lora_alpha", 64)
     epochs = cfg.get("epochs", 3)
 
-    logger.info(f"[simple_strategy] Starting | epochs={epochs} lora_r={r} episodes={len(episodes)}")
+    logger.info(f"[simple_strategy] Starting | epochs={epochs} episodes={len(episodes)}")
 
     # ── Fake training loop ──────────────────────────────
     loss_curve = []
@@ -57,11 +70,34 @@ def train(cfg: dict, episodes: list, policy=None) -> tuple:
                 logger.info(f"  Step {global_step}: loss={loss:.4f}")
         logger.info(f"  Epoch {epoch} done")
 
-    # ── Generate LoRA adapter files ─────────────────────
-    adapter_dir = os.path.join(output_dir, "adapter")
-    os.makedirs(adapter_dir, exist_ok=True)
-    _save_lora_adapter(adapter_dir, cfg)
-    logger.info(f"[simple_strategy] 💾 Adapter saved to {adapter_dir}")
+    # ── Export the checkpoint ───────────────────────────
+    #
+    # ↓↓↓ THIS IS THE STEP YOU HAVE TO WRITE ↓↓↓
+    #
+    # `output_dir` **is** the checkpoint root. `openroboto submit` uploads this
+    # directory verbatim as the Hugging Face repository root, and the evaluator
+    # looks for the weights at the top of it, descending only a couple of
+    # levels. Two rules follow, and both of them cost a burn when broken:
+    #
+    #   1. Write the weights at the top of `output_dir`. If your trainer
+    #      insists on its own layout -- the LingBot exporter writes
+    #      `checkpoints/global_step_N/hf_ckpt/`, three levels down -- move or
+    #      copy that directory's contents up before you finish here.
+    #   2. Write the **full** checkpoint, not a LoRA adapter. Nothing merges an
+    #      adapter: not this package (there is no `openroboto merge`, and the
+    #      model libraries do not fit in the same interpreter as bittensor) and
+    #      not the evaluator. A bare adapter is rejected before a GPU is
+    #      allocated.
+    #
+    # Whatever your trainer's HF-format export is, point it at `output_dir`.
+    #
+    # ↑↑↑ THIS IS THE STEP YOU HAVE TO WRITE ↑↑↑
+    os.makedirs(output_dir, exist_ok=True)
+    logger.warning(
+        "[simple_strategy] ⚠️  no checkpoint exported — this strategy only "
+        "exercises the pipeline. `openroboto check` will say so; replace the "
+        "export step above before you submit."
+    )
 
     # ── Metrics ─────────────────────────────────────────
     final_loss = loss_curve[-1]["loss"] if loss_curve else 0.5
@@ -85,62 +121,6 @@ def train(cfg: dict, episodes: list, policy=None) -> tuple:
 
     logger.info(f"[simple_strategy] ✅ Done in {duration:.1f}s | loss={final_loss:.4f}")
     return metrics, proof
-
-
-def _save_lora_adapter(adapter_dir: str, cfg: dict):
-    """Generate LoRA adapter files whose structure is correct but whose contents
-    are simulated (fake but parseable).
-
-    Args:
-        adapter_dir: the adapter output directory
-        cfg: config dict, containing lora_r, lora_alpha, checkpoint_path, etc.
-    """
-    r = cfg.get("lora_r", 32)
-    alpha = cfg.get("lora_alpha", 64)
-
-    try:
-        import numpy as np
-        try:
-            import safetensors.numpy as st
-            has_safetensors = True
-        except ImportError:
-            has_safetensors = False
-
-        tensors = {}
-        for module in ["q_proj", "k_proj", "v_proj", "o_proj"]:
-            tensors[f"base_model.model.transformer.layers.0.self_attn.{module}.lora_A.weight"] = \
-                np.random.randn(2048, r).astype(np.float32) * 0.01
-            tensors[f"base_model.model.transformer.layers.0.self_attn.{module}.lora_B.weight"] = \
-                np.random.randn(r, 2048).astype(np.float32) * 0.01
-
-        if has_safetensors:
-            st.save_file(tensors, os.path.join(adapter_dir, "adapter_model.safetensors"))
-        else:
-            np.savez(os.path.join(adapter_dir, "adapter_model.npz"), **tensors)
-    except ImportError:
-        # Fallback: empty placeholder
-        logger.warning("[simple_strategy] No numpy/safetensors, creating empty adapter files")
-        with open(os.path.join(adapter_dir, "adapter_model.placeholder"), "w") as f:
-            f.write("")
-
-    # adapter_config.json
-    config = {
-        "alpha_pattern": {},
-        "auto_mapping": None,
-        "base_model_name_or_path": cfg.get("checkpoint_path", "openpi/pi05_base"),
-        "bias": "none",
-        "inference_mode": True,
-        "init_lora_weights": True,
-        "lora_alpha": alpha,
-        "lora_dropout": 0.0,
-        "peft_type": "LORA",
-        "r": r,
-        "target_modules": ["q_proj", "k_proj", "v_proj", "o_proj"],
-        "task_type": None,
-        "use_rslora": False,
-    }
-    with open(os.path.join(adapter_dir, "adapter_config.json"), "w") as f:
-        json.dump(config, f, indent=2)
 
 
 def _get_gpu_name() -> str:

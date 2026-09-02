@@ -19,8 +19,8 @@ services:
       NVIDIA_VISIBLE_DEVICES: all
     volumes:
       - ./miner.yaml:/app/miner.yaml:ro
-      - ./state:/app/state            # checkpoint: submit resumes from it and reuses an existing burn
-      - ./cache:/app/cache            # π0.5 base cache, avoids re-downloading several GB each round
+      - ./state:/app/state            # checkpoint: submit resumes from it and reuses a fee already paid
+      - ./cache:/app/cache            # base-checkpoint cache, avoids re-downloading several GB each round
       - openroboto-logs:/logs
       - /var/run/docker.sock:/var/run/docker.sock
     command: ["train", "--config", "miner.yaml"]
@@ -42,7 +42,7 @@ services:
     profiles: ["tools"]
 
   # Validate the checkpoint format locally -- still free, the last gate before
-  # anything is burned.
+  # anything is paid.
   check:
     image: openroboto-cli:latest
     volumes:
@@ -51,10 +51,11 @@ services:
     command: ["check"]
     profiles: ["tools"]
 
-# ⚠️ There are deliberately **no** submit / burn / announce services.
-# Those three burn TAO that is not refundable, and a compose service is easily
-# pulled in by a stray `up` or re-run by a restart policy. To submit, type the
-# one-off command explicitly and watch it finish:
+# ⚠️ There is deliberately **no** submit service. (`burn` and `announce` are not
+# commands at all since 1.0 -- they are steps of `submit`.) `submit` spends an
+# entry fee that is not refundable, and a compose service is easily pulled in by
+# a stray `up` or re-run by a restart policy. To submit, type the one-off command
+# explicitly and watch it finish:
 #
 #   docker compose run --rm train submit --config miner.yaml
 #

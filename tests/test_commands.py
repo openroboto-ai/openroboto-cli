@@ -1,4 +1,4 @@
-"""Command layer: init / check / build / status / round_state / preflight.
+"""Command layer: init / doctor / check / build / status / round_state / preflight.
 
 All pure local logic: no network, no GPU, no chain.
 """
@@ -252,19 +252,18 @@ def test_init_writes_the_competition_the_miner_picked(
 
 
 def test_section_keys_track_the_protocol_contract() -> None:
-    """🔴 **The alarm on a deliberately blocked line.**
+    """🔴 **The alarm that fired, and the one still armed.**
 
-    `base_model_family` is missing from `SECTION_KEYS` only because the pinned
-    protocol package (0.7.0) has no such field: `Contract` keeps pydantic's
-    `extra=ignore`, so `Competition` drops it on the way in and `model_dump()`
-    would not have the key. Adding it today breaks `openroboto init` outright.
+    `base_model_family` was kept out of `SECTION_KEYS` while the pinned protocol
+    package had no such field (`Contract` keeps pydantic's `extra=ignore`, so
+    `Competition` dropped it on the way in). The pin has since moved, this test
+    went red, and `commands/init.py` gained the key -- which is why the second
+    assertion below now holds rather than being skipped.
 
-    So the two are tied together here instead of in a comment nobody re-reads:
-    the moment the pin moves to 0.8.0 this fails, and the fix is one line in
-    `commands/init.py`. Until then a workspace simply has no such key, and
-    `adapters.base_model_family()` resolves the two sim adapters and refuses for
-    the real track -- which is the honest answer while xArm 6's base model is
-    `null` in the database anyway.
+    It stays armed in both directions: a pin that goes *backwards* to a package
+    without the field makes the second assertion fail again, and a workspace with
+    no `base_model_family` is refused by `adapters.base_model_family()` for the
+    real track rather than guessed at.
 
     The general property (and the reason this is not just a version assertion):
     every column `init` copies has to exist on the model it copies from, or the

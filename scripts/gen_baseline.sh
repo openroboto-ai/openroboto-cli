@@ -3,15 +3,15 @@
 # Regenerate `tests/fixtures/baseline/` from an older commit.
 #
 # The baseline is a **contract, not a temporary file**: it is the recorded
-# behaviour of the legacy commands that still have a legacy path (see
-# `baseline_capture.COMMANDS` for the two that no longer do), taken from a
-# tree that predates the
-# competition work and — this is the load-bearing half — from an environment
-# where `openroboto-protocol` is still **0.6.0**.
+# behaviour of the one legacy step that still has a legacy path (see
+# `baseline_capture.COMMANDS`), taken from a tree that predates the competition
+# work and — this is the load-bearing half — from an environment where
+# `openroboto-protocol` is still **0.6.0**.
 #
-#   tests/test_backward_compat.py compares today's bytes (0.7.0) with these
-#   (0.6.0). Regenerate them on 0.7.0 and that comparison becomes 0.7.0 against
-#   itself: green forever, guarding nothing, with no error to tell you.
+#   tests/test_backward_compat.py compares today's bytes (the pinned release)
+#   with these (0.6.0). Regenerate them on today's pin and that comparison
+#   becomes that pin against itself: green forever, guarding nothing, with no
+#   error to tell you.
 #
 # So this script refuses to write a baseline from a tree that resolves to
 # anything other than 0.6.0, and `test_backward_compat.py` asserts the recorded

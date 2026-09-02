@@ -297,8 +297,8 @@ class RosterEntry(Contract):
     """One row of a competition's entry list.
 
     ⚠️ **The only response model in this repository that the protocol package
-    does not publish.** `openroboto-protocol` 0.7.0 has `Competition` but no
-    roster model, and it is released -- adding one means a release of that
+    does not publish.** `openroboto-protocol` 0.9.0 has `Competition` but still
+    no roster model, and it is released -- adding one means a release of that
     package plus a re-pin here. This is a display-only path (`openroboto
     status`), no money branches on it, so it waits here for the protocol
     package's next version rather than blocking the command. **Do not grow this

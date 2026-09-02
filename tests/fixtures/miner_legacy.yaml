@@ -5,9 +5,10 @@
 # no `id`, no `track`. Every key below already existed in the config template
 # that shipped with `rt.py`.
 #
-# `tests/test_backward_compat.py` runs the four legacy commands against it and
-# compares the result with the baseline recorded on protocol 0.6.0. Adding a
-# field here would silently move what that comparison is comparing.
+# `tests/test_backward_compat.py` runs the one remaining legacy step against it
+# (`perform_announce` -- `announce` stopped being a command in 1.0) and compares
+# the bytes with the baseline recorded on protocol 0.6.0. Adding a field here
+# would silently move what that comparison is comparing.
 
 environment: mainnet
 
