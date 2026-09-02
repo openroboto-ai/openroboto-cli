@@ -25,7 +25,7 @@ and starts from zero.
 
 ```bash
 pip install -U openroboto
-openroboto --version          # expect: openroboto 1.2.0 (openroboto-protocol 0.9.0)
+openroboto --version          # expect: openroboto 1.3.0 (openroboto-protocol 0.10.0)
 
 cd my-miner
 openroboto init --refresh     # re-fetch the competition spec into miner.yaml;

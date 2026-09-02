@@ -18,8 +18,10 @@ you know it is not your machine.
 ## 0. What works today, and what does not
 
 Measured against `https://api.openroboto.ai`. **Upgrade first**: this competition
-needs `openroboto >= 1.3.0`. Earlier clients either cannot resolve this season at
+needs `openroboto >= 1.2.0`. Earlier clients either cannot resolve this season at
 all, or name your HuggingFace repository `pi05-…` whatever season you are on.
+⚠️ `openroboto status` additionally needs **1.3.0**: the backend requires the
+competition on that query, and earlier clients do not send it.
 
 | Step | Today | Blocked on |
 |---|---|---|
@@ -106,17 +108,15 @@ openroboto --version
 Expect the client and the protocol package on one line:
 
 ```
-openroboto 1.2.0 (openroboto-protocol 0.9.0)
+openroboto 1.3.0 (openroboto-protocol 0.10.0)
 ```
 
-**1.3.0 is the minimum for this competition.** Earlier clients stop at the season
+**1.2.0 is the minimum for this competition.** Earlier clients stop at the season
 lookup, or derive the HuggingFace repository name as
-`{username}/pi05-{hotkey suffix}` no matter which season it is
-on. That name outlived the base model it was named after: on 2026-09-02 eight queued
-submissions all read `<user>/pi05-…` while every one of them held a LingBot model,
-and three people in a row concluded miners had submitted the wrong base. 1.2.0 names
-the repository after the season's base model. Already installed? `pip install -U
-openroboto`.
+`{username}/pi05-{hotkey suffix}` whatever season it is on — a name that says
+`pi05` while holding a LingBot model, which reads to anyone auditing the queue as
+a miner who submitted the wrong base. From 1.2.0 the repository is named after
+the season's base model. Already installed? `pip install -U openroboto`.
 
 Machine preparation (NVIDIA driver, Docker, the container toolkit, systemd) has
 not changed: [MINER_DEPLOY.md](./MINER_DEPLOY.md) §1 and §8.
@@ -142,12 +142,12 @@ a value in your config, not something you type each time.
 **One thing to watch**: the official base model finished uploading on 2026-09-01
 and the season record was repinned to it (§4). A workspace that predates the repin
 holds a stale snapshot — refresh it with `openroboto init --refresh`. ⚠️ Nothing
-refuses payment over it: the `(base_repo, base_revision)` comparison was removed in
-1.1.1 (see §1), and what those two columns hold is the leaderboard baseline, not
-your training starting point.
+refuses payment over it: nothing compares `(base_repo, base_revision)`, and what
+those two columns hold is the leaderboard baseline, not your training starting
+point.
 
-> 🔴 **An older `miner.yaml` with no `competition:` section does not work any
-> more.** `openroboto submit` refuses it before uploading anything, because a fee
+> 🔴 **A `miner.yaml` with no `competition:` section does not work.**
+> `openroboto submit` refuses it before uploading anything, because a fee
 > paid with no season attached is filed under whichever season the backend defaults
 > to and is not refunded. `openroboto init --refresh` writes that section and leaves
 > every other line of the file byte for byte as it is.
@@ -425,7 +425,7 @@ it — `--force` does not skip them either:
 - **the competition check**, which prints which competition the fee is for, how
   long until submissions close, the amount, how it is collected and to whom, and
   only then asks you to confirm. ⚠️ It does **not** compare `(base_repo,
-  base_revision)` — that gate was removed in 1.1.1, see §1.
+  base_revision)` — see §1 for why those are the wrong columns to gate on.
 
 If HuggingFace is unreachable and the listing cannot be read, it **refuses to
 pay**. Stopping there costs you one command — the upload is already recorded, and
@@ -443,7 +443,8 @@ openroboto submit
 > refunded. `openroboto submit` runs the three steps back to back precisely so you
 > stay inside that window, and refuses to announce once the window has passed
 > rather than charging you a commitment fee for a submission that is already
-> doomed. `upload` / `burn` / `announce` stopped being separate commands in 1.0.
+> doomed. `upload`, `burn` and `announce` are steps of `submit`, not commands:
+> run separately they are how you get a fee paid with nothing announced.
 
 Re-running `openroboto submit` after a failure resumes from the last completed
 step and **reuses the fee already paid instead of paying twice**.

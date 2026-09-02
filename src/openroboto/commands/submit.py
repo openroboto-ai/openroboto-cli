@@ -221,7 +221,7 @@ def run(args: argparse.Namespace) -> int:
                 return 1
             if not slot_is_free(settings, state, verdict):
                 return 1
-            confirm_payment(verdict)
+            confirm_payment(verdict, settings.netuid)
         except PrecheckFailed:
             return 1
         # The season id goes into the checkpoint, not straight into the

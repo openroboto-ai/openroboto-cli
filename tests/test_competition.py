@@ -559,3 +559,46 @@ def test_declining_at_the_prompt_confirms_that_nothing_was_paid(
         _gate(Settings(), _snapshot(live), NOW)
 
     assert "nothing was paid" in capsys.readouterr().err.lower()
+
+
+# ─── the end-to-end escape hatch ─────────────────────────────
+
+
+def test_e2e_confirm_pays_without_asking_on_the_testnet(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`scripts/e2e_testnet.py` drives a real payment with no terminal, and
+    faucet TAO on 313 costs nothing."""
+    monkeypatch.setenv("OPENROBOTO_E2E_CONFIRM", "1")
+    monkeypatch.setattr(
+        competition_module.sys.stdin, "isatty", lambda: False, raising=False
+    )
+    assert competition_module._confirmed(313) is True
+
+
+def test_e2e_confirm_refuses_loudly_on_any_other_netuid(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """🔴 It must not merely be *ignored* off the testnet.
+
+    A variable that silently does nothing on mainnet is one exported shell away
+    from being trusted there, and the failure mode is a payment nobody
+    approved. So mainnet refuses and says why.
+    """
+    monkeypatch.setenv("OPENROBOTO_E2E_CONFIRM", "1")
+    assert competition_module._confirmed(80) is False
+    printed = capsys.readouterr().err
+    assert "not the testnet" in printed
+    assert "nothing was paid" in printed.lower()
+
+
+def test_without_the_variable_a_non_tty_still_refuses(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The escape hatch is the only way past the tty rule, so removing it from
+    the environment has to restore the refusal."""
+    monkeypatch.delenv("OPENROBOTO_E2E_CONFIRM", raising=False)
+    monkeypatch.setattr(
+        competition_module.sys.stdin, "isatty", lambda: False, raising=False
+    )
+    assert competition_module._confirmed(313) is False

@@ -98,13 +98,20 @@ def step(number: int, title: str) -> None:
 
 
 def run_cli(args: list[str], workspace: Path) -> subprocess.CompletedProcess[str]:
-    """Invoke the installed `openroboto` entry point, echoing its output."""
+    """Invoke the installed `openroboto` entry point, echoing its output.
+
+    🔴 `OPENROBOTO_E2E_CONFIRM=1` answers the payment prompt, which has no
+    terminal to read from here. The CLI honours it **only** on the testnet
+    netuid and refuses loudly anywhere else, so this cannot become a way to
+    pay on mainnet without a human -- see `competition._confirmed`.
+    """
     proc = subprocess.run(
         ["openroboto", *args],
         cwd=workspace,
         capture_output=True,
         text=True,
         timeout=900,
+        env={**os.environ, "OPENROBOTO_E2E_CONFIRM": "1"},
     )
     print(proc.stdout, end="")
     if proc.stderr:

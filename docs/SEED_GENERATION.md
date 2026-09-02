@@ -21,7 +21,7 @@ seed    = big_endian_uint32(digest[-4:])
 ```
 
 The reference implementation is `openroboto_protocol.seed`
-(`pip install "openroboto-protocol==0.9.0"` — the release this CLI pins):
+(`pip install "openroboto-protocol==0.10.0"` — the release this CLI pins):
 
 ```python
 import hashlib

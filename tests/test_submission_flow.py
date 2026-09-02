@@ -726,7 +726,9 @@ def _submitting(
     # The prompt is a conversation with a miner and has nothing to add to these
     # cases; that it is asked **last**, after every gate that could still
     # refuse, has its own test.
-    monkeypatch.setattr(submit_command, "confirm_payment", lambda verdict: None)
+    monkeypatch.setattr(
+        submit_command, "confirm_payment", lambda verdict, netuid=0: None
+    )
 
     checked: list[Any] = []
     paid: list[Any] = []
@@ -1160,7 +1162,7 @@ def test_neither_burn_nor_submit_opens_control_json(
         "fetch_competitions",
         lambda url: SimpleNamespace(data=[live]),
     )
-    monkeypatch.setattr(competition_module, "_confirmed", lambda: True)
+    monkeypatch.setattr(competition_module, "_confirmed", lambda netuid=0: True)
     monkeypatch.setattr(
         submit_command.Settings, "load", staticmethod(lambda path: settings)
     )
@@ -1719,7 +1721,7 @@ def test_nothing_is_confirmed_that_a_later_gate_would_have_refused(
     monkeypatch.setattr(
         submit_command,
         "confirm_payment",
-        lambda verdict: order.append("asked"),
+        lambda verdict, netuid=0: order.append("asked"),
     )
     monkeypatch.setattr(
         submit_command,
@@ -1800,7 +1802,7 @@ def test_an_unfit_workspace_costs_nothing_end_to_end(
         "fetch_competitions",
         lambda url, **kwargs: SimpleNamespace(data=[_live_row()]),
     )
-    monkeypatch.setattr(competition_module, "_confirmed", lambda: True)
+    monkeypatch.setattr(competition_module, "_confirmed", lambda netuid=0: True)
     for module, name in (
         (submit_command, "fetch_roster"),
         (burn_command, "get_subtensor"),

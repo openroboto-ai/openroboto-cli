@@ -30,6 +30,7 @@ the amount and the address.
 
 from __future__ import annotations
 
+import os
 import re
 import sys
 from collections.abc import Mapping, Sequence
@@ -41,7 +42,7 @@ from openroboto_protocol.commitment import Track
 from openroboto_protocol.schemas import Competition
 
 from openroboto.backend_api import BackendError, fetch_competitions
-from openroboto.config import ConfigError, Settings
+from openroboto.config import ConfigError, Settings, environments
 from openroboto.console import fail, say
 
 #: The two ways a season can be paid for. `kind` is competition data, read from
@@ -506,16 +507,19 @@ def resolve_competition(
         raise PrecheckFailed(str(exc)) from exc
 
 
-def confirm_payment(verdict: Verdict) -> None:
+def confirm_payment(verdict: Verdict, netuid: int = 0) -> None:
     """Say who is being paid and ask for a yes. Raises `PrecheckFailed`.
 
     🔴 **The last thing that happens before the money moves.** Every gate that
     can still refuse this submission has already run by the time this is called;
     what is on screen when the question is asked is the whole of what the miner
     is agreeing to.
+
+    `netuid` is passed only so `_confirmed()` can tell the testnet from
+    everywhere else; see the escape hatch there.
     """
     _announce(verdict)
-    if not _confirmed():
+    if not _confirmed(netuid):
         # `_confirmed()` already explained the not-a-tty and closed-stdin cases.
         # A plain "n" is the one route here that has said nothing yet, and on a
         # path that spends money the miner is owed the confirmation that it did
@@ -548,13 +552,37 @@ def _announce(verdict: Verdict) -> None:
     say("")
 
 
-def _confirmed() -> bool:
+def _confirmed(netuid: int = 0) -> bool:
     """Ask before spending. Anything but an explicit yes is a no.
 
     Not a tty (CI, a wrapper script, a cron job) → **no**. There is no silent
-    yes on a path that spends money; a script that wants to pay has to call the
-    single-step commands and own that decision.
+    yes on a path that spends money.
+
+    🔴 **`OPENROBOTO_E2E_CONFIRM=1` is honoured on the testnet and nowhere
+    else.** `scripts/e2e_testnet.py` has to drive a real payment end to end
+    without a terminal, and faucet TAO on netuid 313 costs nothing. On any
+    other netuid the variable is not ignored -- it **refuses loudly**, because
+    a variable that silently does nothing on mainnet is one exported
+    environment away from being trusted there, and the failure would be a
+    payment nobody approved.
     """
+    if os.environ.get("OPENROBOTO_E2E_CONFIRM") == "1":
+        if netuid == environments.DEV.netuid:
+            say(
+                f"⚠️  OPENROBOTO_E2E_CONFIRM=1 on the testnet "
+                f"(netuid {netuid}): paying without asking."
+            )
+            return True
+        fail(
+            f"OPENROBOTO_E2E_CONFIRM=1 is set, but this workspace is on netuid "
+            f"{netuid or '(unset)'}, not the testnet "
+            f"({environments.DEV.netuid}). That variable exists for the "
+            f"end-to-end test and is refused everywhere else -- **nothing was "
+            f"paid**.\n"
+            f"   → unset OPENROBOTO_E2E_CONFIRM, or run `openroboto submit` "
+            f"from a terminal and answer the prompt"
+        )
+        return False
     if not sys.stdin.isatty():
         fail(
             "Not running on a terminal, so the payment cannot be confirmed. "
