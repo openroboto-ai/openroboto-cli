@@ -46,24 +46,14 @@ def test_package_does_not_vendor_the_protocol() -> None:
 
 
 def test_the_installed_protocol_matches_the_pinned_version() -> None:
-    """Half of "0.6.0 and today's release encode the same commitment bytes".
+    """The version resolved into this environment is the version `pyproject.toml`
+    pins.
 
-    The other half lives in the backward-compatibility task: its baseline was
-    recorded on 0.6.0 (`tests/fixtures/baseline/PROTOCOL_VERSION`) and every run
-    compares it against what this environment encodes today. If this environment
-    were 0.6.0 as well, that comparison would be 0.6.0 against itself -- green,
-    and proving nothing about the upgrade a miner is being asked to make. So the
-    assertion is an equality against the number written above, and reading it
-    tells you at a glance that the two versions differ.
-
-    So the resolved version is written down here rather than left to whatever
-    happened to be installed. Yes, that is a second copy of the number in
-    `pyproject.toml`; the failure it exists to catch is precisely the two of them
-    disagreeing, which no amount of reading one of them out of metadata can see.
-
-    When the pin moves again: change the number here, and check that the
-    baseline was **not** regenerated along with it. Regenerating it is what
-    turns the comparison back into a tautology, silently.
+    Yes, that is a second copy of the number; the failure it exists to catch is
+    precisely the two of them disagreeing, which no amount of reading one of them
+    out of metadata can see. A `[tool.uv.sources]` path override resolves whatever
+    is checked out next door while the `==` pin still reads correct, so the pin
+    alone does not say what a miner will actually install.
     """
     assert version("openroboto-protocol") == PROTOCOL_VERSION
 

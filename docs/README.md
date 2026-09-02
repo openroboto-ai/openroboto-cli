@@ -49,18 +49,6 @@ Run both before `openroboto submit`. The rules they enforce are documented in
 | Seed derivation *implementation* | `openroboto-protocol` → `src/openroboto_protocol/seed.py` | One implementation, shared by backend and miners. [SEED_GENERATION.md](./SEED_GENERATION.md) explains how to **verify** it; the package **is** it |
 | Commitment encoding, shared constants | `openroboto-protocol` | Red line #1 in `AGENTS.md`: anything both sides must agree on lives in the package, never in a local copy |
 
-## Archive
-
-[`archive/`](./archive/) holds superseded documents. They are kept because they are
-still referenced from outside this repository, and each carries a header naming what
-replaced it. **Do not treat anything in `archive/` as current.**
-
-| Archived | Replaced by |
-|---|---|
-| `archive/ROLES_BREAKDOWN.md` | [SUBNET_OVERVIEW.md](./SUBNET_OVERVIEW.md) §2 |
-| `archive/CONTROL_JSON_SAMPLE.md` | [control_json.md](./control_json.md) |
-| `api_reference_en.md` (moved out) | `openroboto-backend` → `docs/specs/`, original kept at that repo's `docs/archive/` |
-
 ## Known documentation gaps
 
 Recorded here rather than left to be discovered by a miner losing money:
