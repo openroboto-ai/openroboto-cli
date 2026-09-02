@@ -3,7 +3,7 @@
 > **Status**: current · **Updated**: 2026-08-25 · **Audience**: miners writing their
 > own training logic.
 > **Scope**: the `train(cfg, episodes, policy)` contract and how your script reaches
-> the training container. For the round workflow around it, read
+> the training container. For the workflow around it, read
 > [MINER.md](./MINER.md).
 
 ## Overview
