@@ -13,16 +13,16 @@
 # `mainnet` = netuid 80 on finney, real TAO, non-refundable fees.
 # `dev`     = netuid 313 on testnet, faucet TAO, nothing to lose.
 # `local`   = your own backend, wherever it runs. `init --backend-url <address>`
-#             fills in backend.url, urls.control_json and the netuid that
-#             backend says it watches — but a netuid does not say which chain it
-#             is on, and nothing else can answer that for you, so subnet.network
+#             fills in backend.url and the netuid that backend says it
+#             watches — but a netuid does not say which chain it is on, and
+#             nothing else can answer that for you, so subnet.network
 #             below is left empty and every on-chain command refuses until you
 #             set it (`test` for a testnet backend, `finney` for a mainnet one).
 #
-# This one name covers four settings that must agree: subnet.network,
-# subnet.netuid, urls.control_json and backend.url. Changing only some of them
-# is how you burn mainnet TAO at the dev fee rate, or submit to testnet and then
-# ask production why nothing showed up. Anything below can still be overridden
+# This one name covers three settings that must agree: subnet.network,
+# subnet.netuid and backend.url. Changing only some of them is how you submit to
+# testnet and then ask production why nothing showed up. Anything below can
+# still be overridden
 # individually — the CLI just refuses to run on chain when the pieces disagree.
 environment: $environment
 
@@ -33,7 +33,6 @@ subnet:
                                    # the CLI refuses to touch the chain without
                                    # it, because a wrong netuid burns real TAO on
                                    # the wrong subnet.
-  subtensor_endpoint: ""           # optional WS endpoint override
   wallet_path: ""                  # empty = Bittensor SDK default (~/.bittensor/wallets)
   coldkey: default
   hotkey: default
@@ -41,13 +40,6 @@ subnet:
                                    # is derived from its last 12 characters
   wallet_password: ""              # optional; set it to skip the interactive prompt.
                                    # Never commit this file with a password in it.
-
-# ─── Public HTTP resources ──────────────────────────────────
-# The subnet publishes its API key here, which external validators read. Miners
-# need it for nothing: the dataset, the base model, the round and the fee all
-# come from the competition section below.
-urls:
-  control_json: "$control_json"
 
 # ─── Backend API ────────────────────────────────────────────
 # The backend that served the competition below, written down instead of left to
@@ -64,7 +56,7 @@ backend:
 # and the previous version is kept as miner.yaml.bak).
 #
 # Everything about a season lives here, so `build` / `train` / `check` never
-# have to go online: which round it is, which image to build, which dataset to
+# have to go online: which season it is, which image to build, which dataset to
 # train on, which base checkpoint to start from, which starting script, which
 # checkpoint layout your model is judged by (pi0.5 and LingBot-VLA 2.0 accept
 # completely different trees), and what the entry fee is.
@@ -85,7 +77,8 @@ model:
 
 # ─── HuggingFace ────────────────────────────────────────────
 huggingface:
-  token: ""                        # write token; required by `openroboto upload`
+  token: ""                        # write token; `openroboto submit` pushes the
+                                   # checkpoint with it
   username: ""                     # your HF account name
   repo_id: ""                      # optional. Empty = openroboto uploads to
                                    # <username>/<base_model_family>-<last 12 of
@@ -130,13 +123,13 @@ log_dir: logs
 # There is no payment section here, and adding one changes nothing: the entry
 # fee comes from the season (`competition.params.fee`) and is confirmed against
 # the backend in the moment before it is paid. A number typed here says how
-# much, never which competition — so `openroboto burn` refuses instead of
-# paying it. Rejected burns are not refunded.
+# much, never which competition — so `openroboto submit` refuses instead of
+# paying it. Rejected payments are not refunded.
 #
 # Typical flow:
 #   openroboto doctor      # check GPU / Docker / config before spending anything
-#   openroboto build       # build the openpi-runner image
-#   openroboto train       # train one round
+#   openroboto build       # build this season's training image
+#   openroboto train       # train
 #   openroboto check       # verify the checkpoint layout BEFORE paying
-#   openroboto submit      # upload -> burn -> announce
+#   openroboto submit      # upload -> pay the entry fee -> announce
 #   openroboto status      # what the subnet thinks of your submission

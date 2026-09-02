@@ -1,9 +1,8 @@
-"""Run one training round: download data, run the container, collect metrics and
+"""Run one training pass: download data, run the container, collect metrics and
 the training proof.
 
-Corresponds to the old `miner/trainer_vla.py::train_vla`. Two artifact files, both
-uploaded along with the model: `metrics.json` (training metrics) and
-`training_proof.json` (the training proof).
+Two artifact files, both uploaded along with the model: `metrics.json` (training
+metrics) and `training_proof.json` (the training proof).
 """
 
 from __future__ import annotations
@@ -31,14 +30,12 @@ WEIGHT_SUFFIXES = (".safetensors", ".bin", ".pt", ".pth", ".ckpt")
 DOWNLOAD_TIMEOUT_SEC = 300
 DOWNLOAD_RETRIES = 3
 
-LOCAL_CHECKPOINT_CACHE = Path("cache/pi05_base")
-"""Local cache directory for the base checkpoint, relative to the current working
-directory.
+CHECKPOINT_CACHE_ROOT = Path("cache")
+"""Where base checkpoints are cached, relative to the current working directory.
 
-A `gs://` path cannot be mounted into the container directly, so an empty directory
-is prepared and mounted instead, letting the openpi inside the container do the
-download itself — the next training round then hits the cache instead of
-re-downloading several GB.
+`training/container.py` mounts the **parent** of the resolved checkpoint as
+`/data/cache`, so every base model cached here sits side by side in its own
+subdirectory.
 """
 
 
@@ -47,35 +44,42 @@ def resolve_checkpoint(configured: str) -> str:
 
     Anything starting with `gs://` is always replaced by the local cache directory
     (created empty if it does not exist); every other path is returned unchanged.
-    Matches the branching in the old `miner.py`.
 
-    🔴 **Empty stays empty.** This used to substitute
-    `gs://openpi-assets/checkpoints/pi05_base` for a missing value, which was a
-    base model guessed by the client: the LingBot image was handed a π0.5 path
-    it silently ignored, and any competition after it would have been handed the
-    same one. Empty means no `CHECKPOINT_PATH` reaches `docker run`, so the
-    image falls back to the base it was built around -- see
-    `training/container.py::build_docker_command`. Seasons that do need a
-    specific one say so in `params.training.checkpoint`; π0.5's is recorded
-    there.
+    🔴 **The cache directory is named after the checkpoint it holds**, never a
+    fixed `pi05_base`. One directory shared by every season is a cache that
+    reports a hit on another base model's weights: the container finds it
+    populated, skips the download, and trains against the wrong base -- a week
+    of GPU time spent on a checkpoint that cannot score. Seasons on the same
+    base model still share one cache, which is the point of having one.
+
+    🔴 **Empty stays empty**, and is **never** substituted with a default base
+    model: one guessed by the client is handed to every competition alike, and
+    the LingBot image silently ignores a π0.5 path. Empty means no
+    `CHECKPOINT_PATH` reaches `docker run`, so the image falls back to the base
+    it was built around -- see `training/container.py::build_docker_command`.
+    Seasons that need a specific one say so in `params.training.checkpoint`.
     """
     path = configured
     if not path.startswith("gs://"):
         return path
-    LOCAL_CHECKPOINT_CACHE.mkdir(parents=True, exist_ok=True)
-    if any(LOCAL_CHECKPOINT_CACHE.iterdir()):
-        logger.info("✅ Local base-model cache hit: %s", LOCAL_CHECKPOINT_CACHE)
+    # ponytail: keyed on the URL's last segment, so an existing `cache/pi05_base`
+    # keeps being a hit. Two different URLs ending in the same segment would
+    # share a directory -- hash the whole URL if that ever happens.
+    cache = CHECKPOINT_CACHE_ROOT / (path.rstrip("/").rsplit("/", 1)[-1] or "base")
+    cache.mkdir(parents=True, exist_ok=True)
+    if any(cache.iterdir()):
+        logger.info("✅ Local base-model cache hit: %s", cache)
     else:
         logger.info(
             "📥 Base-model cache is empty; the container will download it into: %s",
-            LOCAL_CHECKPOINT_CACHE,
+            cache,
         )
-    return str(LOCAL_CHECKPOINT_CACHE)
+    return str(cache)
 
 
 @dataclass
 class TrainParams:
-    """Hyperparameters for one training round.
+    """Hyperparameters for one training run.
 
     Comes from the `training:` section of `miner.yaml` — the miner's own. The
     defaults here and the defaults in `Settings` are the same five numbers,
@@ -92,7 +96,7 @@ class TrainParams:
 
 @dataclass
 class TrainOutcome:
-    """The result of one training round."""
+    """The result of one training run."""
 
     metrics: dict[str, Any] = field(default_factory=dict)
     proof: dict[str, Any] = field(default_factory=dict)
@@ -123,7 +127,7 @@ def download_dataset(url: str, dest: str) -> str:
     raise OSError(f"Dataset download failed for {url}: {last_error}")
 
 
-def train_round(
+def train_once(
     *,
     train_json_path: str,
     output_dir: str,
@@ -135,6 +139,7 @@ def train_round(
     image: str = "",
     base_weights: str = "",
     processor: str = "",
+    base_model: str = "",
 ) -> TrainOutcome:
     """Load the data → run the container → assemble metrics and the training proof."""
     started = time.time()
@@ -171,9 +176,9 @@ def train_round(
     # --gpus all`; `_gpu_stats()` reads the *host* process, which on a laptop
     # driving a remote box has no CUDA at all and answers `("cpu", 0.0)`.
     #
-    # That answer used to be written straight into `training_proof.json` and
-    # published to the miner's public HF repo. Measured on 2026-08-26: the proof
-    # said `gpu_device: "cpu"` and `gpu_memory_peak_gb: 0.0` for a run that the
+    # That answer must not reach `training_proof.json`, which is published to
+    # the miner's public HF repo. Measured on 2026-08-26: the host reading gave
+    # `gpu_device: "cpu"` and `gpu_memory_peak_gb: 0.0` for a run that the
     # container's own `proof.json`, in the same directory, recorded as an
     # A100-SXM4-80GB peaking at 20.64 GiB. The file exists so a miner can show
     # how a checkpoint was produced -- one that contradicts the run it describes
@@ -200,13 +205,13 @@ def train_round(
     proof = {
         "miner_uid": hotkey,
         "dataset_hash": file_hash(train_json_path),
-        # Hashes the whole output directory, which is the checkpoint root. It
-        # used to hash `output_dir/adapter` -- the subdirectory the bundled
-        # strategies wrote a LoRA adapter into, a layout that is rejected before
-        # evaluation and is no longer written by anything. The **key** keeps its
-        # name: `training_proof.json` is uploaded to the miner's HF repo, and
-        # renaming a field there breaks whoever is reading it (no consumer in
-        # our own four repositories, which is not the same as no consumer).
+        # Hashes the whole output directory, which is the checkpoint root --
+        # **not** `output_dir/adapter`. A LoRA adapter in a subdirectory is a
+        # layout that is rejected before evaluation, and nothing writes it. The
+        # **key** keeps the name `adapter_hash`: `training_proof.json` is
+        # uploaded to the miner's HF repo, and renaming a field there breaks
+        # whoever is reading it (no consumer in our own four repositories, which
+        # is not the same as no consumer).
         "adapter_hash": directory_hash(Path(output_dir)),
         "base_model_hash": (
             directory_hash(Path(checkpoint_path)) if checkpoint_path else ""
@@ -221,8 +226,15 @@ def train_round(
         "gpu_memory_peak_gb": round(gpu_memory_gb, 2),
         "client": f"openroboto-cli/{__version__}",
         "config_snapshot": {
-            "model": "pi05",
-            "config": "pi05_libero",
+            # 🔴 The season's base model, **never** a literal `"pi05"`. This file
+            # is published to the miner's public repository, so a constant here
+            # is written next to a LingBot checkpoint claiming it is a π0.5 one.
+            # `""` when the season does not say: a gap is honest, a guess is not.
+            #
+            # There is no `config` key. The training config name lives inside the
+            # image and the container does not report it, so the host cannot
+            # state one without inventing it.
+            "model": base_model,
             "batch_size": params.batch_size,
             "learning_rate": params.learning_rate,
             "epochs": params.epochs,

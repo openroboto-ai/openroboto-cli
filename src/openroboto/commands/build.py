@@ -4,13 +4,12 @@ The image definition **ships with the package** (`openroboto/runner/`, about
 20 KB: one Dockerfile plus one stdlib-only script). Miners do not have to
 clone, do not have to be online, and do not need the repository to be public.
 
-It used to live in `openpi-runner/` at the repository root and not ship in the
-package, falling back to docker's **remote git build context** when it was
-absent locally -- that path was broken at both ends: the repository is private
-until launch, so the anonymous fetch that `docker build <git-url>` performs
-returns **401**, meaning `build` could not run at all for any miner who
-installed via pip; and it pinned `#main`, so a miner on a fixed CLI version
-would build from the image definition on `main` -- the container interface
+🔴 **There is no fallback to docker's remote git build context**, and there must
+not be one: that path is broken at both ends. The anonymous fetch that
+`docker build <git-url>` performs returns **401** against a private repository,
+so `build` cannot run at all for a miner who installed via pip; and a git context
+pins a branch, so a miner on a fixed CLI version builds from whatever that branch
+holds -- the container interface
 (mount points, environment variable names, the `train()` signature) is red
 line #2 and is fixed on purpose, and resolving the image definition from a
 moving branch is exactly how the two sides drift apart.
@@ -111,12 +110,11 @@ def build_command(
 
     `code` is `repo@revision` for the model source this season builds against,
     out of `params.training.code`. It reaches the Dockerfile as build args, which
-    **already exist** there -- until 2026-08-31 nothing ever passed them, so the
-    pinned defaults inside the image were the only answer and moving to a new
-    commit took a CLI release.
+    **already exist** there. With nothing passing them, the pinned defaults inside
+    the image are the only answer and moving to a new commit costs a CLI release.
 
     ⚠️ Empty means the season names none, and then the Dockerfile's own pins
-    apply -- byte-for-byte the behaviour every workspace had before this field.
+    apply -- byte-for-byte what a workspace that sets no code revision gets.
     """
     command = ["docker", "build", "-t", image]
     if no_cache:
@@ -245,9 +243,10 @@ def run(args: argparse.Namespace) -> int:
         )
         return 1
 
-    # 🔴 Which image to build follows the **base model**, not the adapter. This
-    # used to read `adapter.format_profile`, and for `real_xarm6` that column was
-    # a guess baked into the table -- the wrong one (xArm 6 comes up on π0.5).
+    # 🔴 Which image to build follows the **base model**, not the adapter --
+    # **not** `adapter.format_profile`: for `real_xarm6` that column can only be
+    # a guess baked into the table, and the guess is wrong (xArm 6 comes up on
+    # π0.5).
     profile = adapters.format_profile(
         adapter_name, competition_base_model_family(args.config)
     )

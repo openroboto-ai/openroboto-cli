@@ -1,4 +1,4 @@
-"""Training: container invocation, data preparation, single-round orchestration."""
+"""Training: container invocation, data preparation, single-run orchestration."""
 
 from __future__ import annotations
 
@@ -9,11 +9,11 @@ from openroboto.training.container import (
     runner_image,
 )
 from openroboto.training.dataset import load_episodes, prepare_samples
-from openroboto.training.round import (
+from openroboto.training.run import (
     TrainOutcome,
     TrainParams,
     download_dataset,
-    train_round,
+    train_once,
 )
 
 __all__ = [
@@ -26,5 +26,5 @@ __all__ = [
     "prepare_samples",
     "run_training",
     "runner_image",
-    "train_round",
+    "train_once",
 ]

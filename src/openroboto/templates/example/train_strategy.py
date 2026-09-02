@@ -8,7 +8,7 @@ Mount this script into the container:
 Interface: train(cfg, episodes, policy) → (metrics_dict, proof_dict)
 
 Two blocks are marked below and both are yours to fill in: the training loop,
-and the **export**. The export is the one that decides whether the round is
+and the **export**. The export is the one that decides whether the run is
 worth anything -- `cfg["output_dir"]` is uploaded verbatim as the Hugging Face
 repository root, so what you leave there is exactly what gets evaluated.
 """

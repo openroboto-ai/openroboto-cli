@@ -3,8 +3,8 @@
 The command-line tool for mining on **OpenRoboto**, a Bittensor mainnet subnet
 (netuid 80) that rewards improvements to vision-language-action models.
 
-You fine-tune π₀.₅ on LIBERO, publish the checkpoint to Hugging Face, pay a small
-on-chain evaluation fee, and announce it. The subnet evaluates every submission in
+You fine-tune the current season's base model — LingBot-VLA 2.0 today — publish the
+checkpoint to Hugging Face, pay a small on-chain evaluation fee, and announce it. The subnet evaluates every submission in
 simulation with a seed nobody can predict, ranks the results, and pays emissions by
 rank.
 
@@ -15,13 +15,8 @@ pip install openroboto
 ```
 
 [Docs index](docs/README.md) · [How the subnet works](docs/SUBNET_OVERVIEW.md) ·
-[Migrating from `rt.py`](docs/MIGRATION.md) ·
+[This season's base model](docs/MIGRATION.md) ·
 [Evaluation toolkit](https://github.com/openroboto-ai/openroboto-evaluation)
-
-> **Upgrading from a clone of this repository?** `python miner.py` and
-> `python rt.py submit` were removed on 2026-08-19. See
-> [docs/MIGRATION.md](docs/MIGRATION.md) for the command map — your existing
-> `miner.yaml` and `state/round_N.json` still work.
 
 ---
 
@@ -46,9 +41,9 @@ cd my-miner
 $EDITOR miner.yaml                # hotkey_ss58, HF token + username
 
 # 2. Check everything BEFORE anything costs money
-openroboto doctor                 # GPU, Docker, HF permissions, balance, config
+openroboto doctor                 # config, season + fee, HF permissions, balance, Docker, GPU
 
-# 3. Build the training image, then train one round
+# 3. Build the training image, then train
 openroboto build
 openroboto train
 
@@ -62,7 +57,7 @@ openroboto submit
 openroboto status
 ```
 
-Steps 2 and 4 exist for one reason: **burns are not refundable.** The most expensive
+Steps 2 and 4 exist for one reason: **entry fees are not refundable.** The most expensive
 mistake on this subnet is discovering after paying that the upload was not something
 the evaluator can load — a bare LoRA adapter, or a checkpoint buried in a
 subdirectory. `doctor` and `check` are free and catch both.
@@ -74,13 +69,13 @@ Real-machine setup, systemd, custom strategies: [docs/MINER_DEPLOY.md](docs/MINE
 
 | Command | What it does |
 |---|---|
-| `openroboto init [DIR] [-s simple\|example] [--validator]` | Create a working workspace: config, a training strategy to edit, a README with the exact next commands, and a `.gitignore` that keeps your wallet password out of git |
+| `openroboto init [DIR] [-s simple\|example] [--validator] [--refresh] [--backend-url URL] [--force]` | Create a working workspace: config, a training strategy to edit, a README with the exact next commands, and a `.gitignore` that keeps your wallet password out of git. ⚠️ **This is the one command that needs the network**: the open competitions come from `GET /api/v1/competitions`, and if that cannot be reached it writes **no file at all** rather than guessing a season. `--refresh` rewrites only the `competition:` section of an existing `miner.yaml`; `--backend-url` says which backend to ask (and the whole workspace is then written to match it); `--force` overwrites existing files |
 | `openroboto doctor` | Environment check: Python, config, the season's own spec, Docker, GPU, image, HF token, wallet balance against **this season's** fee |
 | `openroboto build` | Build the training image from the build context shipped inside the package (no clone, no network). Refuses for a competition this client has no image for, rather than filling that competition's image name with the π0.5 one |
-| `openroboto train [-s script.py]` | Run one round; your strategy script is mounted into the container |
+| `openroboto train [-s script.py]` | Train once; your strategy script is mounted into the container |
 | `openroboto check [PATH]` | Verify checkpoint layout with the rules the evaluator uses — **no GPU, no network, no second repository** |
-| `openroboto submit [--force]` | All three, resumable from `state/round_N.json` |
-| `openroboto status [--hotkey]` | Submission history and scanner rejection reasons (no API key needed) |
+| `openroboto submit [--config] [--output-dir] [--force]` | Upload → re-check the season against the backend → check the repository layout → pay the entry fee → announce on chain. Resumable from `state/competition_<id>.json`: an upload already done is not repeated and a fee already paid is not paid again |
+| `openroboto status [--hotkey] [--competition]` | Submission history and scanner rejection reasons (no API key needed) |
 | `openroboto validator run` | External validator: read published weights, set them on chain |
 | `openroboto --version` | CLI version and protocol package version |
 
@@ -110,13 +105,15 @@ one, which is why no single figure belongs in your config. Never hard-code it:
 and **refuses to pay at all** if it cannot, rather than reaching for an amount
 that says how much but not which competition.
 
-**Do not run `burn` and `announce` as separate steps unless you are recovering.** The
-backend only accepts a submission whose burn is within **50 blocks (~10 minutes)** of
-the chain commitment; this stops a single fee being reused across submissions. Past
-that window the submission is rejected and the fee is gone. `openroboto submit` runs
-the three steps back-to-back so you stay inside it, and `announce` refuses to publish
-once the window has closed instead of charging you a second fee for a doomed
-submission.
+**`submit` is the only command that pays, and that is on purpose.** The backend only
+accepts a submission whose payment is within **50 blocks (~10 minutes)** of the chain
+commitment; this stops a single fee being reused across submissions. Past that window
+the submission is rejected and the fee is gone. `openroboto submit` runs upload,
+payment and announcement back-to-back so you stay inside it, and it refuses to
+publish once the window has closed instead of charging you a second fee for a doomed
+submission. `upload` / `burn` / `announce` were removed as separate commands in 1.0
+for exactly this reason: running one alone is how a fee gets paid for a submission
+that is never announced.
 
 Details: [docs/PAYMENT.md](docs/PAYMENT.md).
 
@@ -136,10 +133,10 @@ Exact requirements: [docs/SUBNET_OVERVIEW.md](docs/SUBNET_OVERVIEW.md).
 
 ## Verify your evaluation seed
 
-Your seed is derived from three public values that did not exist when you submitted —
-the block hash that carried your commitment, the round number, and a drand beacon
-value. Nobody, including the subnet operator, can pick a seed for a specific miner.
-You can recompute it:
+Your seed is derived from three public values, two of which did not exist when you
+submitted — the block hash that carried your commitment, the **competition id** your
+submission was admitted to, and a drand beacon value. Nobody, including the subnet
+operator, can pick a seed for a specific miner. You can recompute it:
 
 ```bash
 pip install openroboto-protocol
@@ -148,7 +145,9 @@ pip install openroboto-protocol
 ```python
 from openroboto_protocol.seed import derive_seed
 
-seed = derive_seed(block_hash, round_num, drand_randomness)
+# The middle argument is the competition id, not the payload's `r` and not the
+# season ordinal the API displays. It is passed by position.
+seed = derive_seed(block_hash, competition_id, drand_randomness)
 ```
 
 The backend and this CLI import that exact function — not a copy of it.
@@ -170,12 +169,13 @@ The training image definition ships **inside the package**. There is nothing to
 clone, nothing to keep in sync, and no network needed to build it. You do need
 Docker on the host.
 
-⚠️ There is exactly **one** image definition in the package and it installs
-openpi (π0.5). Competitions on another base model have no image here yet, and
-`build` / `train` say so and stop instead of running the π0.5 one under that
-competition's name — train those your own way, then come back for `openroboto
-check` and `openroboto submit`, which both work on a checkpoint this CLI did
-not produce.
+The package ships **two** image definitions, one per base model: `runner/`
+(openpi, π0.5) and `runner/lingbot/` (LingBot-VLA 2.0). Which one is used follows
+`competition.base_model_family`, never the adapter name. A competition whose base
+model has no image here is refused by `build` and `train` — they stop rather than
+build another base model's image under that competition's name. Train such a season
+your own way, then come back for `openroboto check` and `openroboto submit`, which
+both work on a checkpoint this CLI did not produce.
 
 ### Running the CLI in a container too (optional, needs a clone)
 
@@ -192,8 +192,8 @@ docker compose run --rm train submit --config miner.yaml
 ```
 
 There is deliberately no `submit` service — a compose service can be restarted, and
-restarting a command that burns non-refundable TAO is not something to leave to a
-restart policy.
+restarting a command that spends a non-refundable entry fee is not something to leave
+to a restart policy.
 
 ⚠️ This compose file mounts the Docker socket so the containerised CLI can start
 the training container. That grants host root to the container; run it only on
@@ -202,8 +202,8 @@ the documented path.
 
 ## Public trust boundary
 
-Public: miner participation, local training, Hugging Face upload, burn and chain
-announcement; chain commitment formats and weight-setting logic; evaluation rules,
+Public: miner participation, local training, Hugging Face upload, fee payment and
+chain announcement; chain commitment formats and weight-setting logic; evaluation rules,
 baseline methodology, LIBERO tooling and seed derivation; and the read-only API
 contract. (`control.json` is documented for external validators, who fetch
 `public_key` from it — no miner command reads it.)
@@ -229,10 +229,10 @@ version pinned in `pyproject.toml`. To work against unreleased protocol changes,
 override it in your environment only —
 `uv pip install -e ../openroboto-protocol` — and do not commit a
 `[tool.uv.sources]` path entry. A path source **bypasses the version constraint**,
-which is how the pin once read `==1.0.0` while every local and CI run was actually
-using `0.2.0`.
+A path source that disagrees with the pin leaves every local and CI run green while
+resolving a different version than the one published.
 
-`--locked` is deliberate: it fails when `uv.lock` no longer matches `pyproject.toml`
+`--locked` is deliberate: it fails when `uv.lock` does not match `pyproject.toml`
 instead of silently resolving a different dependency tree. The interpreter is pinned to
 Python 3.11 by `.python-version` — the version miners run.
 
@@ -276,15 +276,10 @@ no miner lands on one by accident.
 | Path | Purpose |
 |---|---|
 | `src/openroboto/` | The package: `commands/`, `chain/`, `huggingface/`, `payment/`, `config/`, `training/`, `templates/` |
-| `src/openroboto/runner/` | Training-image build context (Dockerfile + the in-container entry script), **shipped in the wheel** so `openroboto build` works offline |
+| `src/openroboto/runner/`, `src/openroboto/runner/lingbot/` | One training-image build context per base model (Dockerfile + the in-container entry script), **both shipped in the wheel** so `openroboto build` works offline |
 | `docs/` | Miner, validator and reproducibility documentation — index at [docs/README.md](docs/README.md) |
 | `tests/` | Mirrors `src/`; needs no GPU, chain or network |
 | `Dockerfile`, `docker-compose.yml` | Optional containerised way to run the CLI |
-
-The old flat layout (`rt.py`, `miner.py`, `payment.py`, `validator.py`, `miner/`,
-`utils/`, `protocol/`) was removed on 2026-08-19; the package replaces all of it. It
-remains in git history, and [docs/MIGRATION.md](docs/MIGRATION.md) maps every old
-command to its replacement.
 
 Local configuration, runtime state, logs, caches and model weights are excluded by
 `.gitignore`.

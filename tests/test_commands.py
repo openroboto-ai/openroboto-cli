@@ -1,4 +1,5 @@
-"""Command layer: init / check / build / status / round_state / preflight.
+"""Command layer: init / doctor / check / build / status / competition_state,
+plus preflight.
 
 All pure local logic: no network, no GPU, no chain.
 """
@@ -37,6 +38,13 @@ from openroboto.commands import doctor as doctor_command
 from openroboto.commands import init as init_command
 from openroboto.commands import status as status_command
 from openroboto.commands import train as train_command
+from openroboto.competition import Snapshot, workspace_competition_id
+from openroboto.competition_state import (
+    is_step_done,
+    load_state,
+    resolve_output_dir,
+    save_state,
+)
 from openroboto.config import ConfigError, Settings
 from openroboto.huggingface import build_repo_id, commit_sha_from_url
 from openroboto.preflight import (
@@ -44,17 +52,9 @@ from openroboto.preflight import (
     check_burn_window,
     payload_size,
 )
-from openroboto.round_state import (
-    StateError,
-    is_step_done,
-    load_state,
-    resolve_output_dir,
-    resolve_round,
-    save_state,
-)
 from openroboto.training import container
 from openroboto.training.container import DEFAULT_IMAGE, runner_image
-from openroboto.training.round import TrainParams
+from openroboto.training.run import TrainParams
 
 BIG_ENOUGH = 11 * 1024 * 1024  # the protocol requires >= 10 MB per repo; below that it
 # is judged "only a pointer was uploaded"
@@ -141,16 +141,13 @@ def test_init_releases_config_and_strategy(
 def test_the_workspace_points_where_the_backend_url_points(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """🔴 The one that was broken: **ask a testnet backend, get a testnet
-    workspace.**
+    """🔴 **Ask a testnet backend, get a testnet workspace.**
 
-    `init` used to write a static mainnet block around whatever season it had
-    just fetched. Asking a local backend on netuid 313 produced a `competition:`
-    from that backend inside `environment: mainnet` / `netuid: 80` / production
-    URLs, with no `backend:` section at all -- so `submit` would confirm the
-    season against **production**, match it by `(track, seq)` (both sides seed
-    the same tracks), and burn mainnet TAO for a season nobody there had heard
-    of. Nothing in the file was inconsistent with anything else in it.
+    A `competition:` from one backend wrapped in another backend's chain
+    settings is the shape that has nothing inconsistent in it: `submit` confirms
+    the season against production, matches it by `(track, seq)` (both sides seed
+    the same tracks), and burns mainnet TAO for a season nobody there has heard
+    of.
     """
     _serving(monkeypatch, _row(), netuid=313)
     args = _init_args(tmp_path / "w", backend_url="http://127.0.0.1:8011")
@@ -161,7 +158,6 @@ def test_the_workspace_points_where_the_backend_url_points(
     assert written.environment == "local"
     assert written.network != "finney"
     assert written.backend_url == "http://127.0.0.1:8011"
-    assert written.control_json_url == "http://127.0.0.1:8011/control.json"
     # and the season carries where it came from, which is the fact no field
     # above can contradict on its own.
     assert written.competition_source == "http://127.0.0.1:8011"
@@ -252,19 +248,18 @@ def test_init_writes_the_competition_the_miner_picked(
 
 
 def test_section_keys_track_the_protocol_contract() -> None:
-    """🔴 **The alarm on a deliberately blocked line.**
+    """🔴 **The alarm that fired, and the one still armed.**
 
-    `base_model_family` is missing from `SECTION_KEYS` only because the pinned
-    protocol package (0.7.0) has no such field: `Contract` keeps pydantic's
-    `extra=ignore`, so `Competition` drops it on the way in and `model_dump()`
-    would not have the key. Adding it today breaks `openroboto init` outright.
+    `base_model_family` was kept out of `SECTION_KEYS` while the pinned protocol
+    package had no such field (`Contract` keeps pydantic's `extra=ignore`, so
+    `Competition` dropped it on the way in). The pin has since moved, this test
+    went red, and `commands/init.py` gained the key -- which is why the second
+    assertion below now holds rather than being skipped.
 
-    So the two are tied together here instead of in a comment nobody re-reads:
-    the moment the pin moves to 0.8.0 this fails, and the fix is one line in
-    `commands/init.py`. Until then a workspace simply has no such key, and
-    `adapters.base_model_family()` resolves the two sim adapters and refuses for
-    the real track -- which is the honest answer while xArm 6's base model is
-    `null` in the database anyway.
+    It stays armed in both directions: a pin that goes *backwards* to a package
+    without the field makes the second assertion fail again, and a workspace with
+    no `base_model_family` is refused by `adapters.base_model_family()` for the
+    real track rather than guessed at.
 
     The general property (and the reason this is not just a version assertion):
     every column `init` copies has to exist on the model it copies from, or the
@@ -779,7 +774,7 @@ def test_train_says_nothing_was_exported_when_there_are_no_weights(
     """
     (tmp_path / "metrics.json").write_text("{}", encoding="utf-8")
 
-    lines = "\n".join(train_command.export_advice(tmp_path, 7))
+    lines = "\n".join(train_command.export_advice(tmp_path))
 
     assert "no model weights" in lines
     assert "merge" in lines  # says there is none, rather than telling them to
@@ -799,11 +794,11 @@ def test_train_names_the_nested_directory_the_vendor_export_produces(
     nested = "checkpoints/global_step_50000/hf_ckpt"
     _make_file(tmp_path / nested / "model-00001-of-00006.safetensors", 1024)
 
-    lines = "\n".join(train_command.export_advice(tmp_path, 7))
+    lines = "\n".join(train_command.export_advice(tmp_path))
 
     # the miner has to be able to copy the line, not decode "invalid layout"
     assert f"openroboto check {tmp_path / nested}" in lines
-    assert f"openroboto submit --round 7 --output-dir {tmp_path / nested}" in lines
+    assert f"openroboto submit --output-dir {tmp_path / nested}" in lines
 
 
 def test_train_points_at_check_when_the_checkpoint_is_at_the_top(
@@ -813,15 +808,15 @@ def test_train_points_at_check_when_the_checkpoint_is_at_the_top(
     package's, not this command's."""
     _make_file(tmp_path / "model.safetensors", 1024)
 
-    lines = "\n".join(train_command.export_advice(tmp_path, 7))
+    lines = "\n".join(train_command.export_advice(tmp_path))
 
     assert f"openroboto check {tmp_path}" in lines
-    assert "openroboto submit --round 7" in lines
+    assert "openroboto submit" in lines
     assert "⚠️" not in lines
 
 
 def test_check_on_missing_directory_returns_error(tmp_path: Path) -> None:
-    args = argparse.Namespace(path=str(tmp_path / "nope"), round=0, config="miner.yaml")
+    args = argparse.Namespace(path=str(tmp_path / "nope"), config="miner.yaml")
     assert check_command.run(args) == 1
 
 
@@ -1082,9 +1077,7 @@ def test_check_keeps_judging_an_old_config_by_the_pi05_rules(
 
     _make_file(tmp_path / "model.safetensors", BIG_ENOUGH)
     _make_file(tmp_path / "assets/physical-intelligence/libero/norm_stats.json", 1024)
-    args = argparse.Namespace(
-        path=str(tmp_path), round=0, config=str(tmp_path / "absent.yaml")
-    )
+    args = argparse.Namespace(path=str(tmp_path), config=str(tmp_path / "absent.yaml"))
     assert check_command.run(args) == 0
     assert "rules: π0.5 (openpi)" in capsys.readouterr().out
 
@@ -1460,7 +1453,7 @@ def test_train_refuses_a_competition_whose_training_is_not_released(
     """
     called: list[Any] = []
     monkeypatch.setattr(
-        train_command, "train_round", lambda **kwargs: called.append(kwargs)
+        train_command, "train_once", lambda **kwargs: called.append(kwargs)
     )
     config = _competition_config(
         tmp_path, track="real", seq=1, adapter=adapter, params={}
@@ -1476,10 +1469,10 @@ def test_train_refuses_a_competition_whose_training_is_not_released(
 
 # ─── train: the season on disk is the whole input ────────────
 #
-# `train` used to open control.json before anything else and take the round,
+# `train` reads the season out of `miner.yaml` and opens no control document,
 # the status, the dataset and the hyperparameters out of it. One static file
 # for a subnet that runs several competitions at once: a LingBot miner was told
-# they were on "round 1", handed the π0.5 sample and the π0.5 checkpoint path,
+# so a LingBot miner cannot be handed the π0.5 sample and checkpoint path
 # and nothing on that path could notice.
 
 DATASET = {
@@ -1515,6 +1508,10 @@ def _train_workspace(
     monkeypatch.chdir(tmp_path)
     config: dict[str, Any] = {
         "competition": {
+            # 🔴 `id` and `seq` are deliberately different numbers here: the id
+            # names local files, the seq is what goes on chain, and a test that
+            # confuses them has to fail rather than pass by coincidence.
+            "id": 42,
             "track": "sim",
             "seq": 7,
             "label": "LingBot-VLA 2.0",
@@ -1552,7 +1549,7 @@ def _fake_training(
         return SimpleNamespace(metrics={"final_loss": 0.5}, proof={})
 
     monkeypatch.setattr(train_command, "download_dataset", _download)
-    monkeypatch.setattr(train_command, "train_round", _train)
+    monkeypatch.setattr(train_command, "train_once", _train)
     return ran
 
 
@@ -1563,7 +1560,7 @@ def test_train_never_opens_control_json(
 
     Blocking `urlopen` catches the whole family at once -- a re-import of
     `fetch_control`, a new HTTP call added later, a helper that reaches for the
-    URL "just to check the round". The dataset download is the one call that is
+    URL "just to check the season". The dataset download is the one call that is
     allowed out, and it is faked above precisely so that the block below is not
     ambiguous.
     """
@@ -1586,19 +1583,24 @@ def test_train_never_opens_control_json(
     assert Settings.load(args.config).control_json_url
 
 
-def test_train_takes_the_round_from_the_season_not_a_subnet_wide_counter(
+def test_train_names_its_files_after_the_competition_and_records_the_seq(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """`competitions.seq` -- the number that differs between two seasons running
-    at the same time, which is what control.json's single `round` could not."""
+    """🔴 Two numbers, two jobs, and they must not be swapped.
+
+    `competition.id` names the output directory and the checkpoint file -- one
+    workspace, one season, one of each. `competition.seq` is the season ordinal
+    that goes on chain, and it is recorded rather than used as a filename.
+    """
     ran = _fake_training(monkeypatch, [])
     args = _train_workspace(
-        tmp_path, monkeypatch, seq=12, training={"dataset": DATASET}
+        tmp_path, monkeypatch, id=42, seq=12, training={"dataset": DATASET}
     )
 
     assert train_command.run(args) == 0
-    assert ran[0]["output_dir"] == str(tmp_path / "out" / "round_12")
-    assert json.loads((tmp_path / "state" / "round_12.json").read_text())["round"] == 12
+    assert ran[0]["output_dir"] == str(tmp_path / "out" / "competition_42")
+    written = json.loads((tmp_path / "state" / "competition_42.json").read_text())
+    assert written["competition_seq"] == 12
 
 
 def test_train_starts_from_the_checkpoint_this_season_names(
@@ -1622,6 +1624,55 @@ def test_train_starts_from_the_checkpoint_this_season_names(
     # `gs://` is swapped for the local cache directory to mount -- the container
     # downloads into it. That branching is unchanged.
     assert ran[0]["checkpoint_path"] == "cache/pi05_base"
+
+
+def test_each_base_model_gets_its_own_checkpoint_cache(tmp_path: Path) -> None:
+    """🔴 One cache directory shared by every season is a cache that reports a
+    hit on **another base model's weights**.
+
+    The container finds the directory populated, skips the download and trains
+    against the wrong base -- a week of GPU time on a checkpoint that cannot
+    score, with nothing on screen to say so. Seasons on the same base model
+    still share, which is what a cache is for.
+    """
+    import os
+
+    from openroboto.training.run import resolve_checkpoint
+
+    cwd = os.getcwd()
+    os.chdir(tmp_path)
+    try:
+        pi05 = resolve_checkpoint("gs://openpi-assets/checkpoints/pi05_base")
+        other = resolve_checkpoint("gs://some-vendor/checkpoints/lingbot_base")
+        # unchanged for pi0.5, so a cache already on a miner's disk stays a hit
+        assert pi05 == "cache/pi05_base"
+        assert other == "cache/lingbot_base"
+        assert pi05 != other
+        # same base model, same directory -- still one download
+        assert resolve_checkpoint("gs://openpi-assets/checkpoints/pi05_base") == pi05
+    finally:
+        os.chdir(cwd)
+
+
+def test_the_training_proof_names_the_season_base_model_not_pi05(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """🔴 `training_proof.json` ships in the miner's public repository.
+
+    A constant `"pi05"` is written next to a LingBot checkpoint just as readily
+    as next to a π0.5 one, which makes the file a false claim about the artifact
+    it sits in rather than a gap.
+    """
+    ran = _fake_training(monkeypatch, [])
+    args = _train_workspace(
+        tmp_path,
+        monkeypatch,
+        base_model_family="lingbot-vla-2.0",
+        training={"dataset": DATASET},
+    )
+
+    assert train_command.run(args) == 0
+    assert ran[0]["base_model"] == "lingbot-vla-2.0"
 
 
 def test_train_leaves_the_base_to_the_image_when_the_season_names_none(
@@ -1654,7 +1705,7 @@ def test_train_refuses_a_season_that_has_published_no_dataset(
 def test_train_refuses_a_workspace_with_no_season_at_all(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """There is no round, no dataset and no base model to guess from -- and
+    """There is no season, no dataset and no base model to guess from -- and
     guessing is what this command stopped doing."""
     monkeypatch.chdir(tmp_path)
     ran = _fake_training(monkeypatch, [])
@@ -1774,34 +1825,37 @@ def test_train_runs_the_same_image_build_built(
     assert runner_image(build_command.competition_image(config)) == "openpi-runner:1.4"
 
 
-# ─── round_state ─────────────────────────────────────────────
+# ─── competition_state ───────────────────────────────────────
 
 
-def test_state_round_trip_and_resolution(tmp_path: Path) -> None:
+def test_state_round_trips_through_the_competition_id(tmp_path: Path) -> None:
     save_state(3, {"step": "training", "status": "completed"}, base=tmp_path)
     save_state(4, {"step": "prep", "status": "in_progress"}, base=tmp_path)
 
     assert load_state(3, base=tmp_path)["step"] == "training"
     assert is_step_done(load_state(3, base=tmp_path), "training")
-    # round 4 did not finish, so auto-resolution must fall back to 3
-    assert resolve_round(0, base=tmp_path) == 3
-    assert resolve_round(4, base=tmp_path) == 4
+    assert not is_step_done(load_state(4, base=tmp_path), "prep")
+    # one file per competition, named after it -- no scanning, nothing to guess
+    assert (tmp_path / "competition_3.json").is_file()
+    assert (tmp_path / "competition_4.json").is_file()
 
 
-def test_resolve_round_refuses_to_guess(tmp_path: Path) -> None:
-    with pytest.raises(StateError) as excinfo:
-        resolve_round(0, base=tmp_path)
-    assert "--round" in str(excinfo.value)
+def test_a_workspace_without_a_competition_id_is_refused(tmp_path: Path) -> None:
+    """🔴 Guessing here would mean `train` writing one file and `submit`
+    reading another, which shows up as "it says I never trained"."""
+    with pytest.raises(ConfigError) as excinfo:
+        workspace_competition_id(Settings())
+    assert "init --refresh" in str(excinfo.value)
 
 
 def test_resolve_output_dir_uses_recorded_path(tmp_path: Path) -> None:
-    save_state(1, {"round_output": "/somewhere/round_1"}, base=tmp_path)
-    assert resolve_output_dir(1, base=tmp_path) == "/somewhere/round_1"
-    assert resolve_output_dir(2, base=tmp_path).endswith("round_2")
+    save_state(1, {"output_dir": "/somewhere/else"}, base=tmp_path)
+    assert resolve_output_dir(1, base=tmp_path) == "/somewhere/else"
+    assert resolve_output_dir(2, base=tmp_path).endswith("competition_2")
 
 
 def test_corrupt_state_file_reads_as_empty(tmp_path: Path) -> None:
-    (tmp_path / "round_1.json").write_text("{ 坏掉的 json", encoding="utf-8")
+    (tmp_path / "competition_1.json").write_text("{ 坏掉的 json", encoding="utf-8")
     assert load_state(1, base=tmp_path) == {}
 
 
@@ -1959,12 +2013,11 @@ def test_a_workspace_without_a_season_base_model_keeps_its_repository() -> None:
     move their repository.
 
     `base_model_family` reached `SECTION_KEYS` after 1.1.1 shipped, so no
-    released CLI has ever written it. An earlier version of this function
-    *refused* here, which would have made 1.2.0 break every miner on upgrade:
-    `upload` dies until they run `init --refresh`, then re-pushes ~25 GB to a
-    repository nobody asked for.
+    released CLI has ever written it. Refusing here breaks every miner on
+    upgrade: `upload` dies until they run `init --refresh`, then re-pushes
+    ~25 GB to a repository nobody asked for.
 
-    Keeping the historical name is not a guess about their model — it is the
+    Keeping the historical name is not a guess about their model -- it is the
     name their repository already has.
     """
     settings = Settings.from_mapping({"huggingface": {"username": "kyleab"}})
@@ -1975,11 +2028,10 @@ def test_a_workspace_without_a_season_base_model_keeps_its_repository() -> None:
 
 
 def test_a_username_is_still_required() -> None:
-    """The legacy fallback covers the season's base model, not the whole name.
+    """The fallback covers the season's base model, not the whole name.
 
-    The old code fell back to the literal `miner` when the username was missing,
-    uploading to `miner/pi05-miner` — a repository nobody evaluates, discovered
-    after the TAO was burned.
+    A fallback to the literal `miner` uploads to `miner/pi05-miner` -- a
+    repository nobody evaluates, discovered after the TAO is burned.
     """
     with pytest.raises(ConfigError) as caught:
         build_repo_id(Settings(), "")
@@ -2048,17 +2100,24 @@ def _history_row(**overrides: Any) -> SubmissionHistoryItem:
         "burn_block": 1180,
         "burn_status": "confirmed",
         "block_hash": "0xbeef",
-        "eval_status": "done",
+        "eval_status": "evaluated",
     }
     return SubmissionHistoryItem.model_validate({**row, **overrides})
 
 
-def test_status_normalises_legacy_words() -> None:
+def test_status_shows_the_word_the_backend_sent() -> None:
+    """🔴 No vocabulary mapping on this side.
+
+    The backend sends the eight storable words and nothing else, so a table
+    here could only ever rewrite a word that cannot arrive -- and would hide it
+    on the day one did.
+    """
     assert (
-        status_command.display_status(_history_row(eval_status="done")) == "evaluated"
+        status_command.display_status(_history_row(eval_status="evaluated"))
+        == "evaluated"
     )
     assert (
-        status_command.display_status(_history_row(eval_status="failed"))
+        status_command.display_status(_history_row(eval_status="eval_failed"))
         == "eval_failed"
     )
     assert status_command.display_status(_history_row(eval_status="")) == "?"
@@ -2067,12 +2126,12 @@ def test_status_normalises_legacy_words() -> None:
 def test_status_prints_a_row_without_touching_a_field_that_no_longer_exists(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """🔴 Walks the real `run()`, because that is where the breakage was.
+    """🔴 Walks the real `run()`, because that is where the breakage hides.
 
-    Protocol 0.9.0 dropped `round_num` from both response models while three
-    lines in `run()` still read it. Every unit test around this command passed
-    -- they all called the small helpers -- and `openroboto status` raised
-    `AttributeError` on the first row it tried to print.
+    The season is not in either response model, and a `run()` still reading it
+    would pass every unit test around this command -- they all call the small
+    helpers -- while `openroboto status` raised `AttributeError` on the first
+    row it tried to print.
 
     So this one renders an actual row through the actual command. It asserts on
     what a miner needs to identify the submission (`task_id`) rather than on
@@ -2094,7 +2153,7 @@ def test_status_prints_a_row_without_touching_a_field_that_no_longer_exists(
     # miner running `openroboto status --hotkey ...` from anywhere else is in.
     monkeypatch.setattr(status_command, "load_snapshot", lambda _settings: None)
 
-    args = argparse.Namespace(config="nope.yaml", hotkey="5X", round=0, limit=20)
+    args = argparse.Namespace(config="nope.yaml", hotkey="5X", competition=7, limit=20)
     assert status_command.run(args) == 0
 
     out = capsys.readouterr().out
@@ -2104,6 +2163,54 @@ def test_status_prints_a_row_without_touching_a_field_that_no_longer_exists(
 
 def _page_meta() -> dict[str, Any]:
     return {"total": 1, "limit": 20, "offset": 0, "has_more": False}
+
+
+def test_status_needs_a_competition_and_says_so_when_it_has_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """🔴 The backend requires the competition on the history query.
+
+    Sending nothing is a 422, not "everything", so guessing here would show a
+    miner an error from the backend instead of the one sentence that fixes it.
+    """
+    monkeypatch.setattr(status_command, "load_snapshot", lambda _settings: None)
+    args = argparse.Namespace(config="nope.yaml", hotkey="5X", competition=0, limit=20)
+    with pytest.raises(ConfigError) as excinfo:
+        status_command.run(args)
+    assert "--competition" in str(excinfo.value)
+
+
+def test_status_defaults_to_the_competition_this_workspace_mines(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A miner in their own workspace should not have to type an id they
+    already wrote down."""
+    asked: list[int] = []
+
+    def _submissions(url: str, competition: int, *args: Any, **kwargs: Any) -> Any:
+        asked.append(competition)
+        return ListEnvelope[SubmissionHistoryItem].model_validate(
+            {"data": [], "meta": {"request_id": "r-1", "page": _page_meta()}}
+        )
+
+    monkeypatch.setattr(status_command, "fetch_submissions", _submissions)
+    monkeypatch.setattr(
+        status_command,
+        "fetch_rejections",
+        lambda *a, **k: ListEnvelope[ScanRejection].model_validate(
+            {"data": [], "meta": {"request_id": "r-1", "page": _page_meta()}}
+        ),
+    )
+    monkeypatch.setattr(
+        status_command,
+        "load_snapshot",
+        lambda _settings: Snapshot({"id": 42, "track": "sim", "seq": 7}),
+    )
+    monkeypatch.setattr(status_command, "say_roster", lambda *a, **k: None)
+
+    args = argparse.Namespace(config="nope.yaml", hotkey="5X", competition=0, limit=20)
+    assert status_command.run(args) == 0
+    assert asked == [42], "the workspace's own competition was not used"
 
 
 def test_status_explains_a_rejection_reason() -> None:
@@ -2169,12 +2276,11 @@ def test_doctor_python_check_matches_the_supported_floor() -> None:
 
 
 def test_doctor_reads_the_fee_from_the_season_not_the_subnet_rate() -> None:
-    """The season's own `params.fee`, never `settings.burn_rate_tao`.
+    """The fee is the season's own `params.fee`, and nothing else can supply it.
 
-    That field is control.json's subnet-wide rate, and the subnet runs several
-    seasons at once: on `real/1` it reads 0.1 while that season charges 2 TAO.
-    A wallet holding 0.5 was ticked green here and ran out at `submit` -- after
-    the upload had already gone out.
+    The subnet runs several seasons at once and they charge different amounts,
+    so a figure that is not this season's would tick a wallet green here and
+    run out at `submit` -- after the upload had already gone out.
     """
     settings = Settings.from_mapping(
         {
@@ -2187,7 +2293,6 @@ def test_doctor_reads_the_fee_from_the_season_not_the_subnet_rate() -> None:
                     "fee": {"kind": "transfer", "amount_tao": 2, "coldkey": "5x"}
                 },
             },
-            "payment": {"burn_rate_tao": 0.1},
         }
     )
     result = doctor_command.check_competition(settings)
@@ -2250,7 +2355,6 @@ def test_doctor_balance_check_does_not_crash_on_an_unknown_rate(
     monkeypatch.setattr(doctor_command, "_coldkey_address", lambda settings: "5abc")
 
     settings = Settings.from_mapping({"subnet": {"netuid": 80}})
-    assert settings.burn_rate_tao is None
 
     result = doctor_command.check_wallet(settings)
     assert result.ok is False

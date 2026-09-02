@@ -2,11 +2,10 @@
 
 There are two reasons this exists:
 
-1. **The User-Agent has a single source.** The old code wrote
-   `robot-train-subnet/0.5` once each in `rt.py` / `miner.py` /
-   `validator.py` -- a hardcoded fake version number, so server-side logs
-   could not tell which client revision a miner was on. It now carries the
-   real version number, and in exactly one place.
+1. **The User-Agent has a single source**, and it carries the real
+   `__version__` -- **not** a hardcoded string, and not one copy per entry
+   point. A fixed fake version leaves server-side logs unable to tell which
+   client revision a miner is on.
 
 2. **Certificates.** On interpreters installed by uv /
    python-build-standalone, `ssl.get_default_verify_paths().cafile` is

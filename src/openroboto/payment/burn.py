@@ -1,7 +1,7 @@
 """Initiate the burn payment (on-chain `add_stake_burn`).
 
-⚠️ **Red line: burn amount conversion and block.** The three places below preserve
-the old `payment.py` formulation verbatim:
+⚠️ **Red line: burn amount conversion and block.** The three things below are
+fixed, and must not be reformulated:
 
 1. `int(amount_tao * 1e9)` — the TAO → Rao conversion, which **must not be changed
    to `round()` or Decimal**. The backend checks against the amount; being off by
@@ -12,9 +12,9 @@ the old `payment.py` formulation verbatim:
    to compute the block distance between burn and commit (the effective window is
    50 blocks; going over means rejected and not refunded).
 
-The **verification** half (`verify_burn_on_chain`) was not moved over: the CLI
-never calls it, it is the backend's / evaluator's job, and it should go into the
-protocol package to be shared. See SCOPE.md open item #3.
+The **verification** half (`verify_burn_on_chain`) deliberately does not live
+here: the CLI never calls it, it is the backend's / evaluator's job, and it
+belongs in the protocol package to be shared. See SCOPE.md open item #3.
 """
 
 from __future__ import annotations

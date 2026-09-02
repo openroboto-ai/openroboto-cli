@@ -5,12 +5,11 @@ is burned for nothing and is not refunded. So both `burn` and `submit` run
 this pass **before spending anything**: are the fields that should be in the
 checkpoint all there, can the payload be encoded, does it exceed 512 bytes.
 
-The old `rt.py::check_announce_ready` treated `h` (the block hash) as an empty
-string when estimating the payload size, while on chain it is 64 hexadecimal
-characters -- meaning **it undercounted by 64 bytes every single time**. An
-hf_repo_id sitting right on the boundary would sail through the preflight,
-burn the TAO, and then blow up at the on-chain step. Here the estimate uses a
-64-character placeholder hash, preferring to overestimate.
+🔴 **The size estimate uses a 64-character placeholder block hash**, never an
+empty string: on chain `h` is 64 hexadecimal characters, so estimating with `""`
+undercounts by 64 bytes every single time. An hf_repo_id sitting right on the
+boundary then sails through the preflight, burns the TAO, and blows up at the
+on-chain step. Overestimating is the safe direction.
 """
 
 from __future__ import annotations
@@ -26,7 +25,7 @@ from openroboto_protocol.commitment import (
     encode,
 )
 
-from openroboto import round_state
+from openroboto import competition_state
 from openroboto.competition import load_snapshot
 from openroboto.config.settings import Settings
 
@@ -81,7 +80,7 @@ def check_burn_window(
             f"burned is not refunded**.\n"
             f"   The burn is in block {burn_block}, the current block is "
             f"{commit_block}.\n"
-            f"   \u2192 this round's burn is wasted. Next time run `openroboto "
+            f"   \u2192 this submission's fee is wasted. Next time run `openroboto "
             f"submit` in one go, or announce immediately after burning -- do not "
             f"leave a long gap",
             "",
@@ -116,7 +115,7 @@ def payload_track(settings: Settings) -> Track:
 
 
 def check_announce_ready(
-    state: dict[str, Any], round_num: int, track: Track = Track.SIM
+    state: dict[str, Any], competition_seq: int, track: Track = Track.SIM
 ) -> list[str]:
     """Return the list of reasons blocking the submission; an empty list means
     it is fine to continue.
@@ -136,27 +135,27 @@ def check_announce_ready(
 
     if not hf_repo_id:
         reasons.append(
-            "No hf_repo_id in the checkpoint state -- run `openroboto upload` first"
+            "No hf_repo_id in the checkpoint state -- run `openroboto submit` first"
         )
     if not hf_url:
         reasons.append(
-            "No hf_url in the checkpoint state -- run `openroboto upload` first"
+            "No hf_url in the checkpoint state -- run `openroboto submit` first"
         )
     if len(hf_commit) != HF_COMMIT_LEN:
         shown = hf_commit[:12] if hf_commit else "empty"
         reasons.append(
             f"Invalid hf_commit ({shown}, expected 40 hexadecimal characters) "
-            "-- run `openroboto upload` again"
+            "-- run `openroboto submit` again"
         )
     if not hotkey_ss58:
         reasons.append(
             "No hotkey_ss58 in the checkpoint state -- "
-            "add subnet.hotkey_ss58 to miner.yaml and run upload again"
+            "add subnet.hotkey_ss58 to miner.yaml and run `openroboto submit` again"
         )
 
     if hf_repo_id and hotkey_ss58:
         try:
-            payload_size(state, round_num)
+            payload_size(state, competition_seq)
         except CommitmentTooLargeError as exc:
             reasons.append(
                 f"The commitment payload is too large ({exc.size} > 512 bytes) "
@@ -168,7 +167,7 @@ def check_announce_ready(
     # real track it is the gate that stops a fee being paid for a submission the
     # backend will refuse for a missing `cid` or a malformed fingerprint.
     try:
-        check_payload(_estimated_payload(state, round_num), track)
+        check_payload(_estimated_payload(state, competition_seq), track)
     except CommitmentFieldError as exc:
         reasons.append(f"{_FIELD_ADVICE.get(exc.field, str(exc))} ({exc})")
 
@@ -181,18 +180,19 @@ def check_announce_ready(
 #: advice.
 _FIELD_ADVICE = {
     "c": "The HF commit in the checkpoint is not a commit SHA -- run "
-    "`openroboto upload` again",
+    "`openroboto submit` again",
     "cid": "This workspace mines a real-track competition, but the checkpoint "
-    "does not say which season the fee is for -- run `openroboto submit`, "
-    "which resolves it from the backend, rather than `openroboto burn` on "
-    "its own",
-    "m": "The model fingerprint for this round is missing or malformed. The "
+    "does not say which season the fee is for -- run `openroboto submit`, which "
+    "resolves it from the backend before it pays",
+    "m": "The model fingerprint for this submission is missing or malformed. The "
     "real track needs it on chain because the repository may be private, so "
-    "the evaluator cannot compute it later -- run `openroboto upload` again",
+    "the evaluator cannot compute it later -- run `openroboto submit` again",
 }
 
 
-def _estimated_payload(state: dict[str, Any], round_num: int) -> CommitmentPayload:
+def _estimated_payload(
+    state: dict[str, Any], competition_seq: int
+) -> CommitmentPayload:
     """The payload as it would go on chain, with a placeholder block hash.
 
     `competition_id` / `model_hash` are read from the checkpoint, so the size
@@ -201,20 +201,24 @@ def _estimated_payload(state: dict[str, Any], round_num: int) -> CommitmentPaylo
     pays for both keys here rather than at the on-chain step, when the fee is
     already gone.
     """
+    # 🔴 Keyword, not positional. The pin is exact (`==`), so a renamed field
+    # fails loudly at the call site; a reordered one would bind silently to the
+    # wrong field, and the field below decides which season a fee is filed
+    # under. On this path, loud beats silent.
     return CommitmentPayload(
         hotkey_ss58=str(state.get("hotkey_ss58", "")),
         block_hash=BLOCK_HASH_PLACEHOLDER,
         hf_commit=str(state.get("hf_commit", "")),
-        round_num=round_num,
+        claimed_competition_seq=competition_seq,
         hf_repo_id=str(state.get("hf_repo_id", "")),
         burn_tx_hash=str(state.get("burn_tx_hash", "")) or "0" * 64,
         burn_block=int(state.get("burn_block", 0) or 0) or 1,
-        competition_id=round_state.competition_id(state),
-        model_hash=round_state.model_hash(state),
+        competition_id=competition_state.paid_competition_id(state),
+        model_hash=competition_state.model_hash(state),
     )
 
 
-def payload_size(state: dict[str, Any], round_num: int) -> int:
+def payload_size(state: dict[str, Any], competition_seq: int) -> int:
     """Estimate the byte size of the on-chain payload (using the placeholder
     block hash and the burn fields)."""
-    return len(encode(_estimated_payload(state, round_num)))
+    return len(encode(_estimated_payload(state, competition_seq)))

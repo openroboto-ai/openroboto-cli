@@ -11,7 +11,7 @@ the data is built from, and once as the yaml robot config text that ships next
 to the data. LingBot reads only the second one. When they disagree, nothing
 raises: `Normalizer` broadcasts a 6-long statistic over an 8-long vector, and
 `torch.cat` is happy to concatenate slices that do not cover the tensor. The
-result is a model trained on mis-normalised inputs, which looks like a bad
+result is a model trained on wrongly normalised inputs, which looks like a bad
 hyperparameter for as long as anyone cares to look.
 """
 

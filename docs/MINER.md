@@ -1,16 +1,18 @@
 # Miner Guide — π₀.₅ LIBERO Training
 
-> **Status**: current · **Updated**: 2026-08-19 · **Audience**: miners
+> **Status**: current · **Updated**: 2026-09-02 · **Audience**: miners
 > **Scope**: Nothing → first submission. Architecture, quick start, chain payload, confirmation outcomes.
 > **Note**: Deployment on a real machine is [MINER_DEPLOY.md](./MINER_DEPLOY.md); field-by-field config is [CONFIG.md](./CONFIG.md).
 
-> For miners participating in the RobotTrain subnet.
+> For miners participating in the OpenRoboto subnet (Bittensor netuid 80).
 
-> **Mining the LingBot-VLA 2.0 competition instead?** Read
-> [MINER_LINGBOT.md](./MINER_LINGBOT.md). Most of this page still applies —
-> the fee, the chain announcement, the repository naming, the burn→announce
-> window — but the checkpoint layout and where the base model comes from do not,
-> and following the π0.5 rules there gets your upload rejected after you pay.
+> **🔴 The π0.5 simulation season was archived on 2026-08-31.** The current
+> simulation season runs on LingBot-VLA 2.0 — read
+> [MINER_LINGBOT.md](./MINER_LINGBOT.md) for it. Most of this page still applies
+> to any season — the fee, the chain announcement, the repository naming, the
+> payment→announce window — but the checkpoint layout and where the base model
+> comes from do not, and following the π0.5 rules there gets your upload rejected
+> after you pay.
 
 ## Architecture
 
@@ -24,37 +26,44 @@
 │  └──────┬───────────┘  └────────┬─────────┘                  │
 │         │                      │                             │
 │  ┌──────────────────────────────────────────────────────┐    │
-│  │                  Public API                          │    │
-│  │  /api/rank   /api/scores   /api/weights              │    │
-│  │  /api/miner  /api/export  /api/v1/*                  │    │
+│  │            Public read-only API                      │    │
+│  │  /api/v1/competitions   /api/v1/submissions/history  │    │
+│  │  /api/v1/scan-rejections   /api/v1/weights           │    │
 │  └──────────────────────────────────────────────────────┘    │
 └──────────┬───────────────────────────────────────────────────┘
+           │  asked once, by `openroboto init`
+    ┌──────▼──────────────┐
+    │ miner.yaml           │  the season's whole spec, on disk
+    │ `competition:`       │
+    └──────┬──────────────┘
            │
     ┌──────▼────────────┐
     │  openroboto train │
-    │  ① Fetch control  │
+    │  ① Read the season│  (offline; from miner.yaml)
     │  ② Download data  │
-    │  ③ LoRA train     │
+    │  ③ Train          │
     │  → saves state    │
     └────────┬──────────┘
              │
-    ┌────────▼──────────┐
-    │ openroboto submit │
-    │  ④ Upload → HF    │
-    │  ⑤ Burn (payment) │
-    │  ⑥ Announce chain │
-    └───────────────────┘
+    ┌────────▼───────────────┐
+    │ openroboto submit      │
+    │  ④ Upload → HF         │
+    │  ⑤ Re-check the season │
+    │  ⑥ Layout gate         │
+    │  ⑦ Pay the entry fee   │
+    │  ⑧ Announce on chain   │
+    └────────────────────────┘
 ```
 
 **Two-stage workflow**: `openroboto train` does prep + training. After it
-completes, `openroboto submit` does upload → check the layout → burn → announce.
+completes, `openroboto submit` does upload → check the layout → pay → announce.
 
-Run `openroboto doctor` before the first round and `openroboto check` before
-paying — both exist so that "burned TAO, then found out the model was wrong"
-stops happening.
+Run `openroboto doctor` before you start and `openroboto check` before
+paying — both exist so that "paid the entry fee, then found out the model was
+wrong" stops happening.
 
 `openroboto submit` judges the layout itself as well, between the upload and the
-payment, so skipping `openroboto check` no longer means skipping the rules. It
+payment, so skipping `openroboto check` does not mean skipping the rules. It
 reads the file listing of your HuggingFace repository — the same listing the
 subnet reads after the fee — and stops without paying if that listing would not
 earn a score. There is no flag to switch it off: past that point a rejection is
@@ -85,7 +94,7 @@ openroboto init my-miner && cd my-miner
 # 3. Check the environment before anything costs money
 openroboto doctor
 
-# 4. Build the training image, then train one round
+# 4. Build the training image, then train
 openroboto build
 openroboto train
 
@@ -122,9 +131,10 @@ run on one. Full table and the local-backend example:
 > the chain commitment — an anti-replay rule. `submit` pays and announces
 > back-to-back so you stay inside it.
 
-The CLI reads the season's spec out of `miner.yaml`, written there by `init`. It no longer reads `control.json` at all (external validators still do, for `public_key` only)
-dependency. `openroboto submit` handles the post-training pipeline, reading the
-wallet password from `miner.yaml`.
+The CLI reads the season's spec out of `miner.yaml`, written there by `init`. It
+no longer reads `control.json` at all — external validators still do, for
+`public_key` only. `openroboto submit` handles the post-training pipeline,
+reading the wallet password from `miner.yaml`.
 
 The evaluation fee comes from the season you are entering
 (`competition.params.fee` in `miner.yaml`) and from nowhere else — not from
@@ -166,7 +176,7 @@ nothing was spent and the upload is still there.
 JSON payload committed on chain (BigRaw):
 
 ```json
-{"s": "5Hotkey...ss58", "h": "<block hash at submit time>", "c": "<hf commit sha>", "r": 1, "i": "<hf_user>/<repo>", "b": "<burn tx hash>", "bb": 8700000}
+{"s": "5Hotkey...ss58", "h": "<block hash at submit time>", "c": "<hf commit sha>", "r": 1, "i": "<hf_user>/<repo>", "b": "<payment tx hash>", "bb": 8700000, "cid": 3}
 ```
 
 | Field | Description |
@@ -174,20 +184,22 @@ JSON payload committed on chain (BigRaw):
 | `s` | Miner hotkey SS58 |
 | `h` | Chain block hash at submission (seed reveal input) |
 | `c` | HF commit hash (pins the exact model revision) |
-| `r` | Round number |
+| `r` | Round number. 🔴 Not the seed input — that is `cid`, see [SEED_GENERATION.md](./SEED_GENERATION.md) |
 | `i` | HF repo id (`user/repo`) |
-| `b` | Burn tx hash (payment proof, bound to this submission) |
-| `bb` | Burn block number (must be within 50 blocks of the commitment) |
+| `b` | Payment tx hash (burn or transfer; bound to this submission) |
+| `bb` | Payment block number (must be within 50 blocks of the commitment) |
+| `cid` | Competition id, resolved from the backend at submit time. Added in protocol 0.7.0 |
+| `m` | Model fingerprint. Real track only — its repositories may be private, so the evaluator cannot compute it later |
 
 ## Chain Submission Confirmation
 
-`openroboto submit` runs upload → burn → announce in sequence and reports the
+`openroboto submit` runs upload → pay → announce in sequence and reports the
 outcome of each step:
 
-1. `announce` builds the payload (including `block_hash` for the seed reveal) and
+1. the announcement step builds the payload (including `block_hash` for the seed reveal) and
    publishes it as a chain commitment, **waiting for inclusion in a block**
 2. Confirmed → `✅ commitment on chain | ref=<block>-<index> fee=… TAO`
-3. State is saved to `state/round_N.json` — re-running skips completed steps
+3. State is saved to `state/competition_<id>.json` — re-running skips completed steps
 
 **The CLI distinguishes three outcomes, and they are not the same thing:**
 
@@ -195,13 +207,13 @@ outcome of each step:
 |---|---|---|
 | `✅ commitment on chain \| ref=<block>-<index>` | In a block. The block reference is real. | Nothing. Check `openroboto status`. |
 | `✅ commitment submitted` + `⚠️ The SDK returned no block number` | Submitted, but the SDK returned no block number. Probably fine. | Confirm with `openroboto status`. |
-| `❌ The commitment was not confirmed on chain` | We do not know. It may still land. | **Do not burn again.** Run `openroboto status` first; only re-run `announce` if the backend never received it. |
+| `❌ The commitment was not confirmed on chain` | We do not know. It may still land. | **Do not pay again.** Run `openroboto status` first; if the backend never received it, re-run `openroboto submit` — it resumes from the checkpoint and sends only the commitment, without re-uploading or paying again. |
 
 A block reference is only ever printed when the chain actually returned one. If
 you see `not confirmed`, no block number is being invented to reassure you.
 
 **Resume support**: if a step fails, re-run `openroboto submit` — it resumes from
-the last completed step and **reuses the existing burn rather than paying twice**.
+the last completed step and **reuses the fee already paid rather than paying twice**.
 
 ## bittensor 10.x Data Decoding
 

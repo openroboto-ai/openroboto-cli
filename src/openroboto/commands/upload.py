@@ -1,5 +1,4 @@
-"""`openroboto upload` -- push the training artifact to HuggingFace (the old
-`rt.py upload`)."""
+"""`openroboto upload` -- push the training artifact to HuggingFace."""
 
 from __future__ import annotations
 
@@ -7,6 +6,10 @@ from typing import Any
 
 from openroboto_protocol.commitment import Track
 
+from openroboto.competition_state import (
+    save_state,
+    training_metrics,
+)
 from openroboto.config import ConfigError, Settings
 from openroboto.console import say
 from openroboto.huggingface import (
@@ -16,15 +19,11 @@ from openroboto.huggingface import (
     push_model,
 )
 from openroboto.preflight import payload_track
-from openroboto.round_state import (
-    save_state,
-    training_metrics,
-)
 
 
 def perform_upload(
     settings: Settings,
-    round_num: int,
+    competition_id: int,
     output_dir: str,
     state: dict[str, Any],
     reuse_existing: bool = False,
@@ -56,8 +55,8 @@ def perform_upload(
         model_dir=output_dir,
         repo_id=repo_id,
         hf_token=settings.hf_token,
-        round_num=round_num,
-        metrics=training_metrics(round_num),
+        competition_id=competition_id,
+        metrics=training_metrics(competition_id),
         base_model=settings.competition_base_model_family,
     )
 
@@ -69,7 +68,7 @@ def perform_upload(
     if hotkey_ss58:
         state["hotkey_ss58"] = hotkey_ss58
     _record_model_hash(settings, repo_id, result.commit_sha, state)
-    save_state(round_num, state)
+    save_state(competition_id, state)
 
 
 def _record_model_hash(

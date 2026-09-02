@@ -1,11 +1,10 @@
 name: protocol guards
 
-# This is currently the **only** workflow in this repo — CI for lint / type checking /
-# tests is not wired up yet (`uv run ruff format --check .` is currently red on 6 files
-# inherited from openroboto-subnet, and how to handle those files has to be decided
-# first). These two protocol-package-related defenses are put up ahead of that, because
-# what they guard against is **silent** failure: drift makes nothing report an error, it
-# just makes an evaluation impossible to reproduce one day.
+# Two protocol-package defences, kept in their own workflow rather than folded into
+# `ci.yml` (which runs lint, types, tests, the coverage gate and the wheel checks).
+# They are separate because what they guard against is **silent** failure: drift makes
+# nothing report an error, it just makes an evaluation impossible to reproduce one day,
+# and that has to stay visible as its own red check.
 #
 # The original wording and rationale of both checks are in
 # `../openroboto-protocol/README.md`, under

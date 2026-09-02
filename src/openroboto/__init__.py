@@ -10,23 +10,21 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Final
 
-__version__: Final = "1.2.0"
+__version__: Final = "1.3.0"
 """Client version.
 
-Its predecessor `rt.py` had no version number anywhere in the file -- when a
-miner reported "my submission failed", there was no way whatsoever to know
-which revision of the code they were running; you could only guess.
 Every log line written before going on chain prints this number (so does
 `openroboto --version`), so reading a log later tells you the client at a
-glance.
+glance. Without a version number in the payload, "my submission failed" can
+only be answered by guessing which revision the miner was running.
 """
 
 GITHUB_REPO_URL: Final = "https://github.com/openroboto-ai/openroboto-cli.git"
 """Public repository URL, the single source.
 
-The default in `scripts/deploy_miner.sh` was always the placeholder
-`your-org/robot-train-subnet`, and that repository does not exist at all --
-following the docs was bound to fail at the git clone step.
+Scripts and docs clone from here, **not** from a placeholder such as
+`your-org/robot-train-subnet`: no such repository exists, so following the
+docs fails at the git clone step.
 """
 
 DEFAULT_RUNNER_PROFILE: Final = "openpi"
@@ -77,15 +75,14 @@ def runner_context(profile: str = DEFAULT_RUNNER_PROFILE) -> Path:
     COPYs one file by name, so nothing of LingBot's can leak into that image.
 
     Each context ships in the wheel (~20 KB: a Dockerfile plus one stdlib-only
-    script). They used to live in `openpi-runner/` at the repository root and
-    *not* ship, with `openroboto build` falling back to docker's remote git
-    context. That was broken in two ways:
+    script) -- **not** resolved from docker's remote git context at build time.
+    A remote context is broken in two ways:
 
-    1. The repository is private until launch, so the anonymous fetch that
-       `docker build <git-url>` performs returned **HTTP 401** -- for every miner
-       who installed from PyPI, `openroboto build` could not work at all.
-    2. It pinned `#main`, so a miner on a pinned CLI version would build the
-       image from whatever `main` happened to be. The container interface
+    1. `docker build <git-url>` fetches anonymously, so a private repository
+       answers **HTTP 401** and `openroboto build` cannot work at all for a
+       miner who installed from PyPI.
+    2. A git context pins a branch, so a miner on a pinned CLI version builds
+       the image from whatever that branch holds. The container interface
        (mount points, env var names, the `train(cfg, episodes, policy)`
        signature) is red line #2 -- fixed on purpose. Resolving the image
        definition from a moving branch is exactly how the two sides drift apart.

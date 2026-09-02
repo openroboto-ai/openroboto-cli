@@ -45,11 +45,11 @@ class SubmitResult:
     def extrinsic_ref(self) -> str:
         """A `block-index` style reference; the easiest thing to paste in a bug report.
 
-        **No block number unless it is confirmed.** This used to fall back to
-        `get_current_block()`, so an unconfirmed submission would still print a
-        perfectly real-looking `6123456-0` — the miner would conclude from it that
-        the announcement was on chain, when it might never have made it into a
-        block at all.
+        **No block number unless it is confirmed**, and never a fall back to
+        `get_current_block()`: that prints a perfectly real-looking `6123456-0`
+        for an unconfirmed submission, and the miner concludes from it that the
+        announcement is on chain when it may never have made it into a block at
+        all.
         """
         if not self.confirmed or not self.block_height:
             return "unconfirmed"
@@ -61,7 +61,7 @@ def build_payload(
     hotkey_ss58: str,
     block_hash: str,
     hf_commit: str,
-    round_num: int,
+    competition_seq: int,
     hf_repo_id: str,
     burn_tx_hash: str,
     burn_block: int,
@@ -88,16 +88,20 @@ def build_payload(
 
     - `competition_id`: which season, on chain `cid`. Absent for every
       commitment written before 0.7.0, which the backend reads as
-      `(sim, seq=round_num)`.
+      `(sim, seq=competition_seq)`.
     - `model_hash`: the weights fingerprint, on chain `m`. Required on the real
       track, where the repository may be private and the backend therefore
       cannot compute it itself.
     """
+    # 🔴 Keyword, not positional. The pin is exact (`==`), so a renamed field
+    # fails loudly at the call site; a reordered one would bind silently to the
+    # wrong field, and the field below decides which season a fee is filed
+    # under. On this path, loud beats silent.
     return CommitmentPayload(
         hotkey_ss58=hotkey_ss58,
         block_hash=block_hash,
         hf_commit=hf_commit,
-        round_num=round_num,
+        claimed_competition_seq=competition_seq,
         hf_repo_id=hf_repo_id,
         burn_tx_hash=burn_tx_hash,
         burn_block=burn_block,
@@ -111,12 +115,11 @@ def submit_announcement(
 ) -> SubmitResult:
     """Send the payload to the chain as a commitment. **Returns only after inclusion.**
 
-    In the old `utils/chain.py:108-109` both of these parameters were `False`, with
-    no comment explaining why — so when "the TAO was already burned but the
-    announcement never made it on chain", the command still printed success (the
-    last row of the known-defects table in the backend `AGENTS.md` §7). The miner's
-    money is not refunded, so here we would rather wait one more block (~12 s) in
-    order to report a truthful conclusion.
+    🔴 **Inclusion is awaited**, never fire-and-forget. With both wait flags
+    `False` the command prints success even when "the TAO was already burned but
+    the announcement never made it on chain" (the last row of the known-defects
+    table in the backend `AGENTS.md` §7). The miner's money is not refunded, so
+    one more block of waiting (~12 s) buys a truthful conclusion.
 
     - `wait_for_inclusion=True`: only with a receipt do we know which block it
       landed in, and only then does `SubmitResult.confirmed` mean anything. What
@@ -134,9 +137,9 @@ def submit_announcement(
 
     data = encode(payload)  # over 512 bytes raises CommitmentTooLargeError
     logger.info(
-        "Committing on chain | repo=%s round=%d size=%d bytes",
+        "Committing on chain | repo=%s seq=%d size=%d bytes",
         payload.hf_repo_id,
-        payload.round_num,
+        payload.claimed_competition_seq,
         len(data),
     )
 
@@ -181,16 +184,13 @@ def parse_extrinsic_result(result: Any) -> SubmitResult:
 
     The SDK returns different shapes across versions (some with
     `extrinsic_receipt`, some with only a bool, and two different names for the fee
-    field), so each field falls back through `getattr` — the decision order in this
-    part follows the old `utils/chain.py::_parse_result`.
+    field), so each field falls back through `getattr`.
 
-    **One thing that was changed**: when no receipt was available, the old
-    implementation filled `block_height` from `subtensor.get_current_block()`, with
-    a comment saying it was "just so the log has a block number in it". But that
-    value also fed `extrinsic_ref`, so an unconfirmed submission would print a
-    block reference that looked entirely normal. Now, no receipt means
-    `confirmed=False` and no invented block number (which is why the `subtensor`
-    parameter is no longer needed).
+    🔴 **No receipt means `confirmed=False` and no block number** -- never a
+    `block_height` filled in from `subtensor.get_current_block()` "just so the log
+    has a block number in it". That value also feeds `extrinsic_ref`, and an
+    unconfirmed submission then prints a block reference that looks entirely
+    normal. This function therefore takes no `subtensor` at all.
     """
     extrinsic_hash = ""
     block_height = 0

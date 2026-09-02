@@ -91,7 +91,6 @@ def _rejection(**overrides: Any) -> dict[str, Any]:
     row = {
         "uid": 7,
         "hotkey": "5X",
-        "round_num": 3,
         "hf_commit": "c0ffee",
         "hf_repo_id": "miner/model",
         "commit_block": 1200,
@@ -109,7 +108,7 @@ def _rejection(**overrides: Any) -> dict[str, Any]:
 
 def test_empty_parameters_are_not_sent(monkeypatch: pytest.MonkeyPatch) -> None:
     seen = _capture(monkeypatch, _list_envelope([]))
-    backend_api.fetch_submissions("https://api.example/", hotkey="", limit=5)
+    backend_api.fetch_submissions("https://api.example/", 2, hotkey="", limit=5)
     url = seen[0].full_url
     assert url.startswith("https://api.example/api/v1/submissions/history?")
     assert "hotkey" not in url
@@ -132,7 +131,7 @@ def test_every_request_asks_for_the_envelope(monkeypatch: pytest.MonkeyPatch) ->
     """
     for kwargs in ({"hotkey": "5X", "limit": 3}, {"hotkey": "", "limit": 5}):
         seen = _capture(monkeypatch, _list_envelope([]))
-        backend_api.fetch_submissions("https://api.example", **kwargs)
+        backend_api.fetch_submissions("https://api.example", 2, **kwargs)
         accept = seen[0].get_header("Accept")
         assert accept is not None, (
             "the request carries no Accept -- what comes back will be bare JSON"
@@ -158,50 +157,54 @@ def test_rows_come_from_data_not_from_a_custom_wrapper(
 ) -> None:
     """The old shape was `{success, submissions, total, ...}`; the business fields now
     live only under `data`."""
-    # ⚠️ Asserts on `uid` because protocol 0.9.0 dropped `round_num` from
+    # ⚠️ Asserts on `uid` because the season is not in the response model at
     # `SubmissionHistoryItem`. What this pins is that rows are parsed out of
     # `data`; any business field proves it.
     _capture(monkeypatch, _list_envelope([_submission(uid=9)]))
-    page = backend_api.fetch_submissions("https://api.example", hotkey="5X")
+    page = backend_api.fetch_submissions("https://api.example", 2, hotkey="5X")
     assert [row.uid for row in page.data] == [9]
 
 
-def test_the_round_filter_goes_out_on_the_wire(
+def test_the_competition_filter_goes_out_on_the_wire(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """`--round` is handed to the backend, not applied to the rows here.
+    """The season filter is handed to the backend, not applied to the rows here.
 
-    🔴 It used to be a client-side filter over `row.round_num`. Protocol 0.9.0
-    dropped that field from both response models, so filtering after the rows
-    arrive is not possible at all any more -- and leaving the old code in place
-    did not degrade to an empty list, it raised `AttributeError` on every
-    `openroboto status` run.
+    🔴 The season is not in either response model, so filtering after the rows
+    arrive is not possible at all -- and `?competition=` is **required** by
+    `/submissions/history`, which answers 422 without it.
 
-    The backend still accepts `?round_num=` on both endpoints and selects rows
-    by `competition_id`. This asserts the parameter really goes out: an
-    implementation that quietly dropped `--round` would show a miner every
-    season's rows while he asked for one, and nothing would look wrong.
+    This asserts the parameter really goes out: an implementation that quietly
+    dropped it would show a miner every season's rows while he asked for one,
+    and nothing would look wrong.
     """
     seen = _capture(monkeypatch, _list_envelope([]))
-    backend_api.fetch_submissions("https://api.example", hotkey="5X", round_num=2)
-    backend_api.fetch_rejections("https://api.example", hotkey="5X", round_num=2)
-    assert all("round_num=2" in request.full_url for request in seen), [
-        request.full_url for request in seen
-    ]
+    backend_api.fetch_submissions("https://api.example", 2, hotkey="5X")
+    assert "competition=2" in seen[0].full_url, seen[0].full_url
 
-    # 0 means "no filter" and must not go out as `?round_num=0`: the backend
-    # reads 0 as a sentinel of its own, so sending it is not the same as
-    # leaving it off.
-    seen.clear()
-    backend_api.fetch_submissions("https://api.example", hotkey="5X")
-    assert "round_num" not in seen[0].full_url
+
+def test_rejections_are_not_filtered_by_competition(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """🔴 Chain-scan rejections happen **before** admission, so those rows carry
+    no season at all -- the endpoint can only filter on the ordinal the miner
+    put in their own payload.
+
+    A miner reads this list precisely because a submission did not arrive where
+    they expected, so filtering it by a number that payload may itself have got
+    wrong hides the row they came for.
+    """
+    seen = _capture(monkeypatch, _list_envelope([]))
+    backend_api.fetch_rejections("https://api.example", hotkey="5X")
+    assert "competition" not in seen[0].full_url
+    assert "claimed_round" not in seen[0].full_url
 
 
 def test_paging_comes_from_meta_not_from_data(monkeypatch: pytest.MonkeyPatch) -> None:
     """`has_more` is computed by the backend; callers no longer derive it themselves
     from offset+len<total."""
     _capture(monkeypatch, _list_envelope([_submission()], total=42, has_more=True))
-    page = backend_api.fetch_submissions("https://api.example", hotkey="5X")
+    page = backend_api.fetch_submissions("https://api.example", 2, hotkey="5X")
     assert page.meta.page.has_more is True
     assert page.meta.page.total == 42
 
@@ -213,7 +216,7 @@ def test_legacy_status_column_is_not_reachable(monkeypatch: pytest.MonkeyPatch) 
         monkeypatch,
         _list_envelope([_submission(eval_status="rejected", status="done")]),
     )
-    page = backend_api.fetch_submissions("https://api.example", hotkey="5X")
+    page = backend_api.fetch_submissions("https://api.example", 2, hotkey="5X")
     assert page.data[0].eval_status == "rejected"
     assert not hasattr(page.data[0], "status")
 
@@ -226,7 +229,7 @@ def test_error_envelope_keeps_code_retryable_and_request_id(
 ) -> None:
     _fail_with(monkeypatch, _http_error(400, _error_envelope("BURN_TX_TOO_OLD", False)))
     with pytest.raises(backend_api.BackendError) as excinfo:
-        backend_api.fetch_submissions("https://api.example")
+        backend_api.fetch_submissions("https://api.example", 2)
 
     error = excinfo.value
     assert error.code == "BURN_TX_TOO_OLD"
@@ -241,7 +244,7 @@ def test_non_retryable_error_tells_the_miner_to_stop(
     printed."""
     _fail_with(monkeypatch, _http_error(400, _error_envelope("BURN_TX_TOO_OLD", False)))
     with pytest.raises(backend_api.BackendError) as excinfo:
-        backend_api.fetch_submissions("https://api.example")
+        backend_api.fetch_submissions("https://api.example", 2)
 
     rendered = str(excinfo.value)
     assert "烧的那笔交易太旧了" in rendered
@@ -255,7 +258,7 @@ def test_retryable_error_says_it_is_worth_retrying(
 ) -> None:
     _fail_with(monkeypatch, _http_error(503, _error_envelope("INFRA_ERROR", True)))
     with pytest.raises(backend_api.BackendError) as excinfo:
-        backend_api.fetch_submissions("https://api.example")
+        backend_api.fetch_submissions("https://api.example", 2)
 
     assert excinfo.value.retryable is True
     assert "retrying it as-is" in str(excinfo.value)
@@ -266,7 +269,7 @@ def test_error_inside_a_200_is_still_an_error(monkeypatch: pytest.MonkeyPatch) -
     and must still be reported as an error."""
     _capture(monkeypatch, _error_envelope("INFRA_ERROR", True))
     with pytest.raises(backend_api.BackendError) as excinfo:
-        backend_api.fetch_submissions("https://api.example")
+        backend_api.fetch_submissions("https://api.example", 2)
     assert excinfo.value.code == "INFRA_ERROR"
 
 
@@ -284,14 +287,14 @@ def test_http_error_without_envelope_guesses_retryable_from_the_status(
 ) -> None:
     _fail_with(monkeypatch, _http_error(502))
     with pytest.raises(backend_api.BackendError) as excinfo:
-        backend_api.fetch_submissions("https://api.example")
+        backend_api.fetch_submissions("https://api.example", 2)
     assert excinfo.value.retryable is True
 
 
 def test_connection_failure_is_retryable(monkeypatch: pytest.MonkeyPatch) -> None:
     _fail_with(monkeypatch, urllib.error.URLError("down"))
     with pytest.raises(backend_api.BackendError) as excinfo:
-        backend_api.fetch_submissions("https://api.example")
+        backend_api.fetch_submissions("https://api.example", 2)
     assert excinfo.value.retryable is True
 
 
@@ -302,7 +305,7 @@ def test_shape_mismatch_asks_the_miner_to_upgrade(
     page of pydantic stack trace."""
     _capture(monkeypatch, {"submissions": [], "total": 0})
     with pytest.raises(backend_api.BackendError) as excinfo:
-        backend_api.fetch_submissions("https://api.example")
+        backend_api.fetch_submissions("https://api.example", 2)
     assert "pip install -U openroboto" in str(excinfo.value)
 
 
@@ -456,7 +459,7 @@ def test_a_competition_list_in_the_wrong_shape_is_an_error(
 def test_the_backend_states_its_own_netuid(monkeypatch: pytest.MonkeyPatch) -> None:
     """`/healthz` is bare JSON on purpose (backend ADR 02 §3.3) -- probes are
     read by orchestrators on fixed field paths, so it carries no envelope."""
-    seen = _capture(monkeypatch, {"status": "ok", "round": 1, "netuid": 313})
+    seen = _capture(monkeypatch, {"status": "ok", "competition": 1, "netuid": 313})
     assert backend_api.fetch_netuid("https://api.example") == 313
     assert seen[0].full_url == "https://api.example/healthz"
 

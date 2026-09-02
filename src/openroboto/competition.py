@@ -6,7 +6,7 @@ Two halves, deliberately separated:
 - **the snapshot** -- `openroboto init` writes the competition's whole spec into
   `miner.yaml` and every later command reads it from there, offline. Training
   does not need the network, and a competition that changed under a miner
-  mid-round must not silently change how their checkpoint is built;
+  mid-season must not silently change how their checkpoint is built;
 - **the check** -- `judge()` compares that snapshot against what the backend
   serves *now*, and it is the last gate before a fee is paid.
 
@@ -22,15 +22,15 @@ backend just served.
 
 ## Why the fee is never read from anywhere else
 
-`params.fee` belongs to one season. `control.json`'s `payment` block and
-`Settings.burn_rate_tao` are subnet-wide, and comparing a season's fee against
-a subnet-wide number is not a comparison at all. Once a config has a
-competition section, this module is the only source of the amount and the
-address.
+`params.fee` belongs to one season, and the subnet runs several at once. A
+figure that is not this season's answers "how much" while answering nothing
+about which competition is being paid for, so this module is the only source of
+the amount and the address.
 """
 
 from __future__ import annotations
 
+import os
 import re
 import sys
 from collections.abc import Mapping, Sequence
@@ -42,7 +42,7 @@ from openroboto_protocol.commitment import Track
 from openroboto_protocol.schemas import Competition
 
 from openroboto.backend_api import BackendError, fetch_competitions
-from openroboto.config import ConfigError, Settings
+from openroboto.config import ConfigError, Settings, environments
 from openroboto.console import fail, say
 
 #: The two ways a season can be paid for. `kind` is competition data, read from
@@ -138,6 +138,16 @@ class Snapshot:
         return int(self.raw.get("seq", 0) or 0)
 
     @property
+    def id(self) -> int:
+        """The competition id **as this backend numbered it**, written by `init`.
+
+        🔴 Local to one database, so it is never the id sent on chain -- that one
+        is re-resolved from `(track, seq)` at payment time (`Verdict.cid`). Its
+        one job here is naming this workspace's files.
+        """
+        return int(self.raw.get("id", 0) or 0)
+
+    @property
     def label(self) -> str:
         return str(self.raw.get("label", "")) or self.name
 
@@ -154,10 +164,8 @@ class Snapshot:
     def status(self) -> str:
         """`draft` | `active` | `archived`, frozen at the moment `init` ran.
 
-        control.json only ever had one word here (`active`), so a workspace
-        reading this instead of that file gains two: `archived` is a season that
-        has finished, `draft` one whose spec is not published yet. Neither is
-        something to train against.
+        `archived` is a season that has finished, `draft` one whose spec is not
+        published yet. Neither is something to train against.
 
         🔴 This is the **snapshot's** copy, so it answers "which season did I
         sign up for", not "is that season still open". The live answer is bought
@@ -232,6 +240,28 @@ def load_snapshot(settings: Settings) -> Snapshot | None:
     if not section.get("track") or not section.get("seq"):
         return None
     return Snapshot(section)
+
+
+def workspace_competition_id(settings: Settings) -> int:
+    """Which competition this workspace operates on, for naming local files.
+
+    Every command that reads or writes the checkpoint needs this one number, and
+    the workspace already carries it -- so no command asks for it on the command
+    line. A workspace that cannot answer is refused rather than guessed at: the
+    alternative is `train` writing one file and `submit` reading another.
+
+    Raises:
+        ConfigError: no competition section, or one written without an `id`.
+    """
+    snapshot = load_snapshot(settings)
+    if snapshot is not None and snapshot.id:
+        return snapshot.id
+    raise ConfigError(
+        "This workspace does not say which competition it mines, so there is no "
+        "checkpoint to read or write.\n"
+        "  \u2192 run `openroboto init --refresh` to write the `competition:` "
+        "section from the backend"
+    )
 
 
 def fee_of(params: Mapping[str, Any], *, where: str) -> Fee:
@@ -409,24 +439,29 @@ def judge(
             + REFRESH_HINT
         )
 
-    # 🔴 **`base_repo` 变了**不**拦付款**（2026-09-01 拿掉的一道闸）。
+    # 🔴 **A changed `base_repo` does not block the payment**, and
+    # `(base_repo, base_revision)` are deliberately **not** compared here.
     #
-    # 这里原来比 `(base_repo, base_revision)`，理由写的是「你在旧底座上训的
-    # checkpoint 会被拿新底座去评判，付了钱买的是一次评错模型的评测」。
-    # **那句话不成立**，而且这个文件自己的 `Competition.training` docstring
-    # 就写着为什么：`base_repo` 是**榜单 `delta_vs_base` 的参照**，
-    # 矿工训练的起点是 `params.training`（π0.5 那期两个地址明显不同）。
-    # 换基线只改 Δ 列拿谁比，不改这份 checkpoint 怎么被评。
+    # `base_repo` is the **leaderboard's `delta_vs_base` reference**, while the
+    # miner's training starting point is `params.training` -- this file's own
+    # `Competition.training` docstring says so, and on the π0.5 season the two
+    # are plainly different addresses. Changing the baseline only changes what
+    # the Δ column compares against, not how this checkpoint is judged.
     #
-    # 2026-09-01 真咬到人：运营把灵波的基线换成带评测结果的那个仓库
-    # （纯展示参照），于是**每个已经 init 过的矿工付不了款**，而报错告诉他
-    # 「要重新训练」—— 一句假话，代价是一轮白训。
+    # Gating on it costs real money. On 2026-09-01 operations pointed LingBot's
+    # baseline at the repository that carries the evaluation results (a
+    # display-only reference), and **every miner who had already run `init` was
+    # blocked from paying** -- with an error telling them to retrain, a falsehood
+    # that costs a training run.
     #
-    # ⚠️ **真正该拦的那件事没有消失**：训练起点被换了确实作废一次训练。
-    # 但那个值在 `params.training`（`base_weights` / `checkpoint`），不在这两列。
-    # 这里不顺手补上，是因为**加一道会拒绝付款的闸门要单独想清楚**：拦错的
-    # 代价是矿工白训一轮，而这次的教训恰恰是「闸门盯错了字段」。
-    # 记在 `08-31-competition-is-the-only-source` 的待办里。
+    # ⚠️ **What really should be gated is still ungated**: a changed *training
+    # starting point* does invalidate a training run. But that value lives in
+    # `params.training` (`base_weights` / `checkpoint`), not in these two
+    # columns, and it is deliberately not added here on the way past: a gate that
+    # refuses payment has to be thought through on its own, because refusing
+    # wrongly costs a miner a whole training run -- and a gate watching the wrong
+    # field is exactly the failure above. Tracked in
+    # `08-31-competition-is-the-only-source`.
 
     return Verdict(live=live, fee=live_fee, window=window)
 
@@ -469,16 +504,19 @@ def resolve_competition(
         raise PrecheckFailed(str(exc)) from exc
 
 
-def confirm_payment(verdict: Verdict) -> None:
+def confirm_payment(verdict: Verdict, netuid: int = 0) -> None:
     """Say who is being paid and ask for a yes. Raises `PrecheckFailed`.
 
     🔴 **The last thing that happens before the money moves.** Every gate that
     can still refuse this submission has already run by the time this is called;
     what is on screen when the question is asked is the whole of what the miner
     is agreeing to.
+
+    `netuid` is passed only so `_confirmed()` can tell the testnet from
+    everywhere else; see the escape hatch there.
     """
     _announce(verdict)
-    if not _confirmed():
+    if not _confirmed(netuid):
         # `_confirmed()` already explained the not-a-tty and closed-stdin cases.
         # A plain "n" is the one route here that has said nothing yet, and on a
         # path that spends money the miner is owed the confirmation that it did
@@ -511,13 +549,37 @@ def _announce(verdict: Verdict) -> None:
     say("")
 
 
-def _confirmed() -> bool:
+def _confirmed(netuid: int = 0) -> bool:
     """Ask before spending. Anything but an explicit yes is a no.
 
     Not a tty (CI, a wrapper script, a cron job) → **no**. There is no silent
-    yes on a path that spends money; a script that wants to pay has to call the
-    single-step commands and own that decision.
+    yes on a path that spends money.
+
+    🔴 **`OPENROBOTO_E2E_CONFIRM=1` is honoured on the testnet and nowhere
+    else.** `scripts/e2e_testnet.py` has to drive a real payment end to end
+    without a terminal, and faucet TAO on netuid 313 costs nothing. On any
+    other netuid the variable is not ignored -- it **refuses loudly**, because
+    a variable that silently does nothing on mainnet is one exported
+    environment away from being trusted there, and the failure would be a
+    payment nobody approved.
     """
+    if os.environ.get("OPENROBOTO_E2E_CONFIRM") == "1":
+        if netuid == environments.DEV.netuid:
+            say(
+                f"⚠️  OPENROBOTO_E2E_CONFIRM=1 on the testnet "
+                f"(netuid {netuid}): paying without asking."
+            )
+            return True
+        fail(
+            f"OPENROBOTO_E2E_CONFIRM=1 is set, but this workspace is on netuid "
+            f"{netuid or '(unset)'}, not the testnet "
+            f"({environments.DEV.netuid}). That variable exists for the "
+            f"end-to-end test and is refused everywhere else -- **nothing was "
+            f"paid**.\n"
+            f"   → unset OPENROBOTO_E2E_CONFIRM, or run `openroboto submit` "
+            f"from a terminal and answer the prompt"
+        )
+        return False
     if not sys.stdin.isatty():
         fail(
             "Not running on a terminal, so the payment cannot be confirmed. "

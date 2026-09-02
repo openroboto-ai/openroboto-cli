@@ -31,7 +31,7 @@ class UploadError(Exception):
 class UploadResult:
     """The result of one upload.
 
-    Both fields go into the round state file, and `commit_sha` ends up on chain.
+    Both fields go into the checkpoint file, and `commit_sha` ends up on chain.
     """
 
     url: str
@@ -52,7 +52,7 @@ def push_model(
     model_dir: str,
     repo_id: str,
     hf_token: str,
-    round_num: int = 0,
+    competition_id: int = 0,
     metrics: dict[str, Any] | None = None,
     base_model: str = "",
 ) -> UploadResult:
@@ -60,13 +60,11 @@ def push_model(
 
     Returns the URL and the commit SHA.
 
-    The old implementation threw `upload_folder` into a worker thread with a
-    600-second timeout, and on timeout treated it as a failure and returned `None`.
-    A complete π0.5 checkpoint is several GB; 600 seconds is simply not enough to
-    transfer it on ordinary home bandwidth — so that timeout manufactured **fake
-    failures**: the files were in fact still uploading, and the miner, seeing
-    "upload failed", would rerun. The timeout is removed here, leaving it to
-    `huggingface_hub`'s own chunked retries.
+    🔴 **No timeout around `upload_folder`, and no worker thread.** A complete
+    π0.5 checkpoint is several GB, which ordinary home bandwidth does not move in
+    600 seconds — a timeout there manufactures **fake failures**: the files are
+    still uploading, and the miner, seeing "upload failed", reruns. A stalled
+    transfer is `huggingface_hub`'s own chunked retries to handle.
     """
     from huggingface_hub import HfApi, create_repo, upload_folder
 
@@ -78,7 +76,7 @@ def push_model(
             "--output-dir"
         )
 
-    _write_round_info(path, round_num, metrics, base_model)
+    _write_run_info(path, competition_id, metrics, base_model)
 
     total_bytes = sum(f.stat().st_size for f in path.rglob("*") if f.is_file())
     file_count = sum(1 for f in path.rglob("*") if f.is_file())
@@ -90,9 +88,9 @@ def push_model(
     )
 
     try:
-        # 🔴 Do not flip an existing repository's visibility. This used to call
-        # `update_repo_visibility(..., "public")` unconditionally, which silently
-        # published a miner's private weights on the first upload -- and
+        # 🔴 Do not flip an existing repository's visibility -- **never** call
+        # `update_repo_visibility(..., "public")` here. Unconditionally, it
+        # silently publishes a miner's private weights on the first upload, and
         # publishing is not undoable: whoever fetched them while the repo was
         # open still has them.
         #
@@ -118,7 +116,7 @@ def push_model(
             # lands in the miner's own commit history, where "pi0.5 LIBERO model"
             # over a LingBot checkpoint is a claim nobody made on purpose.
             commit_message=(
-                f"Round {round_num}"
+                f"Competition {competition_id}"
                 f"{' ' + base_model if base_model else ''} model"
                 f" — {datetime.now(UTC).isoformat()}"
             ),
@@ -138,17 +136,18 @@ def push_model(
     return UploadResult(url=url, commit_sha=commit_sha)
 
 
-def _write_round_info(
+def _write_run_info(
     path: Path,
-    round_num: int,
+    competition_id: int,
     metrics: dict[str, Any] | None,
     base_model: str = "",
 ) -> None:
-    """Put a `round_info.json` into the model directory, uploaded with the model.
+    """Put a `run_info.json` into the model directory, uploaded with the model.
 
-    `model` used to be the literal `"pi05"`, written next to a LingBot checkpoint
-    just as readily as next to a pi0.5 one. This file ships inside the miner's
-    repository, so the wrong value there is a claim about the artifact it sits in.
+    `model` is the season's base model, **never** a literal `"pi05"`: a constant
+    is written next to a LingBot checkpoint just as readily as next to a pi0.5
+    one. This file ships inside the miner's repository, so the wrong value there
+    is a claim about the artifact it sits in.
 
     An empty `base_model` writes `""` rather than guessing: the season names the
     base model (`competition.base_model_family`), and a workspace whose season has
@@ -156,7 +155,7 @@ def _write_round_info(
     """
     info: dict[str, Any] = {
         "model": base_model,
-        "round_num": round_num,
+        "competition_id": competition_id,
         "created_at": datetime.now(UTC).isoformat(),
         "client": f"openroboto-cli/{_client_version()}",
     }
@@ -167,7 +166,7 @@ def _write_round_info(
             "training_steps": metrics.get("training_steps", 0),
             "training_duration_sec": metrics.get("training_duration_seconds", 0),
         }
-    (path / "round_info.json").write_text(json.dumps(info, indent=2), encoding="utf-8")
+    (path / "run_info.json").write_text(json.dumps(info, indent=2), encoding="utf-8")
 
 
 def _client_version() -> str:

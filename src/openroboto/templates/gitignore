@@ -9,15 +9,17 @@
 miner.yaml
 validator.yaml
 
-# ─── Per-round state ────────────────────────────────────────
-# state/round_N.json records the burn transaction for a round. `openroboto
+# ─── Checkpoint state ───────────────────────────────────────
+# state/competition_<id>.json records the payment transaction. `openroboto
 # submit` reads it to resume without paying twice, so it matters -- but it is
 # machine-local truth about your own submissions, not source code.
 state/
 
 # ─── Big things and generated things ────────────────────────
-cache/                  # π0.5 base checkpoint cache, several GB
-tmp/                    # training output root (tmp/robot_train_vla_miner/round_N)
+cache/                  # base checkpoints, one directory per base
+                        # model, several GB each
+tmp/                    # training output root
+                        # (tmp/robot_train_vla_miner/competition_<id>)
 logs/
 *.safetensors
 *.pt

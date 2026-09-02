@@ -125,7 +125,7 @@ def test_both_runners_read_the_same_environment_into_the_same_cfg(
 
     A key present in one runner and absent in the other is a script that works
     in one image and raises `KeyError` in the other -- after the container has
-    started, hours into a round. The values may differ (they name different
+    started, hours into a run. The values may differ (they name different
     base models); the keys may not.
     """
     for name in (

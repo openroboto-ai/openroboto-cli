@@ -1,11 +1,10 @@
 """`openroboto submit` -- upload → resolve the competition → check the layout →
-check that this model is not already entered → pay → announce (the old
-`rt.py submit`).
+check that this model is not already entered → pay → announce.
 
-The steps reuse the very same implementations from the `upload` / `burn` /
-`announce` modules. The old `rt.py` **copied all three again** inside
-`cmd_submit`, and the self-checks and skip conditions in the two places
-gradually grew apart; here there is only one copy.
+🔴 **One implementation of each step, and this command calls it.** The steps are
+the very same functions the `upload` / `burn` / `announce` commands run; a second
+copy inside `submit` lets the self-checks and skip conditions in the two places
+grow apart.
 
 The checkpoint makes this command naturally re-entrant: what has been uploaded
 is not uploaded again, what has been paid for is not paid for again.
@@ -13,11 +12,11 @@ is not uploaded again, what has been paid for is not paid for again.
 ## The layout is checked here too, and on the repository
 
 `openroboto check` is a separate command a miner may or may not run, and the
-promise "nothing is judged after you have paid" was only ever true for the ones
-who did. Everyone else met the layout rules for the first time in the backend's
+promise "nothing is judged after you have paid" is only true for the ones who
+do. Everyone else meets the layout rules for the first time in the backend's
 admission -- which runs **after** the fee, reaches `HF_STRUCTURE_INVALID`, and
 files the submission as `rejected`: final, no retry, no refund, while the model
-itself may have been perfectly good.
+itself may be perfectly good.
 
 So the gate runs here, between the upload and the payment, for every workspace
 that mines a competition. **There is no `--skip-check` and there will not be
@@ -25,18 +24,19 @@ one.** A flag like that keeps today's hole and renames it: whoever uses it burns
 exactly the TAO this exists to save. If the gate refuses a model that was fine,
 the gate is what gets fixed.
 
-⚠️ A config from before competitions existed does not reach it either, but for a
-blunter reason than it used to have: **it does not reach the payment at all**.
-`_no_season` refuses the run before the upload. There is no longer a path through
-this command that spends money without a season attached to it.
+⚠️ A config from before competitions existed does not reach it either, for a
+blunter reason: **it does not reach the payment at all**. `_no_season` refuses
+the run before the upload, so no path through this command spends money without a
+season attached to it.
 
 🔴 **It judges the repository listing, not the local directory.** The fee buys
 a verdict on `hf_repo_id` at the commit that goes on chain, and that is not the
 same set of files: `upload_folder` never deletes, and the repository id is
 `{user}/{base_model_family}-{hotkey suffix}` -- one repository per season, so
-round 7 is uploaded on top of rounds 1 to 6. A `.cache/` or a `*.tmp` left in
-there by an earlier round is `LEFTOVER_UPLOAD_STATE` / `INCOMPLETE_FILE` to
-admission and is **invisible** to anything that walks this round's output
+a seventh attempt is uploaded on top of the first six. A `.cache/` or a `*.tmp`
+left in there by an earlier attempt is `LEFTOVER_UPLOAD_STATE` /
+`INCOMPLETE_FILE` to admission and is **invisible** to anything that walks this
+attempt's output
 directory. Checking the local copy and paying for the repository is the same
 class of bug as the two sides using different rule books, one layer down.
 
@@ -77,7 +77,7 @@ that it had been.
 
 ## What `--force` really is, and what closes its one hole
 
-It means "this round is finished, do it again anyway", and what it clears is the
+It means "this submission is finished, do it again anyway", and what it clears is the
 payment: the upload stays. So the second run re-pays for **the same commit** --
 which the subnet counts once. Admission finds the row already there, files the
 new one as `skipped`, and the fee is spent on nothing. Nothing about the flag
@@ -121,16 +121,15 @@ from openroboto.competition import (
     load_snapshot,
     resolve_competition,
 )
-from openroboto.config import Settings
-from openroboto.console import fail, say
-from openroboto.huggingface import TreeError, fetch_tree
-from openroboto.round_state import (
+from openroboto.competition_state import (
     announced_commit,
     load_state,
     resolve_output_dir,
-    resolve_round,
     save_state,
 )
+from openroboto.config import Settings
+from openroboto.console import fail, say
+from openroboto.huggingface import TreeError, fetch_tree
 
 #: One request instead of a paging loop, the same figure `status` uses -- it is
 #: the backend's maximum page size, and it is asked for **one hotkey's** rows in
@@ -144,12 +143,11 @@ def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) 
         "submit", help="upload → pay the entry fee → announce"
     )
     parser.add_argument("--config", default="miner.yaml")
-    parser.add_argument("--round", type=int, default=0)
     parser.add_argument("--output-dir", default="")
     parser.add_argument(
         "--force",
         action="store_true",
-        help="re-announce a round that is already done, paying the entry fee a "
+        help="re-announce a submission that is already done, paying the entry fee a "
         "second time. The upload is reused as it is, so this re-submits the same "
         "model -- which the subnet counts once, however many times it is paid for",
     )
@@ -158,15 +156,22 @@ def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) 
 
 def run(args: argparse.Namespace) -> int:
     settings = Settings.load(args.config)
-    round_num = resolve_round(args.round)
-    output_dir = args.output_dir or resolve_output_dir(round_num)
-    state = load_state(round_num)
+    snapshot = load_snapshot(settings)
+    if snapshot is None:
+        # Before anything is read or uploaded: this run cannot end in a payment,
+        # and finding that out on the far side of several gigabytes is a cost
+        # with nothing to show for it.
+        _no_season(args.config)
+        return 1
+    competition_id = snapshot.id
+    output_dir = args.output_dir or resolve_output_dir(competition_id)
+    state = load_state(competition_id)
 
-    say(f"🦞 submit | round={round_num}")
+    say(f"🦞 submit | {snapshot.label} ({snapshot.name})")
 
     if state.get("step") == "announce" and not args.force:
         say(
-            "⏭️  this round is already submitted. Pass --force to redo it "
+            "⏭️  this submission is already announced. Pass --force to redo it "
             "(that pays the entry fee again)"
         )
         return 0
@@ -181,27 +186,16 @@ def run(args: argparse.Namespace) -> int:
         )
         state.pop("burn_tx_hash", None)
         state.pop("burn_block", None)
-        save_state(round_num, state)
+        save_state(competition_id, state)
 
-    snapshot = load_snapshot(settings)
-    if snapshot is None and not state.get("burn_tx_hash"):
-        # Before the upload, not after it: this run cannot end in a payment, and
-        # finding that out on the far side of several gigabytes is a cost with
-        # nothing to show for it. A round that has **already** burned is exempt
-        # and falls through to the announcement below -- see the comment there;
-        # refusing a paid submission its commitment is the one outcome worse
-        # than a wasted push.
-        _no_season(args.config)
-        return 1
-
-    perform_upload(settings, round_num, output_dir, state, reuse_existing=True)
+    perform_upload(settings, competition_id, output_dir, state, reuse_existing=True)
 
     if state.get("burn_tx_hash"):
         # The layout gate below is deliberately **not** run on this path. The
         # fee is already gone, and the only thing left that can make it count is
         # the announcement; refusing here would strand a paid submission with
         # nothing on chain -- turning a bad layout into a total loss instead of
-        # a rejection. `--force` cleared this key above, so redoing a round does
+        # a rejection. `--force` cleared this key above, so redoing one does
         # go through the gate.
         say(
             f"⏭️  already paid: tx={str(state['burn_tx_hash'])[:16]}... "
@@ -211,7 +205,7 @@ def run(args: argparse.Namespace) -> int:
         # `snapshot is None` is already impossible here -- the guard above
         # refused every unpaid run without one. It is spelled out rather than
         # asserted so that if the guard is ever moved, this falls through to the
-        # announcement (which refuses an unpaid round) instead of paying.
+        # announcement (which refuses an unpaid submission) instead of paying.
         #
         # The order of these three is the whole point of the season check being
         # in two halves. The live row comes first because both gates below need
@@ -226,7 +220,7 @@ def run(args: argparse.Namespace) -> int:
                 return 1
             if not slot_is_free(settings, state, verdict):
                 return 1
-            confirm_payment(verdict)
+            confirm_payment(verdict, settings.netuid)
         except PrecheckFailed:
             return 1
         # The season id goes into the checkpoint, not straight into the
@@ -234,11 +228,11 @@ def run(args: argparse.Namespace) -> int:
         # steps can be minutes and a crash apart, and a bare `openroboto
         # announce` afterwards has to put the *same* `cid` on chain that the
         # fee was just paid under. It is written before the payment so that
-        # the pre-spend self-check sizes the payload this round will really
+        # the pre-spend self-check sizes the payload this submission will really
         # send, and it is the resolved id from the row the backend served a
         # moment ago -- never a number copied out of miner.yaml.
         state["competition_id"] = verdict.cid
-        save_state(round_num, state)
+        save_state(competition_id, state)
         # The verdict travels with the payment rather than being re-derived
         # from `settings`: it is the proof that the season was confirmed **in
         # this run**, and it carries the fee that was confirmed with it --
@@ -253,10 +247,10 @@ def run(args: argparse.Namespace) -> int:
         # amount in a way that reaches nobody, irreversibly, and leave the
         # submission unpaid).
         pay = perform_burn if verdict.kind == BURN else perform_transfer
-        if not pay(settings, round_num, state, verdict=verdict):
+        if not pay(settings, competition_id, state, verdict=verdict):
             return 1
 
-    if not perform_announce(settings, round_num, state):
+    if not perform_announce(settings, competition_id, state):
         return 1
 
     say("✅ submitted. Run `openroboto status` to see whether the backend accepted it")
@@ -267,14 +261,17 @@ def _no_season(config_path: str) -> None:
     """This workspace does not say which competition it mines, so it cannot pay.
 
     The fee, the collection address and the season the submission is filed under
-    all come from the `competition:` section, and there is no longer a
-    subnet-wide rate standing behind it: `control.json`'s `payment` block served
-    one number to a subnet that runs several seasons at once, and paying it
-    bought a place in whichever season the backend defaults to (`commands/burn.py`
-    has the full account). Refusing is the outcome that costs nothing.
+    all come from the `competition:` section. Nothing stands behind it, so
+    refusing is the outcome that costs nothing.
 
     ⚠️ The miner reading this has only this message to go on, so it names the
     command that repairs the file rather than describing the defect.
+
+    🔴 It also has to reach the miner who **already paid** and then lost the
+    section: their checkpoint is still on disk, so restoring the section resumes
+    the same submission rather than starting a new one. Without that sentence
+    the obvious reading is "my fee is gone", and the obvious reaction is to pay
+    again.
     """
     fail(
         f"{config_path} does not say which competition this workspace mines "
@@ -285,9 +282,11 @@ def _no_season(config_path: str) -> None:
         f"previous version is kept as {config_path}.bak)\n"
         f"   → or `openroboto init <directory>` for a fresh workspace, then copy "
         f"your wallet and HuggingFace settings across\n"
-        f"   Configs written before the subnet ran more than one competition are "
-        f"no longer supported: a fee paid with no season attached is filed under "
-        f"whichever season the backend defaults to, and it is not refunded."
+        f"   If you have already paid for this workspace, your checkpoint under "
+        f"state/ is untouched: restore the section and run `openroboto submit` "
+        f"again -- it resumes that submission and does **not** pay twice.\n"
+        f"   A fee paid with no season attached is filed under whichever season "
+        f"the backend defaults to, and it is not refunded."
     )
 
 

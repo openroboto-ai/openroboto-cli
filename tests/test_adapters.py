@@ -214,7 +214,7 @@ def test_an_unknown_base_model_leads_with_upgrade() -> None:
     🔴 **`pip install -U` has to come before `--refresh`.** For them `--refresh`
     is a dead end: it faithfully re-reads a season name this build has never
     heard of and prints the same message again. Leading with it sends people
-    round a loop before the one command that actually fixes it.
+    in a loop before the one command that actually fixes it.
     """
     with pytest.raises(ConfigError) as caught:
         adapters.base_model_family("sim_openpi", "openpi")

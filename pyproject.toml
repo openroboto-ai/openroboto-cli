@@ -1,6 +1,6 @@
 [project]
 name = "openroboto"
-version = "1.2.0"
+version = "1.3.0"
 description = "OpenRoboto subnet (Bittensor netuid 80) CLI — everything a miner or external validator types."
 readme = "README.md"
 license = "MIT"
@@ -31,13 +31,13 @@ dependencies = [
     # `==` is present; whether the specific version is correct is beyond it — that
     # depends on keeping this in sync with the protocol package).
     #
-    # ⚠️ This number must equal the version in `../openroboto-protocol/pyproject.toml`.
-    # It was once written as `==1.0.0` while the protocol package was `0.2.0`: the
-    # path override in `[tool.uv.sources]` **bypasses the version constraint**, so
-    # local and CI were both green while what was actually installed was 0.2.0.
-    # It only blows up once the path override is removed before a release and the
-    # install really comes from PyPI — and that is exactly release time.
-    "openroboto-protocol==0.9.0",
+    # ⚠️ This number must equal the latest published release of that package.
+    # A path override in `[tool.uv.sources]` **bypasses the version constraint**,
+    # so a wrong number here leaves local and CI green and only blows up once the
+    # override is removed and the install really comes from PyPI — which is
+    # release time. `tests/test_packaging.py` compares this against the version
+    # actually resolved into the environment.
+    "openroboto-protocol==0.11.0",
     "pyyaml>=6.0",
     # Production miner machines run 10.5.0 (the old requirements.txt pinned that
     # version). The two APIs used are private surface of the SDK:
@@ -52,7 +52,6 @@ classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Typing :: Typed",
 ]
@@ -123,10 +122,6 @@ ignore = ["RUF001", "RUF002", "RUF003"]
 # constraints of this package (see the note in [tool.mypy]).
 "src/openroboto/templates/*" = ["T20", "B", "RUF"]
 "src/openroboto/runner/*" = ["T20", "B", "RUF", "E", "UP", "I"]
-# `baseline_capture.py` is both a test helper and a standalone generator invoked by
-# `scripts/gen_baseline.sh`; its whole stdout is a progress report, same as the
-# command layer.
-"tests/baseline_capture.py" = ["T20"]
 # The release-gate script's whole output is a progress report on stdout, same as
 # the command layer. Listed here so it stays clean if the lint scope ever widens
 # past `src tests` -- today `scripts/lint.sh` does not reach it.

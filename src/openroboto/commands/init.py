@@ -1,17 +1,16 @@
 """`openroboto init` -- create a workspace for one competition.
 
 The goal is very concrete: **zero cloning for miners, start to finish**.
-Getting `miner.example.yaml` and an editable strategy script used to require
-`git clone`-ing the whole subnet repository; now one command after
-`pip install openroboto` produces them. The templates are packed into the
-wheel (`openroboto/templates/`).
+One command after `pip install openroboto` produces `miner.example.yaml` and an
+editable strategy script -- no `git clone` of the subnet repository at any point.
+The templates are packed into the wheel (`openroboto/templates/`).
 
-What it produces is not a generic template any more. The subnet runs several
+What it produces is not a generic template. The subnet runs several
 competitions at once and they do not accept the same thing, so `init` asks the
 backend which ones are open, the miner picks one, and that season's whole spec
 is written into `miner.yaml`. **Every later command reads that snapshot off
 disk**: `build` / `train` / `check` never touch the network, and a competition
-edited mid-round cannot silently change how a checkpoint is built.
+edited mid-season cannot silently change how a checkpoint is built.
 
 Two rules hold this together:
 
@@ -21,7 +20,7 @@ Two rules hold this together:
 - **no fall back to a built-in competition.** A guessed season is a season the
   miner finds out about when they pay.
 
-`init` is now the one command that needs the network. `build` / `train` /
+`init` is the one command that needs the network. `build` / `train` /
 `check` still do not, and the error message says so -- otherwise the first
 miner behind a flaky link concludes the whole tool chain is online-only.
 """
@@ -78,8 +77,8 @@ SECTION_KEYS = (
     "base_repo",
     "base_revision",
     #: Which rule book judges this season's checkpoint, which files feed the
-    #: fingerprint, which loader the evaluator uses. `adapter` no longer answers
-    #: that -- its `_openpi` / `_lingbot` suffixes are historical and must not be
+    #: fingerprint, which loader the evaluator uses. `adapter` does not answer
+    #: that -- its `_openpi` / `_lingbot` suffixes are names only and must not be
     #: read as the base model (protocol 0.8.0).
     #:
     #: 🔴 `None` here means **not decided yet, refuse** -- the opposite of the
@@ -239,13 +238,13 @@ class Subnet:
     """Which chain a workspace talks to -- **decided by the backend that served
     its competition**, never by the shipped template.
 
-    That distinction is the whole point of this type. `init` used to write a
-    static mainnet block around whatever season it had just fetched, so
-    `--backend-url <a testnet backend>` produced a workspace whose
-    `competition:` came from testnet and whose `environment` / `netuid` /
-    `backend.url` said mainnet. Every field agreed with every other one; the
-    only thing that disagreed was reality, and the first command to notice
-    would have been the one that pays.
+    That distinction is the whole point of this type. A static mainnet block
+    written around whatever season was just fetched makes
+    `--backend-url <a testnet backend>` produce a workspace whose `competition:`
+    came from testnet and whose `environment` / `netuid` / `backend.url` say
+    mainnet. Every field agrees with every other one; the only thing that
+    disagrees is reality, and the first command to notice it is the one that
+    pays.
     """
 
     environment: str
@@ -303,7 +302,6 @@ def _config_text(subnet: Subnet) -> str:
         # something `Settings` can hold.
         network=subnet.network or '""',
         netuid=subnet.netuid,
-        control_json=f"{subnet.backend_url}/control.json",
         backend_url=subnet.backend_url,
     )
 

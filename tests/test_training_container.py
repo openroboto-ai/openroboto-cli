@@ -16,6 +16,8 @@ import itertools
 import json
 from pathlib import Path
 
+import pytest
+
 from openroboto.training.container import (
     DEFAULT_IMAGE,
     build_docker_command,
@@ -70,7 +72,7 @@ def test_local_checkpoint_is_mounted_where_openpi_downloads_to() -> None:
     writes anything it downloads. This used to mount at `/data/checkpoint` --
     a path nothing else in the image knows -- so the base model landed in the
     container's own writable layer and vanished with the container. The host
-    cache stayed empty forever, `training/round.py`'s "cache hit" branch could
+    cache stayed empty forever, `training/run.py`'s "cache hit" branch could
     never run, and every `train` re-downloaded several GB in silence.
 
     Still mounted by **parent** directory: the name has to survive so that
@@ -177,7 +179,7 @@ def test_every_bind_mount_source_is_an_absolute_path(tmp_path: Path) -> None:
     `Path("./tmp/robot_train_vla_miner")`, `Path` normalises the `./` away, `str()`
     comes out as `tmp/...`, and so `openroboto train` with default arguments **could
     not start a container at all**. The base-model cache case is nastier: no error, it
-    just re-downloads several GB every round.
+    just re-downloads several GB every run.
 
     Pin "all absolute" rather than pinning each specific path -- the next mount point
     someone adds gets caught by this one too.
@@ -264,3 +266,46 @@ def test_the_address_stays_one_string() -> None:
     )
     passed = [part for part in command if part.startswith("BASE_WEIGHTS=")]
     assert passed == ["BASE_WEIGHTS=repo/name@deadbeef"]
+
+
+def test_the_published_training_proof_carries_the_season_base_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """🔴 The file that actually ships, not the argument that produces it.
+
+    `training_proof.json` is uploaded into the miner's public repository. It
+    used to state `"model": "pi05"` for every season, so a LingBot checkpoint
+    shipped with a proof claiming a π0.5 base -- and there is no `config` key,
+    because the training config name lives inside the image and the container
+    never reports it to the host.
+    """
+    import openroboto.training.run as run_module
+
+    episodes = tmp_path / "train.json"
+    episodes.write_text(
+        json.dumps(
+            [
+                {
+                    "observation": {"image": "x", "state": [0.0]},
+                    "actions": [[0.0]],
+                    "prompt": "do the thing",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(run_module, "run_training", lambda **kwargs: ({}, {}))
+    out = tmp_path / "out"
+    run_module.train_once(
+        train_json_path=str(episodes),
+        output_dir=str(out),
+        checkpoint_path="",
+        params=run_module.TrainParams(),
+        hotkey="5X",
+        base_model="lingbot-vla-2.0",
+    )
+
+    snapshot = json.loads((out / "training_proof.json").read_text())["config_snapshot"]
+    assert snapshot["model"] == "lingbot-vla-2.0"
+    assert "config" not in snapshot

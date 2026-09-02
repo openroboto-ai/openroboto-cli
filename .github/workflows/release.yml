@@ -133,13 +133,10 @@ jobs:
   # picked; a pre-release needs `--pre` or an exact pin. PyPI has no dist-tags like npm;
   # the version number itself is that switch.
   #
-  # 🔴 **There is one window of exception, do not step in it**: `openroboto` has never
-  # published a stable release, and "when there is no stable release to choose, pip will
-  # pick a pre-release". That means, until 0.1.0 is out, the first alpha is what a bare
-  # `pip install openroboto` gets. Two ways out: publish a stable 0.1.0 early, or yank
-  # the alpha on PyPI once the beta ends (PEP 592: a yanked version is not picked by the
-  # resolver unless it is pinned exactly — people who already installed it are
-  # unaffected).
+  # ✅ Stable releases exist (1.0.x / 1.1.x / 1.2.0), so a bare `pip install openroboto`
+  # resolves to the newest stable one and never to a pre-release. The window this note
+  # used to warn about — "no stable release yet, so pip picks the alpha" — is closed,
+  # and the yank-the-alpha advice with it.
   #
   # Trusted Publishing (OIDC); no long-lived token is stored.
   #

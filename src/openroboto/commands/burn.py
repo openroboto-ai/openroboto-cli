@@ -1,30 +1,16 @@
-"""`openroboto burn` -- burn TAO to pay a competition's entry fee (the old
-`rt.py burn`).
+"""`openroboto burn` -- burn TAO to pay a competition's entry fee.
 
 This is the only command that **spends money and cannot be undone**, so what it
 refuses to do matters more than what it does. The amount has exactly one source:
-the `Verdict` that `competition.resolve_competition()` returns, which carries both the
-figure and the season it was quoted for, and which exists only if the backend was
-asked in this run. `perform_burn` does not run without one.
+the `Verdict` that `competition.resolve_competition()` returns, which carries
+both the figure and the season it was quoted for, and which exists only if the
+backend was asked in this run. `perform_burn` does not run without one.
 
-## Two sources this deliberately no longer has
-
-🔴 **`control.json`.** Its `payment.burn_rate_tao` is one number for the whole
-subnet, and the subnet runs several seasons at once -- `sim/1` charges 0.1 TAO
-while `real/1` charges 2. A subnet-wide rate is therefore not an answer to "what
-does this submission cost"; it is right for whichever season happens to match and
-silently wrong for the rest. It stayed reachable here for workspaces with no
-`competition:` section, and `openroboto init` has not produced such a workspace
-since seasons existed, so that branch served only installs from before the
-rebuild -- which are not supported (ADR 05).
-
-🔴 **`payment.burn_rate_tao` in `miner.yaml`.** An amount typed by hand satisfies
-"there is a number" while answering nothing about *which competition* is being
-paid for. That gap was payable: a hand-filled rate skipped the season check, so
-no `competition_id` reached the checkpoint, so `announce` sent a payload with no
-`cid`, so the backend filed the submission under the archived π0.5 season -- the
-fee spent, the commitment on chain, the backend acknowledging it, all of it
-landing on the wrong competition without one error printed anywhere.
+🔴 **An amount on its own is not a way to pay.** A number says how much, never
+which competition, so a fee paid from one is filed under whichever season the
+backend defaults to -- spent, on chain, acknowledged, and against the wrong
+competition without one error printed anywhere. That is why the verdict is a
+required argument rather than an optional override: the signature is the gate.
 
 ## Why `openroboto burn` on its own refuses
 
@@ -41,17 +27,18 @@ from __future__ import annotations
 from typing import Any
 
 from openroboto.chain import get_subtensor, open_wallet
+from openroboto.commands.announce import _competition_seq
 from openroboto.competition import Verdict
+from openroboto.competition_state import save_state
 from openroboto.config import Settings
 from openroboto.console import fail, say
 from openroboto.payment import BurnReceipt, execute_stake_burn, execute_transfer
 from openroboto.preflight import check_announce_ready, payload_size, payload_track
-from openroboto.round_state import save_state
 
 
 def perform_burn(
     settings: Settings,
-    round_num: int,
+    competition_id: int,
     state: dict[str, Any],
     verdict: Verdict,
 ) -> bool:
@@ -61,10 +48,10 @@ def perform_burn(
     `verdict` is this run's season check (`competition.resolve_competition`) and it is
     required, not optional: it is the proof that the backend was asked which
     competition this fee is for, and it carries the amount that was confirmed
-    together with that answer. See the module docstring for what the fee bought
-    while it was optional.
+    together with that answer. See the module docstring for why an amount on its
+    own is not a way to pay.
     """
-    if not _ready_to_spend(settings, round_num, state, doing="burning"):
+    if not _ready_to_spend(settings, competition_id, state, doing="burning"):
         return False
 
     # The amount stays a local. Writing it back onto `settings` would put a
@@ -83,18 +70,17 @@ def perform_burn(
             wallet=wallet,
             netuid=settings.netuid,
             amount_tao=amount_tao,
-            limit_price_rao=settings.limit_price_rao,
         )
     finally:
         subtensor.close()
 
-    _record(round_num, state, receipt)
+    _record(competition_id, state, receipt)
     return True
 
 
 def perform_transfer(
     settings: Settings,
-    round_num: int,
+    competition_id: int,
     state: dict[str, Any],
     verdict: Verdict,
 ) -> bool:
@@ -116,7 +102,7 @@ def perform_transfer(
     defaulting keeps that guarantee where it is enforced instead of quietly
     growing a second, weaker copy of it here.
     """
-    if not _ready_to_spend(settings, round_num, state, doing="paying"):
+    if not _ready_to_spend(settings, competition_id, state, doing="paying"):
         return False
 
     amount_tao = verdict.amount_tao
@@ -142,7 +128,7 @@ def perform_transfer(
     finally:
         subtensor.close()
 
-    _record(round_num, state, receipt)
+    _record(competition_id, state, receipt)
     return True
 
 
@@ -220,7 +206,7 @@ def pays_as_the_hotkeys_owner(
 
 
 def _ready_to_spend(
-    settings: Settings, round_num: int, state: dict[str, Any], *, doing: str
+    settings: Settings, competition_id: int, state: dict[str, Any], *, doing: str
 ) -> bool:
     """The last look at the commitment before any money moves. Shared by both
     ways of paying, because the thing being protected is the same either way: a
@@ -229,20 +215,22 @@ def _ready_to_spend(
     settings.require_for_chain()
 
     # The track decides which fields the payload must carry.
-    reasons = check_announce_ready(state, round_num, payload_track(settings))
+    reasons = check_announce_ready(
+        state, _competition_seq(settings), payload_track(settings)
+    )
     if reasons:
-        fail(f"Pre-chain self-check failed (round {round_num}); **not** {doing}:")
+        fail(f"Pre-chain self-check failed; **not** {doing}:")
         for reason in reasons:
             say(f"   • {reason}")
         return False
     say(
         f"✅ self-check passed | commitment payload "
-        f"{payload_size(state, round_num)}/512 bytes"
+        f"{payload_size(state, _competition_seq(settings))}/512 bytes"
     )
     return True
 
 
-def _record(round_num: int, state: dict[str, Any], receipt: BurnReceipt) -> None:
+def _record(competition_id: int, state: dict[str, Any], receipt: BurnReceipt) -> None:
     """Write the payment proof into the checkpoint.
 
     The keys keep their `burn_` names on both tracks: they are what `announce`
@@ -254,4 +242,4 @@ def _record(round_num: int, state: dict[str, Any], receipt: BurnReceipt) -> None
     state["burn_block"] = receipt.block_number
     state["step"] = "burn"
     state["status"] = "completed"
-    save_state(round_num, state)
+    save_state(competition_id, state)

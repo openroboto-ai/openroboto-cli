@@ -1,27 +1,24 @@
 """Which subnet, and which backend, this config is talking to.
 
-Four settings have to agree with each other, and nothing used to check that they
-did: `subnet.network`, `subnet.netuid`, `urls.control_json` and `backend.url`.
-They were four independent switches for one decision, and changing only some of
-them is not a harmless mistake -- both half-states cost the miner money:
-
-- **control.json from dev, netuid still 80.** The dev backend publishes
-  `burn_rate_tao: 0.01` while production publishes `0.1`. The burn goes to
-  *mainnet* at a tenth of the required fee, production checks the amount and
-  rejects it, and burns are not refunded.
-- **netuid 313, backend still production.** The submission goes to testnet while
-  `openroboto status` asks production about it. Nothing is ever found, and there
-  is no error message anywhere that explains why.
+Three settings have to agree with each other: `subnet.network`, `subnet.netuid`
+and `backend.url`. They are three independent switches for one decision, and
+changing only some of them costs the miner money -- submit to testnet while
+`openroboto status` asks production about it, and nothing is ever found, with no
+error message anywhere that explains why.
 
 So `environment` is one name for the whole decision, and `check_coherent()`
 refuses to go on chain when the pieces disagree.
 
-There is a third half-state, and it is the one those four fields cannot see:
-**the season came from one backend and the money leaves on another's chain.**
-Nothing in the config contradicts anything else -- the contradiction is between
-the file and an event that happened while it was being written. That fact is
+There is a fourth half-state, and it is the one those fields cannot see: **the
+season came from one backend and the money leaves on another's chain.** Nothing
+in the config contradicts anything else -- the contradiction is between the file
+and an event that happened while it was being written. That fact is
 `competition.source`, written by `openroboto init`, and `check_coherent()` takes
 it as an argument for exactly this reason.
+
+`urls.control_json` is a **validator** setting (`validator.yaml`); it is checked
+here when it is set, because a validator pointed at another environment's
+control.json reads a key that answers 401 and then sets no weights at all.
 
 **It deliberately does not supply `subnet.netuid`.** That field has no default on
 purpose: a config that forgets it must fail, not quietly pick a subnet, because
@@ -56,6 +53,8 @@ class Environment:
 
     @property
     def control_json_url(self) -> str:
+        """Where this environment publishes `public_key`. Read by external
+        validators only; no miner command opens it."""
         return f"https://{self.host}/control.json" if self.host else ""
 
 
@@ -65,8 +64,8 @@ MAINNET = Environment(
     netuid=80,
     host="api.openroboto.ai",
 )
-"""Real emissions, real TAO. The evaluation fee is whatever control.json says
-(0.1 TAO as of 2026-08-19) and it is not refundable."""
+"""Real emissions, real TAO. The entry fee is the season's own `params.fee`,
+and it is not refundable."""
 
 DEV = Environment(
     name="dev",
@@ -76,15 +75,8 @@ DEV = Environment(
 )
 """Testnet. TAO comes from the faucet, so a wrong burn costs nothing.
 
-✅ True as of 2026-08-21: the rebuilt backend is deployed at
-`api-dev.openroboto.ai` with `NETWORK=test` / `NETUID=313`, and its
-`control.json` burn rate matches production's, so a burn verified here means the
-same thing on mainnet.
-
-(The note that used to sit here said dev still watched mainnet and that this
-entry described where dev was going rather than where it was. That stopped being
-true when the rebuilt backend was deployed and pointed at 313.)
-"""
+The backend at `api-dev.openroboto.ai` runs `NETWORK=test` / `NETUID=313`, so a
+payment verified here exercises the same path it does on mainnet."""
 
 LOCAL = Environment(
     name="local",
@@ -168,11 +160,11 @@ def check_coherent(
 
     `competition_source` is the backend that served the season in this workspace
     (`competition.source`, written by `openroboto init`). 🔴 **Without it the five
-    self-describing fields can be perfectly consistent and still be wrong**, and
-    they were: `init --backend-url <local backend>` used to take the season from
-    that backend and write a mainnet workspace around it. Every field agreed with
-    every other field -- mainnet, finney, 80, production URLs -- because the one
-    fact that disagreed, *where the season came from*, was not among them. Empty
+    self-describing fields can be perfectly consistent and still be wrong**:
+    `init --backend-url <local backend>` takes the season from that backend, and a
+    mainnet workspace written around it has every field agreeing with every other
+    -- mainnet, finney, 80, production URLs -- because the one fact that
+    disagrees, *where the season came from*, is not among them. Empty
     means the workspace does not say (written before the key existed); that is not
     checked rather than assumed to be fine, which is why `init` writes it.
     """
@@ -201,18 +193,22 @@ def check_coherent(
         )
     if env.host is None:
         # Self-hosted backend: the chain is left unconstrained, but you
-        # **must** say where the backend is.
-        for label, url in (
-            ("urls.control_json", control_json_url),
-            ("backend.url", backend_url),
+        # **must** say where the backend is. `urls.control_json` is optional --
+        # only a validator sets it, and a validator that leaves it out simply
+        # never picks up a rotated key.
+        for label, url, required in (
+            ("urls.control_json", control_json_url, False),
+            ("backend.url", backend_url, True),
         ):
             if not url:
-                problems.append(
-                    f"environment=local requires {label} to be set explicitly -- "
-                    f"left unset it keeps the built-in default, which is the "
-                    f"**production** address. You would think you were testing "
-                    f"locally while actually talking to the mainnet backend."
-                )
+                if required:
+                    problems.append(
+                        f"environment=local requires {label} to be set explicitly "
+                        f"-- left unset it keeps the built-in default, which is "
+                        f"the **production** address. You would think you were "
+                        f"testing locally while actually talking to the mainnet "
+                        f"backend."
+                    )
             elif host_of(url) in {e.host for e in ENVIRONMENTS.values() if e.host}:
                 problems.append(
                     f"environment=local, yet {label} points at a hosted environment "
@@ -247,8 +243,7 @@ def check_coherent(
             problems.append(
                 f"{label} points at the {other} environment "
                 f"({host_of(url)}), while environment={env.name}."
-                f"\n     The burn rate comes from control.json and status comes "
-                f"from backend.url -- when they straddle two environments, you "
-                f"burn on one subnet at another subnet's rate."
+                f"\n     Straddling two environments means the seasons, the "
+                f"status and the key come from different subnets."
             )
     return problems

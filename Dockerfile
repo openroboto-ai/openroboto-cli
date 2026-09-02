@@ -1,9 +1,11 @@
 # ═══════════════════════════════════════════════════════════
-# OpenRoboto CLI — π₀.₅ VLA training subnet (netuid 80)
+# OpenRoboto CLI — VLA training subnet (netuid 80)
 #
 # This image holds **only the CLI itself** (bittensor needs numpy>=2.0).
-# Training runs in a separate image (`openpi-runner/Dockerfile`, where openpi
-# needs numpy<2.0) -- one interpreter cannot hold both numpy versions, which is
+# Training runs in a separate image, built from the context this package ships
+# for the season's base model (`src/openroboto/runner/` for π0.5,
+# `src/openroboto/runner/lingbot/` for LingBot-VLA 2.0), where openpi needs
+# numpy<2.0 -- one interpreter cannot hold both numpy versions, which is
 # red line #2.
 # Consequence: inside this container `openroboto train` reaches out to the
 # **host's** Docker to start the training container, so the docker socket has to
@@ -30,8 +32,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # python -> python3 alias) -- that line exited 127, which means this image had
 # never built successfully.
 # The version is pinned (red line #6): uv decides how dependencies resolve, so it
-# must not float.
-COPY --from=ghcr.io/astral-sh/uv:0.10.11 /uv /usr/local/bin/uv
+# must not float. ⚠️ It must also match `UV_VERSION` in
+# `.github/workflows/ci.yml` -- two pins for one tool that drifted apart once
+# already, which means the image resolved dependencies differently from CI.
+COPY --from=ghcr.io/astral-sh/uv:0.11.18 /uv /usr/local/bin/uv
 
 # 3.11 is named explicitly: the base image defaults python3 to 3.10, while both
 # the miner side and CI are on 3.11.
@@ -73,9 +77,9 @@ WORKDIR /app
 RUN mkdir -p /models /logs
 
 # ─── Entrypoint ────────────────────────────────────────
-# No default subcommand: what you can run in this container is doctor / build /
-# train / check / submit / status, and `submit` **spends money**. Defaulting to a
-# command that spends money is not acceptable, so this is left empty and compose
-# or the command line has to name one explicitly.
+# No default subcommand: what you can run in this container is init / doctor /
+# build / train / check / submit / status / validator, and `submit` **spends the
+# entry fee**. Defaulting to a command that spends money is not acceptable, so
+# this is left empty and compose or the command line has to name one explicitly.
 ENTRYPOINT ["openroboto"]
 CMD ["--help"]

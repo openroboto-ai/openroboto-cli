@@ -33,8 +33,8 @@ __all__ = ["U16_MAX", "NormalizedWeights", "normalize_weights", "set_weights_on_
 #: perfectly ordinary-looking extrinsic. 0.5 sits between the two with room on
 #: both sides.
 #:
-#: Refusing costs one round: the chain keeps the previous weights, which were
-#: correct. Sending costs the round's entire emission, and is only visible
+#: Refusing costs one cycle: the chain keeps the previous weights, which were
+#: correct. Sending costs that cycle's entire emission, and is only visible
 #: afterwards.
 REFUSE_ABOVE_DROPPED_SHARE = 0.5
 
@@ -61,21 +61,21 @@ def set_weights_on_chain(
         logger.info("[set_weights]%s", line)
 
     if not normalized.uids:
-        logger.warning("[set_weights] no positive weights, skipping this round")
+        logger.warning("[set_weights] no positive weights, skipping this cycle")
         return False
 
     if normalized.dropped_share >= REFUSE_ABOVE_DROPPED_SHARE:
         logger.error(
             "[set_weights] %.0f%% of the incoming weight belongs to hotkeys that are "
             "not on netuid %d, and would be redistributed to the ones that are. "
-            "Refusing to send. The chain keeps last round's weights.",
+            "Refusing to send. The chain keeps the previous weights.",
             normalized.dropped_share * 100,
             netuid,
         )
         logger.error(
             "[set_weights] This usually means the backend is publishing weights for "
             "a different subnet than the one this validator is pointed at. Check "
-            "`netuid` and `network` in the config against the backend's control.json."
+            "`netuid` and `network` in the config against the backend it is reading."
         )
         return False
 
@@ -96,9 +96,9 @@ def set_weights_on_chain(
 def _is_success(result: Any) -> bool:
     """Decide whether the return value of set_weights means success.
 
-    The SDK has three return shapes (the old bool, the standard `is_success`, and
-    the timelock version's `success` + `error=None`); the decision order from the
-    old `validator.py` is preserved as-is.
+    The SDK has three return shapes (a bare bool, the standard `is_success`, and
+    the timelock version's `success` + `error=None`). All three are accepted, in
+    the order below.
     """
     if not result:
         logger.warning("[set_weights] set_weights returned a falsy value")

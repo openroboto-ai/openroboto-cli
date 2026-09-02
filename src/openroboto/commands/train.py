@@ -1,28 +1,16 @@
-"""`openroboto train` -- run one round of training (Step 1-2 of the old
-`miner.py`).
+"""`openroboto train` -- train once against this workspace's competition.
 
 Everything this command needs is already on disk when it starts: the season's
-spec in the `competition:` section of `miner.yaml` (round, status, image,
-dataset, base checkpoint) and the miner's own hyperparameters beside it.
-**Not one byte is fetched.** Training runs inside the runner container (red
-line #2, see `training/container.py`); when it finishes the checkpoint is
-written into `state/round_N.json`, and the later upload / burn / announce
-continue from there.
+spec in the `competition:` section of `miner.yaml` (status, image, dataset, base
+checkpoint) and the miner's own hyperparameters beside it. **Not one byte is
+fetched**, beyond the dataset that season names. Training runs inside the runner
+container (red line #2, see `training/container.py`); when it finishes the
+checkpoint is written into `state/competition_<id>.json`, and the later upload /
+payment / announce continue from there.
 
-## Why control.json is gone from here
-
-It used to be mandatory: no `urls.control_json`, no training. That file is one
-static JSON for the whole subnet, so everything it said was said once for
-everybody -- one round number, one dataset, one base checkpoint, one set of
-hyperparameters -- while the subnet has been running several competitions at
-once for a while now. Reading the round from it meant a LingBot miner training
-"round 1" on the π0.5 sample, on the π0.5 checkpoint path, and nothing on that
-path could notice.
-
-Each of those fields now comes from the place that actually varies per season
-(the competition row), except the five hyperparameters, which come from the
-miner: choosing their epoch count and LoRA rank for them was deciding the
-competition on their behalf.
+Everything that varies per season is read from the competition row, except the
+five hyperparameters, which are the miner's: choosing their epoch count and LoRA
+rank for them would be deciding the competition on their behalf.
 
 The output directory **is the checkpoint root**
 ------------------------------------------------
@@ -52,26 +40,26 @@ from openroboto import adapters
 from openroboto.commands.build import competition_image
 from openroboto.commands.check import weights_subdir
 from openroboto.competition import REFRESH_HINT, Snapshot, load_snapshot
-from openroboto.config import Settings
-from openroboto.console import fail, say
-from openroboto.round_state import (
+from openroboto.competition_state import (
     DEFAULT_OUTPUT_ROOT,
     is_step_done,
     load_state,
     save_state,
 )
-from openroboto.training.round import (
+from openroboto.config import Settings
+from openroboto.console import fail, say
+from openroboto.training.run import (
     TrainParams,
     download_dataset,
     resolve_checkpoint,
-    train_round,
+    train_once,
 )
 
 ACTIVE_STATUS = "active"
 
 
 def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    parser = subparsers.add_parser("train", help="Run one round of training")
+    parser = subparsers.add_parser("train", help="Train once")
     parser.add_argument("--config", default="miner.yaml")
     parser.add_argument(
         "--output-dir",
@@ -116,8 +104,8 @@ def run(args: argparse.Namespace) -> int:
     if snapshot is None:
         fail(
             "This workspace does not say which competition it mines, so there "
-            "is no round to train, no dataset to train on and no base model to "
-            "start from.\n"
+            "is nothing to train against, no dataset to train on and no base "
+            "model to start from.\n"
             "   → `openroboto init --refresh` writes the `competition:` section "
             "from the backend"
         )
@@ -131,18 +119,21 @@ def run(args: argparse.Namespace) -> int:
         )
         return 1
 
-    round_num = snapshot.seq
+    competition_id = snapshot.id
     say(
         f"🦞 {snapshot.label} ({snapshot.name}) | hotkey={settings.hotkey} | "
         f"HF={settings.hf_username}"
     )
 
-    state = load_state(round_num)
-    output_dir = str(Path(args.output_dir) / f"round_{round_num}")
+    state = load_state(competition_id)
+    output_dir = str(Path(args.output_dir) / f"competition_{competition_id}")
 
     if is_step_done(state, "training"):
-        say(f"⏭️  Round {round_num} is already trained (state/round_{round_num}.json)")
-        say(f"    → next: `openroboto check {state.get('round_output', output_dir)}`")
+        say(
+            f"⏭️  {snapshot.name} is already trained "
+            f"(state/competition_{competition_id}.json)"
+        )
+        say(f"    → next: `openroboto check {state.get('output_dir', output_dir)}`")
         return 0
 
     dataset = _dataset(snapshot)
@@ -184,13 +175,13 @@ def run(args: argparse.Namespace) -> int:
 
     state.update(
         {
-            "round": round_num,
+            "competition_seq": snapshot.seq,
             "step": "prep",
             "status": "completed",
             "started_at": datetime.now(UTC).isoformat(),
             "checkpoint_path": checkpoint,
-            "round_output": output_dir,
-            "data_version": f"v{round_num}",
+            "output_dir": output_dir,
+            "data_version": f"v{snapshot.seq}",
             "epochs": params.epochs,
             "batch_size": params.batch_size,
             "lr": params.learning_rate,
@@ -198,11 +189,11 @@ def run(args: argparse.Namespace) -> int:
             "lora_alpha": params.lora_alpha,
         }
     )
-    save_state(round_num, state)
+    save_state(competition_id, state)
 
     state["step"] = "training"
     state["status"] = "in_progress"
-    save_state(round_num, state)
+    save_state(competition_id, state)
 
     with tempfile.TemporaryDirectory() as tmpdir:
         train_path = download_dataset(train_url, str(Path(tmpdir) / "train.json"))
@@ -213,7 +204,7 @@ def run(args: argparse.Namespace) -> int:
             except OSError:
                 say("⏭️  No validation set, continuing")
 
-        outcome = train_round(
+        outcome = train_once(
             train_json_path=train_path,
             val_json_path=val_path,
             output_dir=output_dir,
@@ -227,29 +218,34 @@ def run(args: argparse.Namespace) -> int:
             image=competition_image(args.config),
             # 🔴 **The season's addresses, from the season's own row.**
             #
-            # These used to live only as constants inside the LingBot image
-            # (`runner/lingbot/train_runner.py`), which meant changing a base
-            # model required a CLI release and every miner rebuilding -- while
-            # π0.5 could do the same thing by editing one field. Two seasons on
-            # the same client behaving differently is the shape this closes.
+            # They are **not** constants inside the LingBot image
+            # (`runner/lingbot/train_runner.py`): a base model fixed there
+            # changes only with a CLI release and a rebuild on every miner's
+            # machine, while π0.5 does the same thing by editing one field. Two
+            # seasons on the same client behaving differently is the shape this
+            # closes.
             #
-            # ⚠️ Empty is meaningful and common: the season names nothing, the
-            #    image falls back to the base it was built around, and the
-            #    behaviour is byte-for-byte what it was before this existed.
-            #    That is what keeps older workspaces working.
+            # ⚠️ Empty is meaningful and common: the season names nothing and
+            #    the image falls back to the base it was built around. That is
+            #    what keeps older workspaces working.
             base_weights=str(snapshot.training.get("base_weights") or ""),
             processor=str(snapshot.training.get("processor") or ""),
+            # Named in `training_proof.json`, which ships in the public
+            # repository. Same source as `run_info.json`'s -- one season, one
+            # answer to "which base model is this".
+            base_model=settings.competition_base_model_family,
         )
 
     if not outcome.metrics.get("final_loss"):
         state["status"] = "failed"
         state["error"] = "training_result_invalid"
-        save_state(round_num, state)
+        save_state(competition_id, state)
         fail(
             "training result is invalid (final_loss missing or 0), most likely an "
             "OOM inside the container.\n"
             "  → check the container logs, or lower batch_size; "
-            f"the round is marked failed: state/round_{round_num}.json"
+            f"this attempt is marked failed: "
+            f"state/competition_{competition_id}.json"
         )
         return 1
 
@@ -259,22 +255,22 @@ def run(args: argparse.Namespace) -> int:
     state["status"] = "completed"
     if settings.hotkey_ss58:
         state["hotkey_ss58"] = settings.hotkey_ss58
-    save_state(round_num, state)
+    save_state(competition_id, state)
 
     say(f"✅ Training finished, output is in {output_dir}")
     say("")
-    for line in export_advice(Path(output_dir), round_num):
+    for line in export_advice(Path(output_dir)):
         say(line)
     return 0
 
 
-def export_advice(output_dir: Path, round_num: int) -> list[str]:
+def export_advice(output_dir: Path) -> list[str]:
     """What the run actually produced, and the next command that is true for it.
 
-    This used to be four fixed lines telling every miner to "merge the adapter
-    into the π0.5 base" -- wrong for the LingBot competitions, which do not use
-    LoRA at all, and wrong since the merge decision: nothing merges, on this side
-    or the evaluator's, and the export is the trainer's job.
+    🔴 **Not fixed text.** Advice like "merge the adapter into the π0.5 base" is
+    wrong for the LingBot competitions, which do not use LoRA at all, and wrong
+    everywhere else too: nothing merges, on this side or the evaluator's, and the
+    export is the trainer's job.
 
     Fixed text cannot be right for all three outcomes anyway, and the difference
     between them is one `rglob` away at the moment the artifact appears. Saying
@@ -314,12 +310,12 @@ def export_advice(output_dir: Path, round_num: int) -> list[str]:
             "    which is already too deep -- so this is the normal way to get here.",
             "    Submit that directory instead, or move its contents to the top:",
             f"      openroboto check {nested}",
-            f"      openroboto submit --round {round_num} --output-dir {nested}",
+            f"      openroboto submit --output-dir {nested}",
         ]
 
     return [
         f"    openroboto check {output_dir}      # free, local, do not skip it",
-        f"    openroboto submit --round {round_num}",
+        "    openroboto submit",
     ]
 
 

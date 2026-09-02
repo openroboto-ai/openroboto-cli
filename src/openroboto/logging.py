@@ -1,10 +1,9 @@
 """Logging assembly. Console plus a per-day file: both handlers configured in
 one go.
 
-Comes from the old `utils/logger.py`. The behavior is preserved: calling it
-again for the same logger name does not stack up handlers (a miner's
-`validator run` is a long-running process, and stacked handlers would print
-the same log line a dozen times).
+Calling it again for the same logger name does not stack up handlers: a
+miner's `validator run` is a long-running process, and stacked handlers would
+print the same log line a dozen times.
 """
 
 from __future__ import annotations

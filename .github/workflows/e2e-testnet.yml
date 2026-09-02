@@ -1,9 +1,13 @@
 name: E2E (testnet 313)
 
 # Release gate, NOT a pull-request check. It drives the real miner flow against
-# Bittensor testnet and a live backend: check -> upload -> burn -> announce ->
-# the chain scanner admits it (steps 1-5 of the backend repo's
-# `docs/上线验收计划.md` S1). Steps 6-10 need a GPU worker and stay out.
+# Bittensor testnet and a live backend: check -> submit (upload, the season check,
+# the layout gate, the fee, the chain announcement) -> the chain scanner admits it
+# (steps 1-5 of the backend repo's `docs/上线验收计划.md` S1). Steps 6-10 need a GPU
+# worker and stay out.
+#
+# ⚠️ `upload` / `burn` / `announce` stopped being commands in 1.0; `submit` is the
+# only entry point and it is re-entrant.
 #
 # Why it is not part of ci.yml:
 #   - it spends testnet TAO on every run, so per-PR execution drains the wallet

@@ -170,12 +170,20 @@ class BackendError(Exception):
 
 def fetch_submissions(
     base_url: str,
+    competition: int,
     hotkey: str = "",
     limit: int = DEFAULT_LIMIT,
     offset: int = 0,
-    round_num: int = 0,
 ) -> ListEnvelope[SubmissionHistoryItem]:
-    """Query the submission history.
+    """Query one competition's submission history.
+
+    🔴 **`competition` is required by the backend**, and is a competition **id**
+    -- omitted, the endpoint answers 422 rather than picking a season. That is
+    deliberate on its side: a default would give "which season is this response
+    about" two answers, the one that was asked for and the one that was not.
+
+    The filter is applied on the **server**. The season is not in the response
+    at all, so there would be nothing left to filter on once the rows arrive.
 
     Returns the whole envelope instead of just the rows: `meta.page.has_more`
     is the only reliable answer to "you have submissions that were not
@@ -184,19 +192,14 @@ def fetch_submissions(
     getting it wrong once shows up as **silently displaying a few rows too
     few** -- neither the backend nor the CLI raises any error.
     """
-    # 🔴 `round_num` filters on the **server**, not here. The field is not in the
-    # response at all any more (protocol 0.9.0 dropped it), so there is nothing
-    # left to filter on once the rows arrive -- while the backend still accepts
-    # the query parameter and selects rows by `competition_id`.
-    # 0 means "no filter": `_get` drops empty values rather than sending them.
     raw = _get(
         base_url,
         HISTORY_PATH,
         {
+            "competition": competition,
             "hotkey": hotkey,
             "limit": limit,
             "offset": offset,
-            "round_num": round_num or "",
         },
     )
     return _parse(ListEnvelope[SubmissionHistoryItem], raw, HISTORY_PATH)
@@ -207,20 +210,20 @@ def fetch_rejections(
     hotkey: str = "",
     limit: int = DEFAULT_LIMIT,
     offset: int = 0,
-    round_num: int = 0,
 ) -> ListEnvelope[ScanRejection]:
     """Query records rejected during the chain-scan stage -- the answer to
-    "it is on chain but not in the queue" is here."""
-    # Server-side filter, same as `fetch_submissions` -- see the note there.
+    "it is on chain but not in the queue" is here.
+
+    🔴 **Not filtered by competition, deliberately.** These rows are rejections
+    from *before* admission, so they have no season attached; the endpoint can
+    only filter on the ordinal the miner put in their own payload. Filtering a
+    rejection list by a number the rejected payload may itself have got wrong
+    hides exactly the row the miner came here to find.
+    """
     raw = _get(
         base_url,
         REJECTIONS_PATH,
-        {
-            "hotkey": hotkey,
-            "limit": limit,
-            "offset": offset,
-            "round_num": round_num or "",
-        },
+        {"hotkey": hotkey, "limit": limit, "offset": offset},
     )
     return _parse(ListEnvelope[ScanRejection], raw, REJECTIONS_PATH)
 
@@ -255,9 +258,9 @@ def fetch_netuid(base_url: str) -> int:
     """Which subnet this backend watches, from its own liveness probe.
 
     For a self-hosted backend this is the **only** honest answer to "which chain
-    is this workspace on". `openroboto init` used to answer it from a static
-    template instead, which is how asking a testnet backend for the season
-    produced a mainnet workspace around it.
+    is this workspace on" -- **not** a static template. A templated answer is how
+    asking a testnet backend for the season produces a mainnet workspace around
+    it.
 
     ⚠️ `/healthz` is deliberately **not** enveloped (backend ADR 02 §3.3: probes
     stay bare JSON so orchestrators can read fixed field paths), so this is the
@@ -297,8 +300,8 @@ class RosterEntry(Contract):
     """One row of a competition's entry list.
 
     ⚠️ **The only response model in this repository that the protocol package
-    does not publish.** `openroboto-protocol` 0.7.0 has `Competition` but no
-    roster model, and it is released -- adding one means a release of that
+    does not publish.** `openroboto-protocol` 0.9.0 has `Competition` but still
+    no roster model, and it is released -- adding one means a release of that
     package plus a re-pin here. This is a display-only path (`openroboto
     status`), no money branches on it, so it waits here for the protocol
     package's next version rather than blocking the command. **Do not grow this

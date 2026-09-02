@@ -20,7 +20,6 @@ from openroboto.config import (
     ConfigError,
     ControlFetchError,
     Settings,
-    apply_control,
     fetch_control,
 )
 from openroboto.config import control as control_module
@@ -153,39 +152,6 @@ def test_a_learning_rate_yaml_read_as_text_still_reaches_the_container_as_a_numb
     assert Settings.load(str(path)).learning_rate == 1e-4
 
 
-def test_apply_control_only_touches_payment() -> None:
-    """Everything but `payment` is now read off the competition row instead.
-
-    The `training` block is the one that matters here: while it landed in
-    settings, a stale control.json could still decide which base checkpoint a
-    season trains from -- the exact override this move exists to remove.
-    """
-    settings = Settings.from_mapping(
-        {
-            "backend": {"url": "https://backend.invalid"},
-            "model": {"vla_checkpoint_path": "/mine/pi05_base"},
-            "training": {"epochs": 7},
-        }
-    )
-    apply_control(
-        settings,
-        {
-            "round": 9,
-            "status": "active",
-            "payment": {"burn_rate_tao": 0.1, "limit_price_rao": 5},
-            "training": {"vla_checkpoint_path": "gs://bucket/ckpt", "epochs": 42},
-            "dataset": {"train_url": "https://example.invalid/other.json"},
-            "public_key": "should-not-land-in-settings",
-        },
-    )
-    assert settings.burn_rate_tao == 0.1
-    assert settings.limit_price_rao == 5
-    # round / status / dataset / training / public_key change nothing.
-    assert settings.vla_checkpoint_path == "/mine/pi05_base"
-    assert settings.epochs == 7
-    assert settings.backend_url == "https://backend.invalid"
-
-
 class _FakeResponse(io.BytesIO):
     def __init__(self, payload: bytes, status: int = 200, etag: str = "") -> None:
         super().__init__(payload)
@@ -205,10 +171,12 @@ def test_fetch_control_returns_payload_and_etag(
     monkeypatch.setattr(
         control_module,
         "urlopen",
-        lambda *a, **k: _FakeResponse(json.dumps({"round": 1}).encode(), etag="abc"),
+        lambda *a, **k: _FakeResponse(
+            json.dumps({"public_key": "k1"}).encode(), etag="abc"
+        ),
     )
     fetched = fetch_control("https://example.invalid/control.json")
-    assert fetched.control == {"round": 1}
+    assert fetched.control == {"public_key": "k1"}
     assert fetched.etag == "abc"
 
 
@@ -234,41 +202,6 @@ def test_fetch_control_network_failure_is_infrastructure_error(
     monkeypatch.setattr(control_module, "urlopen", _raise)
     with pytest.raises(ControlFetchError):
         fetch_control("https://example.invalid/control.json")
-
-
-def test_refresh_burn_rate_falls_back_to_local_config(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """When control.json cannot be fetched, the rate falls back to miner.yaml -- **not**
-    to a literal in the code.
-
-    The fallback constant in the old `rt.py` said 0.01 while production is 0.1; burning
-    ten times too little is still rejected, and still not refunded.
-    """
-    settings = Settings.from_mapping(
-        {
-            "urls": {"control_json": "https://example.invalid/control.json"},
-            "payment": {"burn_rate_tao": 0.1},
-        }
-    )
-
-    def _raise(*args: Any, **kwargs: Any) -> None:
-        raise urllib.error.URLError("down")
-
-    monkeypatch.setattr(control_module, "urlopen", _raise)
-
-    messages: list[str] = []
-
-    class _Logger:
-        def warning(self, message: str, *args: Any) -> None:
-            messages.append(message % args)
-
-        def info(self, message: str, *args: Any) -> None:
-            messages.append(message % args)
-
-    control_module.refresh_burn_rate(settings, _Logger())
-    assert settings.burn_rate_tao == 0.1
-    assert any("0.1" in message for message in messages)
 
 
 # ─── environment: the four fields that must share one source ─────────────────
@@ -303,12 +236,12 @@ def test_explicit_fields_beat_the_environment_preset() -> None:
 
 
 def test_mainnet_netuid_with_dev_control_json_is_refused() -> None:
-    """One of the half-switched setups that costs money: burning at the dev rate of
-    0.01 on **mainnet**.
+    """One of the half-switched setups that costs money.
 
-    dev publishes burn_rate_tao=0.01 and production publishes 0.1. In this combination
-    the miner burns one tenth of the fee, the production backend rejects on the amount
-    check, **and there is no refund**.
+    The four fields describe one decision. Naming mainnet's netuid while the
+    public resources point at dev means the seasons and the fee come from one
+    subnet and the burn lands on another -- rejected on arrival, **and there is
+    no refund**.
     """
     cfg = Settings.from_mapping(
         {
@@ -530,7 +463,7 @@ def test_the_bounds_themselves_are_reachable() -> None:
 
 
 def test_require_for_chain_reports_the_interval_with_everything_else() -> None:
-    """Reported together with the other problems, not in a second round.
+    """Reported together with the other problems, not in a second pass.
 
     One command re-run per problem just to learn the next one is the experience
     this check exists to avoid.

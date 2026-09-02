@@ -32,7 +32,6 @@ from openroboto.console import fail
 from openroboto.huggingface import UploadError
 from openroboto.logging import setup_logger
 from openroboto.payment import BurnError, TransferError
-from openroboto.round_state import StateError
 from openroboto.training import TrainingError
 
 #: The whole command surface, in the order a miner uses it.
@@ -63,7 +62,6 @@ EXPECTED_ERRORS = (
     ChainError,
     ConfigError,
     ControlFetchError,
-    StateError,
     TrainingError,
     TransferError,
     UploadError,

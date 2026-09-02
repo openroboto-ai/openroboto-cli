@@ -1,10 +1,8 @@
-"""`openroboto announce` -- write the submission on chain (the old
-`rt.py announce`).
+"""`openroboto announce` -- write the submission on chain.
 
 **This step must be completed after a burn**: without a commitment, that burn
 does not exist as far as the backend is concerned. The payload bytes are
-produced by `openroboto-protocol`; this repo no longer assembles a JSON of its
-own.
+produced by `openroboto-protocol`; this repo never assembles a JSON of its own.
 """
 
 from __future__ import annotations
@@ -19,30 +17,39 @@ from openroboto.chain import (
     open_wallet,
     submit_announcement,
 )
+from openroboto.competition import load_snapshot
+from openroboto.competition_state import (
+    announced_commit,
+    model_hash,
+    paid_competition_id,
+    save_state,
+)
 from openroboto.config import ConfigError, Settings
 from openroboto.console import fail, say
 from openroboto.preflight import check_burn_window, payload_track
-from openroboto.round_state import (
-    announced_commit,
-    competition_id,
-    model_hash,
-    save_state,
-)
 
 
-def perform_announce(settings: Settings, round_num: int, state: dict[str, Any]) -> bool:
-    """Send the commitment and, on success, mark the step as announce."""
+def perform_announce(
+    settings: Settings, competition_id: int, state: dict[str, Any]
+) -> bool:
+    """Send the commitment and, on success, mark the step as announce.
+
+    `competition_id` names this workspace's checkpoint file. The season ordinal
+    that goes on chain (`r`) and the competition id that goes on chain (`cid`)
+    are read from the snapshot and the checkpoint respectively -- see
+    `competition_state.paid_competition_id` for why the two ids differ.
+    """
     settings.require_for_chain()
 
     hf_repo_id = str(state.get("hf_repo_id", ""))
     hf_url = str(state.get("hf_url", ""))
     if not hf_repo_id or not hf_url:
         raise ConfigError(
-            "No HF repo info in the checkpoint -- run `openroboto upload` first"
+            "No HF repo info in the checkpoint -- run `openroboto submit` first"
         )
 
     # The same revision the layout gate in `submit` judged before the fee was
-    # paid -- see `round_state.announced_commit` for why one function answers
+    # paid -- see `competition_state.announced_commit` for why one function answers
     # this for both.
     hf_commit = announced_commit(state)
 
@@ -53,13 +60,12 @@ def perform_announce(settings: Settings, round_num: int, state: dict[str, Any]) 
         block_hash = subtensor.get_block_hash(current_block)
         # The window check comes first, and nothing is printed before it.
         #
-        # These two lines used to be the other way round, so a refused announce
-        # ended with "📡 committing on chain" as the last thing on screen while
-        # no extrinsic was ever sent. The exit code was already 1, which is what
-        # a script reads -- but a person reads the last line, and that line said
-        # the opposite of what happened. Spent ten minutes checking the chain,
-        # then the database, then the ingest logs, for a commitment that had
-        # been deliberately not sent.
+        # Ordered the other way round, a refused announce ends with
+        # "📡 committing on chain" as the last thing on screen while no extrinsic
+        # was ever sent. The exit code is 1 either way, which is what a script
+        # reads -- but a person reads the last line, and that line would say the
+        # opposite of what happened: ten minutes of checking the chain, then the
+        # database, then the ingest logs, for a commitment deliberately not sent.
         burn_block = int(state.get("burn_block", 0) or 0)
         if not _burn_window_ok(settings, burn_block, current_block):
             say("   → nothing was sent on chain, and no transaction fee was paid")
@@ -69,7 +75,7 @@ def perform_announce(settings: Settings, round_num: int, state: dict[str, Any]) 
             hotkey_ss58=str(state.get("hotkey_ss58", "")) or wallet.hotkey.ss58_address,
             block_hash=str(block_hash),
             hf_commit=hf_commit,
-            round_num=round_num,
+            competition_seq=_competition_seq(settings),
             hf_repo_id=hf_repo_id,
             # `b` / `bb` are the **payment credential** -- which transaction,
             # which block. Whether that payment was a burn or a transfer to the
@@ -80,7 +86,7 @@ def perform_announce(settings: Settings, round_num: int, state: dict[str, Any]) 
             # Both come from the checkpoint, and both are `None` when absent --
             # which is what a config from before competitions existed produces,
             # and what makes its bytes identical to what it wrote a year ago.
-            competition_id=competition_id(state),
+            competition_id=paid_competition_id(state),
             model_hash=model_hash(state),
         )
         # The last gate, and like the window check above it runs **before
@@ -106,7 +112,7 @@ def perform_announce(settings: Settings, round_num: int, state: dict[str, Any]) 
             return False
 
         say(
-            f"📡 committing on chain | round={round_num} "
+            f"📡 committing on chain | competition={competition_id} "
             f"repo={hf_repo_id} block={current_block}"
         )
         result = submit_announcement(subtensor, wallet, settings.netuid, payload)
@@ -120,8 +126,9 @@ def perform_announce(settings: Settings, round_num: int, state: dict[str, Any]) 
             "   This may be only a wait timeout while the transaction did make"
             " it into a block, so check once first: `openroboto status`.\n"
             "   Once you have confirmed the backend did not receive it, run"
-            " `openroboto announce` again (the burn_tx in the checkpoint is"
-            " reused)"
+            " `openroboto submit` again: it resumes from the checkpoint -- the"
+            " upload is not repeated and the entry fee is not paid a second"
+            " time, only the commitment is sent"
         )
         return False
 
@@ -142,7 +149,7 @@ def perform_announce(settings: Settings, round_num: int, state: dict[str, Any]) 
         )
     state["step"] = "announce"
     state["status"] = "completed"
-    save_state(round_num, state)
+    save_state(competition_id, state)
     return True
 
 
@@ -158,3 +165,16 @@ def _burn_window_ok(settings: Settings, burn_block: int, current_block: int) -> 
     if warning:
         say(f"⚠️  {warning}")
     return True
+
+
+def _competition_seq(settings: Settings) -> int:
+    """The season ordinal that goes on chain as `r`.
+
+    🔴 **Not the competition id.** The protocol reads `r` as
+    `competitions.seq`, so sending an id there would name a different season --
+    or none. `0` when the workspace does not say, which is a value no season
+    ordinal can be, so the backend's lookup fails loudly instead of matching the
+    wrong row.
+    """
+    snapshot = load_snapshot(settings)
+    return snapshot.seq if snapshot is not None else 0

@@ -9,7 +9,6 @@ environment: mainnet   # mainnet | dev (see miner.yaml for the full list)
 subnet:
   network: finney                  # finney | test | local
   netuid: 80                       # required
-  subtensor_endpoint: ""
   wallet_path: ""
   coldkey: default
   hotkey: default

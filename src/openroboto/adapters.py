@@ -10,12 +10,12 @@ The **strings** are shared with the backend; the implementations behind them are
 not (the backend decides admission and rounds, this decides which local tool
 chain to run).
 
-## 🔴 Two orthogonal dimensions, two tables (2026-08-26)
+## 🔴 Two orthogonal dimensions, two tables
 
-`adapter` used to answer both "which track" and "which base model". It never
-could: `real_xarm6` names a *robot arm*, not a model, so the real track had
-nowhere to say what it runs on and this table simply guessed `LINGBOT` for it --
-a guess that was backwards, since the plan is to bring xArm 6 up on π0.5 first.
+`adapter` answers "which track", **never** "which base model". It cannot:
+`real_xarm6` names a *robot arm*, not a model, so a single table has nowhere to
+say what the real track runs on and can only guess -- and guessing `LINGBOT`
+for it is backwards, since xArm 6 comes up on π0.5 first.
 
     ADAPTERS      keyed by `competition.adapter`             -> training
     FORMAT_PROFILES  keyed by `competition.base_model_family` -> format profile
@@ -78,12 +78,11 @@ class Adapter:
 
 ADAPTERS: Final = {
     "sim_openpi": Adapter(),
-    # `DOCKER` since 2026-08-26, on evidence rather than arithmetic. Three
-    # reasons were written here over time for holding it at `UNAVAILABLE`; all
-    # three are now discharged, and they are worth a line each so nobody
-    # re-derives them.
+    # `DOCKER`, on evidence rather than arithmetic (measured 2026-08-26). Three
+    # objections to shipping a LingBot container do not hold, and each is worth
+    # a line here so nobody re-derives them.
     #
-    # "This package ships no LingBot Dockerfile": **fixed.**
+    # "This package ships no LingBot Dockerfile": **it does.**
     # `runner/lingbot/` ships one, and `runner_context(LINGBOT)` selects it.
     #
     # "LingBot cannot fit `train(cfg, episodes, policy)`": **wrong.** That
@@ -116,10 +115,11 @@ ADAPTERS: Final = {
     # The dataset (`xarm6-libero-seed-v1`) and the training image do not exist
     # yet, so there is nothing to install and nothing to run.
     #
-    # ⚠️ This row used to carry `format_profile=LINGBOT`, which was a **guess** --
-    # and the wrong one: xArm 6 is being brought up on π0.5 first. Nothing here
-    # ever knew, because the base model is a property of the season and this
-    # table is keyed by hardware. It is now read off the season row instead.
+    # ⚠️ **No `format_profile` on this row.** A base model written here could
+    # only be a **guess**, and `LINGBOT` is the wrong one: xArm 6 is being
+    # brought up on π0.5 first. This table is keyed by hardware and cannot know,
+    # because the base model is a property of the season -- it is read off the
+    # season row instead.
     "real_xarm6": Adapter(training=UNAVAILABLE),
 }
 """Every adapter this client knows, and what each step does for it."""
@@ -127,8 +127,11 @@ ADAPTERS: Final = {
 DEFAULT_ADAPTER: Final = "sim_openpi"
 """A `miner.yaml` written before competitions existed has no adapter at all.
 It is the π0.5 simulation competition -- the same rule the chain side uses when
-a commitment carries no competition id, and the promise made in MIGRATION.md
-§2: a config without the section keeps working exactly as it did."""
+a commitment carries no competition id.
+
+⚠️ It does **not** mean such a workspace can still submit: `submit` refuses a
+config with no `competition:` section before it uploads anything (ADR 05). This
+default only decides how the offline commands read a file that old."""
 
 
 def resolve(adapter: str) -> Adapter:
@@ -168,18 +171,19 @@ def resolve(adapter: str) -> Adapter:
 #: LingBot's is `"lingbot"` rather than the season's full name. Shared strings,
 #: separate implementations, same as `ADAPTERS`.
 #:
-#: ⚠️ **The keys changed on 2026-08-31** (`openpi` / `lingbot_vla` ->
-#: `pi0.5` / `lingbot-vla-2.0`) and **the old spellings are deliberately absent**.
-#: The old pair named two different kinds of thing -- openpi is Physical
-#: Intelligence's *framework*, the model is π0.5 -- and would have run out the day
-#: something other than π0.5 shipped on that framework. The new pair names models
-#: on both sides and carries the generation, which decides the code path: LingBot
-#: v1 and v2 need different config classes (`runner/lingbot/train_runner.py`).
+#: ⚠️ The keys are `pi0.5` / `lingbot-vla-2.0`, and the spellings `openpi` /
+#: `lingbot_vla` are **deliberately absent**. That pair names two different kinds
+#: of thing -- openpi is Physical Intelligence's *framework*, the model is π0.5 --
+#: and runs out the day something other than π0.5 ships on that framework. These
+#: keys name models on both sides and carry the generation, which decides the code
+#: path: LingBot v1 and v2 need different config classes
+#: (`runner/lingbot/train_runner.py`).
 #:
-#: 🔴 Not keeping both spellings was a decision, not an oversight: two live
-#: vocabularies mean nobody can say which one is correct, and removing the old one
-#: later costs another release. The changeover is a single co-ordinated switch --
-#: the backend and the evaluator flip together and miners are told to upgrade.
+#: 🔴 **Exactly one spelling is live at a time**, by decision: two live
+#: vocabularies mean nobody can say which one is correct, and dropping the second
+#: one later costs another release. A vocabulary change is a single co-ordinated
+#: switch -- the backend and the evaluator flip together and miners are told to
+#: upgrade.
 FORMAT_PROFILES: Final = {
     "pi0.5": OPENPI,
     "lingbot-vla-2.0": LINGBOT,
@@ -191,9 +195,9 @@ FORMAT_PROFILES: Final = {
 #: compatibility as `DEFAULT_ADAPTER`, and bounded the same way: these two mappings
 #: can be proven from the seeded competition rows, and there is no third.
 #:
-#: 🔴 `real_xarm6` is deliberately absent. Its name says *hardware*; guessing a base
-#: model from it is what this whole split removed, and the previous guess here was
-#: wrong. A real-track workspace with no `base_model_family` gets a refusal.
+#: 🔴 `real_xarm6` is deliberately absent. Its name says *hardware*, so any base
+#: model inferred from it is a guess -- and the available guess, `LINGBOT`, is the
+#: wrong one. A real-track workspace with no `base_model_family` gets a refusal.
 _FAMILY_BY_LEGACY_ADAPTER: Final = {
     "sim_openpi": "pi0.5",
     "sim_lingbot": "lingbot-vla-2.0",

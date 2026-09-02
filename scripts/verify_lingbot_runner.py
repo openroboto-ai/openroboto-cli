@@ -49,17 +49,30 @@ RUNNER_CANDIDATES = (
 #: TypeError hours into a run; here it is one line of output.
 EXPECTED_SIGNATURES = {
     "lingbotvla.models:build_foundation_model": (
-        "config_path", "config_cls", "weights_path", "torch_dtype",
-        "init_device", "config_kwargs", "moe_implementation",
+        "config_path",
+        "config_cls",
+        "weights_path",
+        "torch_dtype",
+        "init_device",
+        "config_kwargs",
+        "moe_implementation",
     ),
     "lingbotvla.models:build_processor": ("processor_path",),
     "lingbotvla.utils.lora_utils:add_lora_to_model": (
-        "model", "lora_rank", "lora_alpha", "lora_target_modules",
+        "model",
+        "lora_rank",
+        "lora_alpha",
+        "lora_target_modules",
     ),
     "lingbotvla.utils.lora_utils:freeze_parameters": ("model",),
     "lingbotvla.utils.arguments:ModelArguments": (
-        "config_key", "config_path", "model_path", "tokenizer_path",
-        "post_training", "adanorm_time", "moe_implementation",
+        "config_key",
+        "config_path",
+        "model_path",
+        "tokenizer_path",
+        "post_training",
+        "adanorm_time",
+        "moe_implementation",
     ),
 }
 
@@ -82,7 +95,7 @@ def stage(name: str):
             except SkipStage as exc:
                 record(name, "SKIP", str(exc))
                 return None
-            except Exception as exc:  # noqa: BLE001 - the whole point
+            except Exception as exc:
                 record(name, "FAIL", f"{type(exc).__name__}: {exc}")
                 if os.getenv("VERIFY_TRACEBACK"):
                     traceback.print_exc()
@@ -108,7 +121,9 @@ def load_runner(explicit: str = ""):
             spec.loader.exec_module(module)
             print(f"   runner: {path}")
             return module
-    raise SystemExit(f"train_runner.py not found, looked in: {[str(p) for p in candidates]}")
+    raise SystemExit(
+        f"train_runner.py not found, looked in: {[str(p) for p in candidates]}"
+    )
 
 
 # ─── 1. What is installed ─────────────────────────────────
@@ -135,7 +150,7 @@ def check_environment() -> str:
         import flash_attn
 
         parts.append(f"flash_attn {flash_attn.__version__}")
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         # Not a hard fail: `build_foundation_model` takes attn_implementation.
         # But the default is flash_attention_2, so a broken wheel here is a
         # crash later, and this line is where it should be read.
@@ -158,7 +173,8 @@ def check_signatures() -> str:
                 missing.append(f"{target}({name})")
     if missing:
         raise AssertionError(
-            "arguments gone from upstream: " + ", ".join(missing)
+            "arguments gone from upstream: "
+            + ", ".join(missing)
             + " -- the Dockerfile's LINGBOT_REF and train_runner.py disagree"
         )
     return f"{len(EXPECTED_SIGNATURES)} entry points, all arguments present"
@@ -173,12 +189,16 @@ def check_parallel_state() -> str:
     from lingbotvla.distributed.parallel_state import get_parallel_state
 
     if dist.is_initialized():
-        raise SkipStage("a process group is already initialised; run this bare, not under torchrun")
+        raise SkipStage(
+            "a process group is already initialised; run this bare, not under torchrun"
+        )
 
     state = get_parallel_state()
     rank, world = state.global_rank, state.world_size
     if world != 1:
-        raise AssertionError(f"world_size is {world}, expected 1 without a process group")
+        raise AssertionError(
+            f"world_size is {world}, expected 1 without a process group"
+        )
     if rank == 0:
         # Not a failure of ours -- but decision 1 in train_runner.py rests on
         # rank being -1 here, and if upstream changed it to 0 then
@@ -275,17 +295,23 @@ def check_export(runner, policy, output_dir: str) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--runner", default="", help="path to the lingbot train_runner.py")
+    parser.add_argument(
+        "--runner", default="", help="path to the lingbot train_runner.py"
+    )
     parser.add_argument(
         "--weights-root",
         default="",
         help="directory holding lingbot-vla-v2-6b/ and Qwen3-VL-4B-Instruct/; "
         "without it stages 4-6 download tens of GB",
     )
-    parser.add_argument("--output-dir", default="", help="where stage 6 writes; default is a temp dir")
+    parser.add_argument(
+        "--output-dir", default="", help="where stage 6 writes; default is a temp dir"
+    )
     parser.add_argument("--lora-r", type=int, default=32)
     parser.add_argument("--lora-alpha", type=int, default=64)
-    parser.add_argument("--quick", action="store_true", help="stages 1-3 only (no weights, no GPU)")
+    parser.add_argument(
+        "--quick", action="store_true", help="stages 1-3 only (no weights, no GPU)"
+    )
     args = parser.parse_args()
 
     print("LingBot runner verification\n" + "=" * 60)
@@ -307,7 +333,9 @@ def main() -> int:
     failed = [name for name, status, _ in results if status == "FAIL"]
     skipped = [name for name, status, _ in results if status == "SKIP"]
     print("\n" + "=" * 60)
-    print(f"{len(results) - len(failed) - len(skipped)} passed, {len(failed)} failed, {len(skipped)} skipped")
+    print(
+        f"{len(results) - len(failed) - len(skipped)} passed, {len(failed)} failed, {len(skipped)} skipped"
+    )
     if skipped:
         print("⏭️  a skip is not a pass: " + "; ".join(skipped))
     if failed:
@@ -315,11 +343,15 @@ def main() -> int:
         print("\n🔴 sim_lingbot.training must stay UNAVAILABLE.")
         return 1
     if skipped:
-        print("\n🟡 Nothing failed, but not everything ran. Flipping "
-              "sim_lingbot.training to DOCKER needs stages 4-6 green on a card.")
+        print(
+            "\n🟡 Nothing failed, but not everything ran. Flipping "
+            "sim_lingbot.training to DOCKER needs stages 4-6 green on a card."
+        )
         return 0
-    print("\n✅ All stages green -- this is the evidence "
-          "`adapters.sim_lingbot.training = DOCKER` was waiting for.")
+    print(
+        "\n✅ All stages green -- this is the evidence "
+        "`adapters.sim_lingbot.training = DOCKER` was waiting for."
+    )
     return 0
 
 
