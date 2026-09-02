@@ -37,7 +37,7 @@ dependencies = [
     # override is removed and the install really comes from PyPI — which is
     # release time. `tests/test_packaging.py` compares this against the version
     # actually resolved into the environment.
-    "openroboto-protocol==0.10.0",
+    "openroboto-protocol==0.11.0",
     "pyyaml>=6.0",
     # Production miner machines run 10.5.0 (the old requirements.txt pinned that
     # version). The two APIs used are private surface of the SDK:

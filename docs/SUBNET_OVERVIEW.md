@@ -143,7 +143,7 @@ Each task's evaluation seed is derived from **two independent public beacons**, 
 seed = uint32( last 4 bytes of SHA256( "{block_hash}:{competition_id}:{drand_randomness}" ) )
 ```
 
-🔴 The middle input is the **competition id** — `competitions.id`, the season your submission was admitted to. It is **not** the `r` field of your commitment payload (§11), which you write yourself and which nothing validates once `cid` is present, and it is **not** the season ordinal an API response displays (that is the season's `seq`, which restarts per track). `derive_seed` concatenates by position; in the pinned protocol release its second parameter is still named `round_num`. [SEED_GENERATION.md](./SEED_GENERATION.md) is the authority here.
+🔴 The middle input is the **competition id** — `competitions.id`, the season your submission was admitted to. It is **not** the `r` field of your commitment payload (§11), which you write yourself and which nothing validates once `cid` is present, and it is **not** the season ordinal an API response displays (that is the season's `seq`, which restarts per track). `derive_seed` concatenates by position; its second parameter is the competition id. [SEED_GENERATION.md](./SEED_GENERATION.md) is the authority here.
 
 The seed is unpredictable before submission, frozen after it, and reproducible by anyone: the API exposes `block_hash`, `drand_round`, `drand_random`, and the derived `seed` for every task, and the drand value can be checked byte-for-byte at `https://api.drand.sh/public/{round}`. Even if one beacon were compromised, the other still guarantees unpredictability.
 

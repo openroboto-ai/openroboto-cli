@@ -201,16 +201,15 @@ def _estimated_payload(
     pays for both keys here rather than at the on-chain step, when the fee is
     already gone.
     """
-    # 🔴 The first four are **positional on purpose.** The fourth field is the
-    # season ordinal that goes on chain as `r`; the protocol package is renaming
-    # it (`round_num` → `claimed_competition_seq`) without changing the wire
-    # format or the field order, and a keyword here would break on that bump
-    # while positional survives it.
+    # 🔴 Keyword, not positional. The pin is exact (`==`), so a renamed field
+    # fails loudly at the call site; a reordered one would bind silently to the
+    # wrong field, and the field below decides which season a fee is filed
+    # under. On this path, loud beats silent.
     return CommitmentPayload(
-        str(state.get("hotkey_ss58", "")),
-        BLOCK_HASH_PLACEHOLDER,
-        str(state.get("hf_commit", "")),
-        competition_seq,
+        hotkey_ss58=str(state.get("hotkey_ss58", "")),
+        block_hash=BLOCK_HASH_PLACEHOLDER,
+        hf_commit=str(state.get("hf_commit", "")),
+        claimed_competition_seq=competition_seq,
         hf_repo_id=str(state.get("hf_repo_id", "")),
         burn_tx_hash=str(state.get("burn_tx_hash", "")) or "0" * 64,
         burn_block=int(state.get("burn_block", 0) or 0) or 1,

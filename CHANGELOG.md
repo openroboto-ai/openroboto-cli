@@ -44,7 +44,7 @@ and **pays again**.
 
 ### Changed
 
-- Pins `openroboto-protocol==0.10.0`.
+- Pins `openroboto-protocol==0.11.0`.
 - `OPENROBOTO_E2E_CONFIRM=1` answers the payment confirmation, on the testnet
   netuid only. On any other netuid it **refuses and says so** rather than being
   ignored.

@@ -108,7 +108,7 @@ openroboto --version
 Expect the client and the protocol package on one line:
 
 ```
-openroboto 1.3.0 (openroboto-protocol 0.10.0)
+openroboto 1.3.0 (openroboto-protocol 0.11.0)
 ```
 
 **1.2.0 is the minimum for this competition.** Earlier clients stop at the season

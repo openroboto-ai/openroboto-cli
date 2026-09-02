@@ -93,16 +93,15 @@ def build_payload(
       track, where the repository may be private and the backend therefore
       cannot compute it itself.
     """
-    # 🔴 The first four are **positional on purpose.** The fourth field is the
-    # season ordinal that goes on chain as `r`; the protocol package is renaming
-    # it (`round_num` → `claimed_competition_seq`) without changing the wire
-    # format or the field order, and a keyword here would break on that bump
-    # while positional survives it.
+    # 🔴 Keyword, not positional. The pin is exact (`==`), so a renamed field
+    # fails loudly at the call site; a reordered one would bind silently to the
+    # wrong field, and the field below decides which season a fee is filed
+    # under. On this path, loud beats silent.
     return CommitmentPayload(
-        hotkey_ss58,
-        block_hash,
-        hf_commit,
-        competition_seq,
+        hotkey_ss58=hotkey_ss58,
+        block_hash=block_hash,
+        hf_commit=hf_commit,
+        claimed_competition_seq=competition_seq,
         hf_repo_id=hf_repo_id,
         burn_tx_hash=burn_tx_hash,
         burn_block=burn_block,
@@ -140,7 +139,7 @@ def submit_announcement(
     logger.info(
         "Committing on chain | repo=%s seq=%d size=%d bytes",
         payload.hf_repo_id,
-        payload.round_num,
+        payload.claimed_competition_seq,
         len(data),
     )
 

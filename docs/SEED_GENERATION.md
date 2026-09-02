@@ -21,16 +21,15 @@ seed    = big_endian_uint32(digest[-4:])
 ```
 
 The reference implementation is `openroboto_protocol.seed`
-(`pip install "openroboto-protocol==0.10.0"` — the release this CLI pins):
+(`pip install "openroboto-protocol==0.11.0"` — the release this CLI pins):
 
 ```python
 import hashlib
 
 
 def derive_seed(block_hash: str, competition_id: int, drand_random: str) -> int:
-    # ⚠️ The formula concatenates by position and never reads the parameter
-    #    name. In the pinned protocol release the second parameter is still
-    #    declared as `round_num`; what the backend passes is the competition id.
+    # ⚠️ The formula concatenates by position; the middle input is the
+    #    competition id, and nothing about the seed depends on the name.
     seed_input = f"{block_hash}:{competition_id}:{drand_random}".encode("utf-8")
     digest = hashlib.sha256(seed_input).digest()
     return int.from_bytes(digest[-4:], byteorder="big")
