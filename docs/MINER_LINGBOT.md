@@ -63,7 +63,7 @@ If you have mined the π0.5 competition, this is the part to read first.
 |---|---|---|
 | The exam | **LIBERO**, the same task suites in simulation. Only the textbook changed | [SUBNET_OVERVIEW.md](./SUBNET_OVERVIEW.md) §6 |
 | What you deliver | Upload to HuggingFace, then announce on chain. Two artefacts, same order | `commands/submit.py::run` |
-| Your repository name | `{hf-username}/lingbot-vla-2.0-{last 12 chars of your hotkey}` — one repository per season. Already have a `pi05-…` one? Put it in `huggingface.repo_id` and keep using it. | `huggingface/repository.py::build_repo_id` |
+| Your repository name | `{hf-username}/lingbot-vla-2.0-{last 12 chars of your hotkey}` for a workspace `openroboto init` created. A workspace whose season names no base model keeps its `pi05-…` name — upgrading never moves your repository. `openroboto init --refresh` adopts the season-scoped name (re-pushes the model once); `huggingface.repo_id` pins any repository. | `huggingface/repository.py::build_repo_id` |
 | One repository per **season** | Within this season, each attempt is uploaded on top of the last — `upload_folder` never deletes | `huggingface/upload.py::push_model`, `huggingface/repository.py` |
 | Entry fee | **0.1 TAO**, and this season's `params.fee.kind` is `burn` — destroyed, not transferred. (The real-hardware track transfers instead; see [PAYMENT.md](./PAYMENT.md)) | competition row `sim/2` in `0003_competitions.sql` |
 | Chain announcement | Same encoder, **≤512 bytes**, burn→announce within **50 blocks** | `preflight.py::check_burn_window`, `openroboto_protocol.commitment.MAX_COMMITMENT_BYTES` = 512, `constants.BURN_BLOCK_WINDOW` = 50 |

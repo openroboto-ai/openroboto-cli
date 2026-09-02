@@ -84,12 +84,13 @@ huggingface:
                                    # <username>/<base_model_family>-<last 12 of
                                    # hotkey>, i.e. one repository per season,
                                    # named after the base model that season runs.
-                                   # Set it to keep a repository you already use
-                                   # — miners who started before 2026-09-02 have
-                                   # one named <username>/pi05-<...>, from back
-                                   # when every season shared one repository.
-                                   # Either works; the backend pulls whatever
-                                   # repository the commitment points at.
+                                   # A workspace whose competition: section has
+                                   # no base_model_family keeps the older
+                                   # <username>/pi05-<...> name, so upgrading
+                                   # never moves an existing repository.
+                                   # Set this to pin any repository explicitly;
+                                   # the backend pulls whatever repository the
+                                   # commitment points at.
 
 # ─── Training ───────────────────────────────────────────────
 custom_train_script: "train_strategy.py"   # mounted into the container as

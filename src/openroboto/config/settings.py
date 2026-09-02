@@ -205,10 +205,10 @@ class Settings:
     hf_username: str = ""
     #: Explicit repository to upload to, used verbatim when set.
     #:
-    #: A miner who already has a repository whose name the default no longer
-    #: derives (the default is season-scoped, see `huggingface/repository.py`)
-    #: sets this to keep it. Otherwise the next upload creates a second
-    #: repository and re-pushes several GB for no reason.
+    #: Only needed to name a repository the default would not derive. Upgrading
+    #: does not require it: a workspace whose season names no base model keeps
+    #: the name it already has (`huggingface/repository.py::LEGACY_PREFIX`), so
+    #: no upload re-pushes several GB to a repository nobody asked for.
     hf_repo_id: str = ""
     hf_merged_model_id: str = ""
 

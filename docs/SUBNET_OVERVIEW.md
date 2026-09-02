@@ -253,7 +253,7 @@ The miner's announcement is a JSON payload stored on chain via Commitments (fits
 
 This single payload binds together the miner's identity (`s`), the exact model artifact (`i` + `c`), the fee payment (`b` + `bb`), the season (`cid`) and its ordinal (`r`). The backend's chain scanner decodes it, runs the §4 payment checks, and creates the evaluation task.
 
-**Repo naming:** the CLI generates `{hf-username}/{base_model_family}-{last 12 characters of the hotkey SS58}` — one repository per season, named after the base model that season runs. It is a **default, not a rule**: any repository the miner can read is accepted, because the backend fetches whatever the commitment's `i` field points at. Set `huggingface.repo_id` to name it yourself.
+**Repo naming:** the CLI generates `{hf-username}/{base_model_family}-{last 12 characters of the hotkey SS58}` — one repository per season, named after the base model that season runs. A workspace whose `competition:` section names no base model keeps the older `pi05-` name, so upgrading never moves an existing repository. It is a **default, not a rule**: any repository the miner can read is accepted, because the backend fetches whatever the commitment's `i` field points at. Set `huggingface.repo_id` to name it yourself.
 
 ⚠️ The suffix is a convention, not a check: nothing in the backend or in `openroboto-protocol` enforces it, and a submission named nothing like it is scored normally. Do not treat it as a defence against impersonation.
 

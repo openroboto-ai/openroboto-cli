@@ -38,15 +38,28 @@ rather than this training run's output directory.
 ## The value comes from the competition row
 
 `base_model_family` is read from `miner.yaml`'s `competition:` section, which
-`openroboto init` wrote from the backend. A workspace without it is **refused,
-not guessed** — the same rule the rest of the CLI follows for this field: a
-guessed base model judges a submission somebody paid for by rules nobody chose
-for that season.
+`openroboto init` writes from the backend.
 
-⚠️ **A miner who already has a repository should set `huggingface.repo_id`.**
-Otherwise the next `upload` creates a new one and re-pushes several GB. Nothing
-is lost either way — submissions are located by their on-chain commitment, not
-by name — but the bytes are real.
+🔴 **A workspace without it keeps the name it already has** (`LEGACY_PREFIX`);
+it is not refused. Every workspace a released CLI created is in that state:
+`base_model_family` reached `SECTION_KEYS` after 1.1.1 shipped, so no miner
+running today has that key.
+
+**Refusing here would be the wrong rule borrowed from the right place.** Where
+`base_model_family` selects a rule book, guessing it judges a paid submission by
+rules nobody chose for that season — never guess. As a word in a repository
+name it decides nothing: the backend fetches whatever the commitment points at.
+And for these workspaces it is not a guess at all, because their repository is
+*already* named `pi05-…`.
+
+The cost of getting this wrong is not theoretical: a refusal breaks every miner
+on upgrade. `upload` dies until they run `init --refresh`, and then re-pushes
+~25 GB to a repository nobody asked for. The season-scoped name is worth having
+on a new workspace and worth nothing forced onto an old one.
+
+⚠️ **Moving an existing repository to the season-scoped name is opt-in**:
+`openroboto init --refresh`, and the next upload re-pushes the model once. To
+pin any repository explicitly, set `huggingface.repo_id`.
 """
 
 from __future__ import annotations
@@ -56,6 +69,14 @@ import re
 from openroboto.config.settings import ConfigError, Settings
 
 HOTKEY_SUFFIX_LEN = 12
+
+#: The prefix a workspace keeps when its season does not name a base model.
+#:
+#: 🔴 **This is not a claim about the model.** It is the name those repositories
+#: already have, so using it for a workspace whose season names no base model
+#: points at the repository the miner actually uploads to. Changing it would
+#: move their repository, not correct a statement.
+LEGACY_PREFIX = "pi05"
 
 #: What HuggingFace accepts in the repository part of a repo id.
 #:
@@ -81,10 +102,10 @@ def build_repo_id(settings: Settings, hotkey_ss58: str = "") -> str:
             wallet).
 
     Raises:
-        ConfigError: something needed is missing. **No fallback to a literal
-            `miner` here** — that uploads the model to `miner/pi05-miner`, a
-            repository nobody will ever evaluate, and it is found out only once
-            the miner has already burned TAO. Stop before any money is spent.
+        ConfigError: `huggingface.username` or the hotkey is missing. **No
+            fallback to a literal `miner` here** — that uploads the model to
+            `miner/pi05-miner`, a repository nobody will ever evaluate, found
+            out only once the miner has already burned TAO.
     """
     if settings.hf_repo_id:
         return settings.hf_repo_id
@@ -98,13 +119,6 @@ def build_repo_id(settings: Settings, hotkey_ss58: str = "") -> str:
         missing.append("huggingface.username")
     if not address:
         missing.append("subnet.hotkey_ss58 (or a wallet the hotkey can be read from)")
-    if not family:
-        # Refuse rather than fall back to a fixed word: a fixed word is exactly
-        # what this module exists not to produce, and the real value is one
-        # `openroboto init --refresh` away.
-        missing.append(
-            "competition.base_model_family (run `openroboto init --refresh`)"
-        )
     if missing:
         raise ConfigError(
             "Cannot build the HF repo name, missing:\n  - "
@@ -113,6 +127,11 @@ def build_repo_id(settings: Settings, hotkey_ss58: str = "") -> str:
             "  → add them to miner.yaml and run again, or set "
             "huggingface.repo_id to the repository you already upload to"
         )
+
+    if not family:
+        # This workspace's season names no base model, and its repository is
+        # already named this. See LEGACY_PREFIX.
+        return f"{username}/{LEGACY_PREFIX}-{address[-HOTKEY_SUFFIX_LEN:]}"
 
     if not HF_NAME_OK.match(family):
         raise ConfigError(

@@ -71,3 +71,40 @@ and **pays again**.
 - `docs/control_json.md` and its sample, replaced by one section in
   `docs/VALIDATOR.md` — `public_key` is the only field anything reads.
 - The `rt.py` → `openroboto` migration guide. Those entry points are gone.
+
+## 1.2.0
+
+### One repository per season, named after that season's base model
+
+`build_repo_id` produced `{user}/pi05-{last 12 of hotkey}` — a fixed string, and
+one repository for a miner's whole career. Two failures came out of that pair:
+
+- **The name outlived the base model.** π0.5 was archived and LingBot-VLA 2.0
+  took over, while every repository kept saying `pi05`. Eight queued submissions
+  read `<user>/pi05-…` while every one of them held a LingBot model; three people
+  in a row read that table and concluded miners had submitted the wrong base, and
+  one proposed rejecting all eight at admission — eight paid submissions, 0.8 TAO
+  burned, models entirely correct.
+- **Seasons piled up in one directory.** `upload_folder` never deletes, so a
+  career-long repository is season 7 laid on seasons 1–6, and a `.cache/` left by
+  an earlier push is `LEFTOVER_UPLOAD_STATE` at admission — terminal, fee gone.
+
+The name is now `{username}/{base_model_family}-{last 12 of hotkey}`. It is a
+default, not a protocol rule: the backend fetches whatever the commitment's `i`
+field points at.
+
+### 🔴 Upgrading does not move your repository
+
+**You do not have to do anything.** A workspace whose `competition:` section
+names no base model keeps its `pi05-…` name — which is every workspace a
+released CLI created, because `base_model_family` landed after 1.1.1 shipped.
+
+An earlier build of this change refused instead, which would have broken every
+miner on upgrade: `upload` dies until you run `init --refresh`, and then
+re-pushes ~25 GB to a repository nobody asked for. Refusing is right where
+`base_model_family` selects the rule book a paid submission is judged by; as a
+word in a repository name it decides nothing.
+
+Adopting the season-scoped name is opt-in: `openroboto init --refresh`, and the
+next upload re-pushes the model once. `huggingface.repo_id` still pins any
+repository explicitly, and a missing username or hotkey is still refused.

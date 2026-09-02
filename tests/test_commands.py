@@ -2008,21 +2008,35 @@ def test_a_different_season_gets_a_different_repository() -> None:
     assert repo_for("pi0.5") != repo_for("lingbot-vla-2.0")
 
 
-def test_repo_id_refuses_when_the_season_has_no_base_model() -> None:
-    """🔴 Refuse, never fall back to a fixed word.
+def test_a_workspace_without_a_season_base_model_keeps_its_repository() -> None:
+    """🔴 **Every miner running today is in this state**, and upgrading must not
+    move their repository.
 
-    A fixed word is exactly what this module stopped doing, and the value is one
-    `openroboto init --refresh` away. Guessing it judges a paid submission by
-    rules nobody chose for that season -- the same reason `init` refuses to
-    default this field.
+    `base_model_family` reached `SECTION_KEYS` after 1.1.1 shipped, so no
+    released CLI has ever written it. Refusing here breaks every miner on
+    upgrade: `upload` dies until they run `init --refresh`, then re-pushes
+    ~25 GB to a repository nobody asked for.
+
+    Keeping the historical name is not a guess about their model -- it is the
+    name their repository already has.
     """
     settings = Settings.from_mapping({"huggingface": {"username": "kyleab"}})
 
-    with pytest.raises(ConfigError) as caught:
-        build_repo_id(settings, "5FH32ZXmRZqCuLCS2vhMme6jwznP6NpywGjSqXgcGfvRk2Xp")
+    repo = build_repo_id(settings, "5FH32ZXmRZqCuLCS2vhMme6jwznP6NpywGjSqXgcGfvRk2Xp")
 
-    assert "base_model_family" in str(caught.value)
-    assert "--refresh" in str(caught.value), "the error has to say how to fix it"
+    assert repo == "kyleab/pi05-qXgcGfvRk2Xp", "upgrading moved an existing repository"
+
+
+def test_a_username_is_still_required() -> None:
+    """The fallback covers the season's base model, not the whole name.
+
+    A fallback to the literal `miner` uploads to `miner/pi05-miner` -- a
+    repository nobody evaluates, discovered after the TAO is burned.
+    """
+    with pytest.raises(ConfigError) as caught:
+        build_repo_id(Settings(), "")
+
+    assert "huggingface.username" in str(caught.value)
 
 
 def test_a_base_model_name_hf_cannot_take_is_refused_not_mangled() -> None:
