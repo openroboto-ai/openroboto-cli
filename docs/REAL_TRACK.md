@@ -38,8 +38,9 @@ what the fee costs and when it is wasted is in [PAYMENT.md](./PAYMENT.md).
 
 ## 3. Prize pool and settlement
 
-- The track has its **own prize-pool hotkey on netuid 80**. While a season's submission
-  window is open, **20% of the subnet's emissions** accrue to it.
+- The track has its **own prize-pool hotkey**, registered on this subnet. While a
+  season's submission window is open, **20% of the subnet's emissions** accrue to that
+  hotkey.
 - The pool holds nothing but this track's rewards, so its balance — and every payout
   that leaves it — can be checked on chain against the season record.
 - Settlement happens **once per season**, on what accrued during that season:
