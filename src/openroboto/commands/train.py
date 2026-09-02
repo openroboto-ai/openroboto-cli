@@ -218,16 +218,16 @@ def run(args: argparse.Namespace) -> int:
             image=competition_image(args.config),
             # 🔴 **The season's addresses, from the season's own row.**
             #
-            # These used to live only as constants inside the LingBot image
-            # (`runner/lingbot/train_runner.py`), which meant changing a base
-            # model required a CLI release and every miner rebuilding -- while
-            # π0.5 could do the same thing by editing one field. Two seasons on
-            # the same client behaving differently is the shape this closes.
+            # They are **not** constants inside the LingBot image
+            # (`runner/lingbot/train_runner.py`): a base model fixed there
+            # changes only with a CLI release and a rebuild on every miner's
+            # machine, while π0.5 does the same thing by editing one field. Two
+            # seasons on the same client behaving differently is the shape this
+            # closes.
             #
-            # ⚠️ Empty is meaningful and common: the season names nothing, the
-            #    image falls back to the base it was built around, and the
-            #    behaviour is byte-for-byte what it was before this existed.
-            #    That is what keeps older workspaces working.
+            # ⚠️ Empty is meaningful and common: the season names nothing and
+            #    the image falls back to the base it was built around. That is
+            #    what keeps older workspaces working.
             base_weights=str(snapshot.training.get("base_weights") or ""),
             processor=str(snapshot.training.get("processor") or ""),
         )
@@ -263,10 +263,10 @@ def run(args: argparse.Namespace) -> int:
 def export_advice(output_dir: Path) -> list[str]:
     """What the run actually produced, and the next command that is true for it.
 
-    This used to be four fixed lines telling every miner to "merge the adapter
-    into the π0.5 base" -- wrong for the LingBot competitions, which do not use
-    LoRA at all, and wrong since the merge decision: nothing merges, on this side
-    or the evaluator's, and the export is the trainer's job.
+    🔴 **Not fixed text.** Advice like "merge the adapter into the π0.5 base" is
+    wrong for the LingBot competitions, which do not use LoRA at all, and wrong
+    everywhere else too: nothing merges, on this side or the evaluator's, and the
+    export is the trainer's job.
 
     Fixed text cannot be right for all three outcomes anyway, and the difference
     between them is one `rglob` away at the moment the artifact appears. Saying

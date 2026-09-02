@@ -27,7 +27,6 @@ from openroboto.commands import (
     train,
     validator,
 )
-from openroboto.competition_state import StateError
 from openroboto.config import ConfigError, ControlFetchError
 from openroboto.console import fail
 from openroboto.huggingface import UploadError
@@ -63,7 +62,6 @@ EXPECTED_ERRORS = (
     ChainError,
     ConfigError,
     ControlFetchError,
-    StateError,
     TrainingError,
     TransferError,
     UploadError,

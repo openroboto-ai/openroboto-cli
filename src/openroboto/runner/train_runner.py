@@ -87,14 +87,14 @@ def _resolve_checkpoint(configured: str) -> str:
     The CLI mounts a host cache directory here and creates it with
     `mkdir(parents=True, exist_ok=True)` *before* `docker run`
     (`training/run.py::_checkpoint_path`). So on a first run the path always
-    exists and is always empty. The old test was `not os.path.exists(cp)`,
-    which is therefore never true, and nothing ever downloaded the base model.
+    exists and is always empty. `not os.path.exists(cp)` is therefore never
+    true, and with that test nothing ever downloads the base model.
 
-    It did not fail here, either. It failed four frames deeper inside orbax
-    with `FileNotFoundError: Metadata file (named _METADATA) does not exist at
-    .../params` -- naming neither the base model nor the download that never
-    happened. Every miner following the documented `build` -> `train` flow hit
-    this on their first run.
+    That failure does not surface here. It surfaces four frames deeper inside
+    orbax as `FileNotFoundError: Metadata file (named _METADATA) does not exist
+    at .../params` -- naming neither the base model nor the download that never
+    happened, on the first run of every miner following the documented
+    `build` -> `train` flow.
 
     ⚠️ Only `_run_custom` calls this. `_run_default` never loads a model, so it
     must **not** download one -- see the note at its call site.
@@ -183,8 +183,7 @@ def _run_default(cfg: dict) -> tuple:
     # ⚠️ **No checkpoint is resolved or downloaded here, on purpose.** This path
     # never loads a model -- see the docstring -- so pulling several GB would
     # cost a first-time miner a long wait for something the smoke test does not
-    # use. What used to sit here was a comment reading "Download checkpoint if
-    # needed" above no download at all, which read like the opposite.
+    # use.
     episodes = _load_episodes(cfg["train_data"])
     logger.info(f"📊 Loaded {len(episodes)} episodes")
 
@@ -208,23 +207,24 @@ def _run_default(cfg: dict) -> tuple:
     # No checkpoint is exported here on purpose.
     #
     # This path is the smoke test: it runs without a GPU and without training
-    # anything, so there are no weights to write. It used to fabricate a LoRA
-    # adapter under `output_dir/adapter/`, which was wrong twice over -- an
-    # adapter is never a submittable artifact (nothing merges it), and the
-    # subdirectory taught the wrong export location. `output_dir` **is** the
-    # checkpoint root; a real run's export writes the full checkpoint at the top
-    # of it.
+    # anything, so there are no weights to write. **Nothing here is fabricated.**
     #
-    # Fabricating a `model.safetensors` full of random numbers instead would be
-    # worse than either: `openroboto check` would go green, and that command is
-    # the last thing standing between a miner and a burn of TAO.
+    # Not a LoRA adapter under `output_dir/adapter/`: an adapter is never a
+    # submittable artifact (nothing merges it), and the subdirectory teaches the
+    # wrong export location -- `output_dir` **is** the checkpoint root, and a
+    # real run's export writes the full checkpoint at the top of it.
     #
-    # The norm_stats that used to be written here went with it: `_save_norm_stats`
-    # was **never defined in this file**, so every run of this function died on a
-    # NameError at that line -- which is why nobody noticed the fabricated
-    # adapter was useless. (ruff would have caught it as F821; `src/openroboto/
-    # runner` is in `extend-exclude`.) Norm stats without weights buy nothing
-    # anyway: `check` reports the missing weights either way.
+    # Not a `model.safetensors` full of random numbers either, which would be
+    # worse than the adapter: `openroboto check` would go green, and that command
+    # is the last thing standing between a miner and a burn of TAO.
+    #
+    # Not norm stats: without weights they buy nothing, and `check` reports the
+    # missing weights either way.
+    #
+    # ⚠️ `src/openroboto/runner` is in ruff's `extend-exclude`, so an undefined
+    # name in this file is **not** caught as F821 -- a call to a helper that does
+    # not exist here dies at runtime, on every run, and nothing before that says
+    # so.
     output_dir = cfg["output_dir"]
     os.makedirs(output_dir, exist_ok=True)
     logger.warning(

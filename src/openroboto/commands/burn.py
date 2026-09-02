@@ -48,8 +48,8 @@ def perform_burn(
     `verdict` is this run's season check (`competition.resolve_competition`) and it is
     required, not optional: it is the proof that the backend was asked which
     competition this fee is for, and it carries the amount that was confirmed
-    together with that answer. See the module docstring for what the fee bought
-    while it was optional.
+    together with that answer. See the module docstring for why an amount on its
+    own is not a way to pay.
     """
     if not _ready_to_spend(settings, competition_id, state, doing="burning"):
         return False

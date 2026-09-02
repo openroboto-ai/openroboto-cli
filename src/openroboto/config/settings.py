@@ -89,7 +89,7 @@ class Settings:
 
     #: Which subnet + backend this config talks to: `mainnet` | `dev`.
     #:
-    #: One name for a decision that used to be four independent switches
+    #: One name for a decision that would otherwise be four independent switches
     #: (`network`, `netuid`, `urls.control_json`, `backend.url`). Changing only
     #: some of them is not harmless — see `config/environments.py` for the two
     #: half-states and what each one costs.
@@ -103,18 +103,16 @@ class Settings:
     # ─── Bittensor ─────────────────────────────────────
     network: str = "finney"
     # ⚠️ This field currently **has no effect**: the chain connection goes through
-    # `bt.Subtensor(network=...)`, which only accepts a network name. The old code
-    # behaved the same way (the endpoint parameter of `utils/chain.py::get_subtensor`
-    # was never used), so the same behaviour is kept here, rather than quietly
-    # changing it to "connect to the node you configured" — that would change which
-    # node transactions are sent to. Whether to really support a custom endpoint
-    # needs a separate decision.
+    # `bt.Subtensor(network=...)`, which only accepts a network name. It stays
+    # inert on purpose rather than being wired up to "connect to the node you
+    # configured" — that would change which node transactions are sent to.
+    # Whether to really support a custom endpoint needs a separate decision.
     subtensor_endpoint: str = ""
-    # 0 = not configured. The old code defaulted to 313 (testnet) while mainnet is
-    # 80 — a miner.yaml that forgets to set netuid would send the burn to a
-    # different subnet, and the TAO really is burned. A default value cannot save
-    # you from that mistake, only refusing to start can, so no default network is
-    # given here and `require_for_chain()` blocks it.
+    # 0 = not configured. **No default netuid**, deliberately: any default (313 on
+    # testnet, 80 on mainnet) means a miner.yaml that forgets the field sends the
+    # burn to whichever subnet that default names, and the TAO really is burned. A
+    # default cannot save you from that mistake, only refusing to start can, so
+    # `require_for_chain()` blocks it.
     netuid: int = 0
     wallet_path: str = ""
     coldkey: str = "default"
@@ -131,10 +129,10 @@ class Settings:
     #            and the subnet stops counting you: your weights are treated as
     #            absent and the miners you back earn nothing.
     #
-    # The default used to be 720 (12 h), leaving 4.7 h of headroom -- one missed
-    # cycle, or one restart during a deploy, puts you past the cutoff with nothing
-    # to tell you. 60 is 3x the floor (never rejected for being early) and leaves
-    # 16 cycles of margin under the ceiling. `check_weight_interval` enforces both.
+    # 60 is 3x the floor (never rejected for being early) and leaves 16 cycles of
+    # margin under the ceiling. **Not 720** (12 h): that leaves 4.7 h of headroom,
+    # so one missed cycle -- or one restart during a deploy -- puts you past the
+    # cutoff with nothing to tell you. `check_weight_interval` enforces both.
     #
     # The unit is minutes. Production's config carries the comment "(in blocks)",
     # which is wrong -- the code multiplies by 60 to get seconds.
@@ -188,18 +186,16 @@ class Settings:
     #: the season names its own starting point in `params.training.checkpoint`,
     #: and when neither says anything the training image uses its own default.
     #:
-    #: The season wins over this field, which is what control.json did before
-    #: it (`training.vla_checkpoint_path` overwrote whatever miner.yaml said).
-    #: The other direction lets a path left over from an earlier season quietly
-    #: train the next one on the wrong base.
+    #: The season wins over this field. The other direction lets a path left
+    #: over from an earlier season quietly train the next one on the wrong base.
     vla_checkpoint_path: str = ""
 
     # ─── Training hyperparameters ──────────────────────
-    #: 🔴 **These five are the miner's, not the subnet's.** They used to arrive
-    #: in control.json's `training` block, which meant we picked the epoch count
-    #: and the LoRA rank for every miner on the subnet -- their competition
-    #: space, decided centrally. The defaults are the values control.json
-    #: served, so a workspace that leaves them alone trains exactly as before.
+    #: 🔴 **These five are the miner's, not the subnet's.** They are read from
+    #: `miner.yaml`, **never** from control.json's `training` block: an epoch
+    #: count and a LoRA rank served centrally decide every miner's competition
+    #: space for them. The defaults are the values control.json served, so a
+    #: workspace that leaves them alone is unaffected.
     #:
     #: They reach the container as `EPOCHS` / `BATCH_SIZE` / `LR` / `LORA_R` /
     #: `LORA_ALPHA` (red line #2 -- strategy scripts read them out of `cfg`,
@@ -215,9 +211,9 @@ class Settings:
     hf_username: str = ""
     #: Explicit repository to upload to, used verbatim when set.
     #:
-    #: Miners who already have a repository -- everyone who mined before
-    #: 2026-09-02, when the default stopped naming a base model -- set this to
-    #: keep it. Otherwise the first upload after upgrading creates a second
+    #: A miner who already has a repository whose name the default no longer
+    #: derives (the default is season-scoped, see `huggingface/repository.py`)
+    #: sets this to keep it. Otherwise the next upload creates a second
     #: repository and re-pushes several GB for no reason.
     hf_repo_id: str = ""
     hf_merged_model_id: str = ""
@@ -236,7 +232,7 @@ class Settings:
     #: How many blocks are allowed between burn and announce. Going over means the
     #: backend marks it `rejected`, and the TAO is not refunded.
     #:
-    #: ✅ **Comes from the protocol package** (red line #1), no longer a local copy.
+    #: ✅ **Comes from the protocol package** (red line #1), never a local copy.
     #: This field only exists so `miner.yaml` can still override it; leave it out
     #: and you get the protocol value.
     #:
@@ -257,7 +253,7 @@ class Settings:
         """
         missing: list[str] = []
         if self.netuid <= 0:
-            missing.append("subnet.netuid (80 on mainnet, 313 on the old testnet)")
+            missing.append("subnet.netuid (80 on mainnet, 313 on testnet)")
         if not self.network:
             missing.append("subnet.network (finney | test | local)")
         # Report missing fields and contradictions **together**, not in two
@@ -363,7 +359,7 @@ class Settings:
         cfg.competition_adapter = str(
             competition.get("adapter", cfg.competition_adapter) or ""
         )
-        # Which base model, as opposed to which track: `adapter` no longer says
+        # Which base model, as opposed to which track: `adapter` does not say
         # (`real_xarm6` names a robot arm). `""` = this file does not say, which
         # `adapters.base_model_family()` resolves or refuses -- never guesses.
         cfg.competition_base_model_family = str(

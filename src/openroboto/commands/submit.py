@@ -1,11 +1,10 @@
 """`openroboto submit` -- upload → resolve the competition → check the layout →
-check that this model is not already entered → pay → announce (the old
-`rt.py submit`).
+check that this model is not already entered → pay → announce.
 
-The steps reuse the very same implementations from the `upload` / `burn` /
-`announce` modules. The old `rt.py` **copied all three again** inside
-`cmd_submit`, and the self-checks and skip conditions in the two places
-gradually grew apart; here there is only one copy.
+🔴 **One implementation of each step, and this command calls it.** The steps are
+the very same functions the `upload` / `burn` / `announce` commands run; a second
+copy inside `submit` lets the self-checks and skip conditions in the two places
+grow apart.
 
 The checkpoint makes this command naturally re-entrant: what has been uploaded
 is not uploaded again, what has been paid for is not paid for again.
@@ -13,11 +12,11 @@ is not uploaded again, what has been paid for is not paid for again.
 ## The layout is checked here too, and on the repository
 
 `openroboto check` is a separate command a miner may or may not run, and the
-promise "nothing is judged after you have paid" was only ever true for the ones
-who did. Everyone else met the layout rules for the first time in the backend's
+promise "nothing is judged after you have paid" is only true for the ones who
+do. Everyone else meets the layout rules for the first time in the backend's
 admission -- which runs **after** the fee, reaches `HF_STRUCTURE_INVALID`, and
 files the submission as `rejected`: final, no retry, no refund, while the model
-itself may have been perfectly good.
+itself may be perfectly good.
 
 So the gate runs here, between the upload and the payment, for every workspace
 that mines a competition. **There is no `--skip-check` and there will not be
@@ -25,10 +24,10 @@ one.** A flag like that keeps today's hole and renames it: whoever uses it burns
 exactly the TAO this exists to save. If the gate refuses a model that was fine,
 the gate is what gets fixed.
 
-⚠️ A config from before competitions existed does not reach it either, but for a
-blunter reason than it used to have: **it does not reach the payment at all**.
-`_no_season` refuses the run before the upload. There is no longer a path through
-this command that spends money without a season attached to it.
+⚠️ A config from before competitions existed does not reach it either, for a
+blunter reason: **it does not reach the payment at all**. `_no_season` refuses
+the run before the upload, so no path through this command spends money without a
+season attached to it.
 
 🔴 **It judges the repository listing, not the local directory.** The fee buys
 a verdict on `hf_repo_id` at the commit that goes on chain, and that is not the

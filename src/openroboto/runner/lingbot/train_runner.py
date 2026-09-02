@@ -96,14 +96,13 @@ difference that lets the container interface stay fixed.
 Verified on a GPU, 2026-08-26
 =============================
 `scripts/verify_lingbot_runner.py`, A100-SXM4-80GB, driver 580.126.09, all
-stages green — which is what moved `adapters.sim_lingbot.training` to
-`DOCKER`. This file was originally written on a machine with no NVIDIA card,
-and six things were listed here as unproven. Five are now observed:
+stages green — which is what puts `adapters.sim_lingbot.training` at `DOCKER`.
+Five of the six things this runner depends on are observed, not argued:
 
   2. `build_foundation_model()` completes with no process group ✅ — single
      process, `global_rank=-1`, `world_size=1`, no `init_process_group`, no
-     FSDP2. The earlier survey that concluded the vendor's training entry
-     point "cannot fit the container interface" rested on the opposite claim.
+     FSDP2. Concluding that the vendor's training entry point "cannot fit the
+     container interface" rests on the opposite claim, and it is false.
   3. `LORA_TARGET_MODULES` matches real modules ✅ — 396 of them, 38.9 M
      trainable parameters. It did *not* match on the first run; the vendor's
      signature default names another architecture entirely. See below.
@@ -178,9 +177,8 @@ answered
     ValueError: Target modules {'o', 'v', 'k', 'ffn.0', 'ffn.2', 'q'} not
     found in the base model.
 
-which is the loud failure this docstring used to promise, arriving on cue. The
-vendor never calls `add_lora_to_model` anywhere, so its default has never been
-matched against anything.
+The vendor never calls `add_lora_to_model` anywhere, so its default has never
+been matched against anything.
 
 Derived from `model.safetensors.index.json`, counting leaf module names across
 all 1708 tensors: `q_proj` 108, `k_proj` 108, `v_proj` 108, `o_proj` 72.
@@ -824,17 +822,16 @@ def run_training(cfg: dict) -> tuple:
 def _addressed(env: str, repo: str, revision: str) -> tuple[str, str]:
     """`repo@revision` out of the environment, falling back to the built-in pair.
 
-    🔴 **The season's row wins; the constants below it are the fallback.** Those
-    constants used to be the only answer, which meant changing LingBot's base
-    model took a CLI release and a rebuild on every miner's machine -- while a
-    π0.5 season could do the same thing by editing one field. The addresses now
-    ride in on `BASE_WEIGHTS` / `PROCESSOR`, set by `openroboto train` from
-    `params.training`.
+    🔴 **The season's row wins; the constants below it are only the fallback.**
+    The addresses ride in on `BASE_WEIGHTS` / `PROCESSOR`, set by
+    `openroboto train` from `params.training`. Constants as the only answer mean
+    changing LingBot's base model takes a CLI release and a rebuild on every
+    miner's machine -- while a π0.5 season does the same thing by editing one
+    field.
 
-    ⚠️ **Empty is the normal case for older workspaces**, and it has to keep
-    meaning exactly what it meant before: use the base this image was built
-    around. Anything else would break every config written before the field
-    existed.
+    ⚠️ **Empty means: use the base this image was built around.** That is the
+    normal case for a workspace written before the field existed, and it has to
+    keep meaning exactly that -- anything else breaks every one of those configs.
 
     ⚠️ One string, split here rather than carried as two variables. `repo@rev`
     cannot drift; a pair of variables can, and "right repository, another

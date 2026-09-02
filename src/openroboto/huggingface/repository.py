@@ -12,11 +12,11 @@ matches no format this module has ever produced. Nothing in the backend or in
 `{username}/{base_model_family}-{last 12 of hotkey}`, e.g.
 `kyleab/lingbot-vla-2.0-qXgcGfvRk2Xp`.
 
-It used to be `{username}/pi05-{suffix}` — a fixed string, and one repository
-for the miner's **whole career**. Two failures came out of that pair, and the
-season-scoped name closes both:
+**Not** `{username}/pi05-{suffix}` — a fixed string, and one repository for the
+miner's **whole career**. That pair causes two failures, and the season-scoped
+name closes both:
 
-**The name went stale and lied.** π0.5 was archived on 2026-08-31 and
+**A fixed name goes stale and lies.** π0.5 was archived on 2026-08-31 and
 LingBot-VLA 2.0 took over; every repository kept saying `pi05`. On 2026-09-02
 eight queued submissions all read `<user>/pi05-…` while every one of them held a
 LingBot model (`model_type` `lingbotvla`, `action_dim` 55, checked on all
@@ -24,7 +24,7 @@ eight). Three people in a row read that table and concluded miners had
 submitted the wrong base model. One proposed rejecting all eight at admission:
 eight paid submissions, 0.8 TAO already burned, models entirely correct.
 
-**Seasons piled up in one directory.** `upload_folder` never deletes, so a
+**Seasons pile up in one directory.** `upload_folder` never deletes, so a
 career-long repository is season 7 laid on top of seasons 1 through 6, and a
 `.cache/` left behind by an earlier push is `LEFTOVER_UPLOAD_STATE` to
 admission — a terminal rejection with the fee already gone. Files from a season
@@ -81,10 +81,10 @@ def build_repo_id(settings: Settings, hotkey_ss58: str = "") -> str:
             wallet).
 
     Raises:
-        ConfigError: something needed is missing. The old code fell back to the
-            literal `miner` here, which uploaded the model to `miner/pi05-miner`
-            — a repository nobody will ever evaluate, and by that point the miner
-            had already burned TAO. Better to stop before any money is spent.
+        ConfigError: something needed is missing. **No fallback to a literal
+            `miner` here** — that uploads the model to `miner/pi05-miner`, a
+            repository nobody will ever evaluate, and it is found out only once
+            the miner has already burned TAO. Stop before any money is spent.
     """
     if settings.hf_repo_id:
         return settings.hf_repo_id
@@ -99,9 +99,9 @@ def build_repo_id(settings: Settings, hotkey_ss58: str = "") -> str:
     if not address:
         missing.append("subnet.hotkey_ss58 (or a wallet the hotkey can be read from)")
     if not family:
-        # Refuse rather than fall back to a fixed word. A fixed word is what this
-        # whole module just stopped doing, and the value is one `openroboto init
-        # --refresh` away.
+        # Refuse rather than fall back to a fixed word: a fixed word is exactly
+        # what this module exists not to produce, and the real value is one
+        # `openroboto init --refresh` away.
         missing.append(
             "competition.base_model_family (run `openroboto init --refresh`)"
         )

@@ -1,11 +1,10 @@
 """`openroboto check` -- decide locally, before paying, whether a checkpoint
 can be evaluated.
 
-This step used to require cloning a second repository
-(`openroboto-evaluation`'s `libero_eval/check_model.py`), and the actual
-outcome was that nobody ran it -- which made "finding out only after burning
-the TAO that what was uploaded is a bare LoRA adapter" the most common way to
-burn for nothing.
+🔴 **It runs from this package, with no second repository to clone.** A check
+that lives in `openroboto-evaluation`'s `libero_eval/check_model.py` is a check
+nobody runs, which makes "finding out only after burning the TAO that what was
+uploaded is a bare LoRA adapter" the most common way to burn for nothing.
 
 The decision rules **are not implemented here**: it calls
 `openroboto_protocol.model_format`, the same code and the same set of error
@@ -214,10 +213,10 @@ def protocol_rule(name: str) -> Any:
             f"  (`openroboto --version` prints both versions; the client pins the "
             f"protocol package it was built against.)\n"
             # `pi0.5` verbatim: that is the season vocabulary a miner sees in
-            # `miner.yaml` and in the backend's competition list (renamed
-            # 2026-08-31 from `openpi`, which named the framework rather than the
-            # model). Naming the framework here would send them looking for a
-            # value that no longer appears anywhere they can check.
+            # `miner.yaml` and in the backend's competition list. Naming the
+            # framework instead (`openpi` names the framework, not the model)
+            # would send them looking for a value that appears nowhere they can
+            # check.
             f"  Not falling back to the π0.5 (pi0.5) rules on purpose: they "
             f"report 'no model weights found' for a perfectly good LingBot "
             f"checkpoint. Being told nothing costs you a command; being told the "
@@ -301,22 +300,21 @@ def check_directory(directory: Path, *, layout: Any = None) -> FormatReport:
 def read_weight_map(directory: Path, layout: Any) -> Mapping[str, str] | None:
     """Parse `model.safetensors.index.json` -- the `{tensor: shard}` map.
 
-    Reading it is what makes this command **stricter than admission**, and the
-    reason to want that is not the one this docstring used to give. It claimed
-    "the backend, which can read the same file, does" -- **it does not.**
-    `judge_lingbot_tree` passes `weight_map=None` and says why in so many words:
-    the backend's rule book lives in its domain layer, which performs zero I/O,
-    so the missing-shard and missing-tensor rules are not evaluated there at all
-    ("absence of evidence, not evidence of a missing shard").
+    Reading it is what makes this command **stricter than admission**.
+    🔴 **The backend does not read it**, though it could: `judge_lingbot_tree`
+    passes `weight_map=None` and says why in so many words -- the backend's rule
+    book lives in its domain layer, which performs zero I/O, so the missing-shard
+    and missing-tensor rules are not evaluated there at all ("absence of
+    evidence, not evidence of a missing shard").
 
     So a broken index does not get you rejected after burning. It gets you
     *admitted* after burning, and then the evaluator cannot load the model --
     which by this module's own header is the more expensive of the two. This
     command is the only place it can be caught before the money moves.
 
-    The direction is the safe one (stricter before payment, never looser), but
-    the sentence had to go: believing the backend already checks this is how a
-    real gap stops getting closed.
+    The direction is the safe one (stricter before payment, never looser).
+    Believing the backend already checks this is how a real gap stops getting
+    closed.
 
     It does not break the "never download the weights" rule either: the index is
     a few hundred KB of plain text sitting next to the shards, not the shards.
@@ -355,11 +353,10 @@ def weights_subdir_of(paths: Iterable[str]) -> str | None:
     `""` they are already at the top, `"a/b"` they are in that subdirectory,
     `None` there are no weight files anywhere in the list at all.
 
-    The last one used to be `""` as well, which was harmless while the only
-    caller was the nesting advice below. It is not harmless for `openroboto
-    train`, which uses this to tell "your trainer nested the checkpoint" apart
-    from "nothing exported a checkpoint" -- two different mistakes with two
-    different fixes.
+    🔴 **`None` is not `""`.** Collapsing the two is harmless for the nesting
+    advice below, but not for `openroboto train`, which uses this to tell "your
+    trainer nested the checkpoint" apart from "nothing exported a checkpoint" --
+    two different mistakes with two different fixes.
 
     The shallowest hit wins, matching the evaluator: it takes the first
     checkpoint it finds while descending.

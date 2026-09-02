@@ -96,9 +96,9 @@ def set_weights_on_chain(
 def _is_success(result: Any) -> bool:
     """Decide whether the return value of set_weights means success.
 
-    The SDK has three return shapes (the old bool, the standard `is_success`, and
-    the timelock version's `success` + `error=None`); the decision order from the
-    old `validator.py` is preserved as-is.
+    The SDK has three return shapes (a bare bool, the standard `is_success`, and
+    the timelock version's `success` + `error=None`). All three are accepted, in
+    the order below.
     """
     if not result:
         logger.warning("[set_weights] set_weights returned a falsy value")

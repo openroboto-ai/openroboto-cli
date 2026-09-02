@@ -45,11 +45,11 @@ class SubmitResult:
     def extrinsic_ref(self) -> str:
         """A `block-index` style reference; the easiest thing to paste in a bug report.
 
-        **No block number unless it is confirmed.** This used to fall back to
-        `get_current_block()`, so an unconfirmed submission would still print a
-        perfectly real-looking `6123456-0` — the miner would conclude from it that
-        the announcement was on chain, when it might never have made it into a
-        block at all.
+        **No block number unless it is confirmed**, and never a fall back to
+        `get_current_block()`: that prints a perfectly real-looking `6123456-0`
+        for an unconfirmed submission, and the miner concludes from it that the
+        announcement is on chain when it may never have made it into a block at
+        all.
         """
         if not self.confirmed or not self.block_height:
             return "unconfirmed"
@@ -116,12 +116,11 @@ def submit_announcement(
 ) -> SubmitResult:
     """Send the payload to the chain as a commitment. **Returns only after inclusion.**
 
-    In the old `utils/chain.py:108-109` both of these parameters were `False`, with
-    no comment explaining why — so when "the TAO was already burned but the
-    announcement never made it on chain", the command still printed success (the
-    last row of the known-defects table in the backend `AGENTS.md` §7). The miner's
-    money is not refunded, so here we would rather wait one more block (~12 s) in
-    order to report a truthful conclusion.
+    🔴 **Inclusion is awaited**, never fire-and-forget. With both wait flags
+    `False` the command prints success even when "the TAO was already burned but
+    the announcement never made it on chain" (the last row of the known-defects
+    table in the backend `AGENTS.md` §7). The miner's money is not refunded, so
+    one more block of waiting (~12 s) buys a truthful conclusion.
 
     - `wait_for_inclusion=True`: only with a receipt do we know which block it
       landed in, and only then does `SubmitResult.confirmed` mean anything. What
@@ -186,16 +185,13 @@ def parse_extrinsic_result(result: Any) -> SubmitResult:
 
     The SDK returns different shapes across versions (some with
     `extrinsic_receipt`, some with only a bool, and two different names for the fee
-    field), so each field falls back through `getattr` — the decision order in this
-    part follows the old `utils/chain.py::_parse_result`.
+    field), so each field falls back through `getattr`.
 
-    **One thing that was changed**: when no receipt was available, the old
-    implementation filled `block_height` from `subtensor.get_current_block()`, with
-    a comment saying it was "just so the log has a block number in it". But that
-    value also fed `extrinsic_ref`, so an unconfirmed submission would print a
-    block reference that looked entirely normal. Now, no receipt means
-    `confirmed=False` and no invented block number (which is why the `subtensor`
-    parameter is no longer needed).
+    🔴 **No receipt means `confirmed=False` and no block number** -- never a
+    `block_height` filled in from `subtensor.get_current_block()` "just so the log
+    has a block number in it". That value also feeds `extrinsic_ref`, and an
+    unconfirmed submission then prints a block reference that looks entirely
+    normal. This function therefore takes no `subtensor` at all.
     """
     extrinsic_hash = ""
     block_height = 0

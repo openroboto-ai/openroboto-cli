@@ -9,8 +9,8 @@ Both endpoints need **no API key** (measured 2026-08-17):
   collision, ...).
 
 "It went on chain but there is nothing in the queue" is answered by the second
-endpoint -- the question miners ask most often, which previously could only be
-answered by curling by hand.
+endpoint -- the question miners ask most often, and without this command the
+only way to answer it is curling by hand.
 
 When a rejection record carries a `reason`, two extra lines are printed: the
 stable error code, and **whether to burn another TAO and retry**. "The
@@ -191,8 +191,9 @@ def explain(reason: Reason | None) -> list[str]:
     """Flatten one `reason` into the two lines a miner can act on.
 
     `code` is the stable machine code (scripts branch on it), and `retryable`
-    answers "do I have to burn another one". The old `reject_reason` field is
-    still printed on the line above -- this is an addition, not a replacement.
+    answers "do I have to burn another one". `reject_reason` is printed on the
+    line above and stays there -- these two lines are an addition, not a
+    replacement.
     """
     if reason is None:
         return []
@@ -205,7 +206,7 @@ def explain(reason: Reason | None) -> list[str]:
 def say_more_hint(has_more: bool, total: int) -> None:
     """Say so when there are records that were not displayed.
 
-    `has_more` is computed by the backend (`meta.page`); we no longer derive it
+    `has_more` is computed by the backend (`meta.page`) and is **never** derived
     again here from `offset + len(rows) < total` -- every copy of that
     expression is one more chance to get it wrong, and getting it wrong shows
     up as "the miner believes they only submitted this many times".
@@ -217,9 +218,9 @@ def say_more_hint(has_more: bool, total: int) -> None:
 def display_status(row: SubmissionHistoryItem) -> str:
     """The lifecycle status the backend reported, verbatim.
 
-    Reads `eval_status` only. **The old `status` column does not appear here,
-    because the model does not have it at all** -- two status keys in one
-    response means the one read first decides, and it is the un-normalized one.
+    Reads `eval_status` only. **The `status` column does not appear here, because
+    the model does not carry it at all** -- two status keys in one response means
+    the one read first decides, and it is the un-normalized one.
 
     🔴 **Not passed through `normalize_status`.** That table maps the pre-1.0
     worker vocabulary (`done` / `failed` / `benchmark_*`), and the backend sends

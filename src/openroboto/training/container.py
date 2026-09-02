@@ -120,16 +120,16 @@ def build_docker_command(
         else:
             # 🔴 **Mounted at `/data/cache`, which is `OPENPI_DATA_HOME`.**
             #
-            # This used to mount at `/data/checkpoint`, a path nothing else in
-            # the image knows about, while the Dockerfile sets
-            # `OPENPI_DATA_HOME=/data/cache` -- so openpi downloaded the base
-            # model into the container's own writable layer and it went away
-            # with the container. The host cache therefore stayed empty, the
-            # "Local base-model cache hit" branch in `training/run.py` could
-            # never be true, and **every `train` re-downloaded several GB**.
+            # **Not** `/data/checkpoint`: nothing else in the image knows that
+            # path, while the Dockerfile sets `OPENPI_DATA_HOME=/data/cache`.
+            # Mounted anywhere else, openpi downloads the base model into the
+            # container's own writable layer, which goes away with the
+            # container. The host cache then stays empty, the "Local base-model
+            # cache hit" branch in `training/run.py` can never be true, and
+            # **every `train` re-downloads several GB**.
             #
-            # Nothing reported this: the download is quiet, and the only visible
-            # symptom was a training run that took longer than it should have.
+            # Nothing reports this: the download is quiet, and the only visible
+            # symptom is a training run that takes longer than it should.
             checkpoint = Path(checkpoint_path).resolve()
             command += [
                 "-v", f"{checkpoint.parent}:/data/cache",
@@ -169,7 +169,7 @@ def detect_free_gpus() -> str:
     """Ask nvidia-smi which cards are free and return comma-separated indices.
 
     Returns an empty string if it cannot be determined. An empty string means "do
-    not set CUDA_VISIBLE_DEVICES" = use every card, matching the old behaviour.
+    not set CUDA_VISIBLE_DEVICES" = use every card.
     """
     try:
         result = subprocess.run(

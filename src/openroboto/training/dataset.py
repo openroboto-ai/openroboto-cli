@@ -1,16 +1,14 @@
 """Loading and conversion of LIBERO episode data.
 
 What the container reads is the **converted** samples (the `observation/image`,
-`actions`, `prompt` set of key names), not the raw JSON that was downloaded — that
-conversion layer lived in the old `miner/trainer_vla.py`, and not one key name was
-touched when it was moved here.
+`actions`, `prompt` set of key names), not the raw JSON that was downloaded. 🔴
+**None of those key names may change**: the training code inside the container
+reads them (red line #2).
 
-Field validation for episodes used to depend on the now-deleted
-`protocol/types.py::VLAEpisode`: that was a dataclass, so a missing field made
-`cls(**clean)` raise `TypeError` outright, and the caller did not catch it — one
-bad sample could crash a whole training run at the loading stage. This was
-changed to validate entry by entry, skipping and counting, so bad data only costs
-you that one entry.
+Episodes are validated **entry by entry, skipping and counting** — never by
+constructing one object per episode. A dataclass makes a missing field raise
+`TypeError` out of `cls(**clean)`, uncaught, and one bad sample then crashes a
+whole training run at the loading stage; skipping costs you that one entry.
 """
 
 from __future__ import annotations
@@ -29,12 +27,12 @@ REQUIRED_FIELDS = (
     "language_instruction",
     "license",
 )
-"""Fields an episode must have. Same as the old `EPISODE_REQUIRED_FIELDS`."""
+"""Fields an episode must have."""
 
 ALLOWED_LICENSES = frozenset(
     {"CC-BY-4.0", "CC-BY-SA-4.0", "CC0-1.0", "Apache-2.0", "MIT", "OpenRail"}
 )
-"""Licenses accepted for datasets. Same as the old `ALLOWED_LICENSES`."""
+"""Licenses accepted for datasets."""
 
 DEFAULT_LICENSE = "CC-BY-4.0"
 

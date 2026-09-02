@@ -324,19 +324,19 @@ def check_gpu() -> CheckResult:
 def check_image(config_path: str = "") -> CheckResult:
     """Is the image `openroboto train` would run actually here?
 
-    Two things this used to get wrong, both silent:
+    Two things it must not get wrong, both silent when it does:
 
-    1. it looked up `runner_image()` with no competition, i.e. the π0.5 default,
-       while `train` runs the image `params.training.image` names. Doctor
-       reported on an image nothing was going to use;
+    1. the image to report on is the one `params.training.image` names, **not**
+       `runner_image()` with no competition (the π0.5 default) -- that reports on
+       an image nothing is going to use;
     2. for a competition this client has no container for, an image under that
-       name can still be sitting in `docker images` -- built by an older release
-       out of the openpi context, or by hand. "ready" is the one thing that must
+       name can still be sitting in `docker images` -- built out of the openpi
+       context by another release, or by hand. "ready" is the one thing that must
        not be said about it: the name came from the competition and the contents
        came from somewhere else, and this is the last place that can say so.
 
-    An empty `config_path` (no config, or one that failed to parse) checks what
-    it always did.
+    An empty `config_path` (no config, or one that failed to parse) falls back to
+    the default profile and the default image name.
     """
     try:
         adapter = adapters.resolve(competition_adapter(config_path))

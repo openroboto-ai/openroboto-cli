@@ -1,10 +1,8 @@
-"""`openroboto announce` -- write the submission on chain (the old
-`rt.py announce`).
+"""`openroboto announce` -- write the submission on chain.
 
 **This step must be completed after a burn**: without a commitment, that burn
 does not exist as far as the backend is concerned. The payload bytes are
-produced by `openroboto-protocol`; this repo no longer assembles a JSON of its
-own.
+produced by `openroboto-protocol`; this repo never assembles a JSON of its own.
 """
 
 from __future__ import annotations
@@ -62,13 +60,12 @@ def perform_announce(
         block_hash = subtensor.get_block_hash(current_block)
         # The window check comes first, and nothing is printed before it.
         #
-        # These two lines used to be the other way round, so a refused announce
-        # ended with "📡 committing on chain" as the last thing on screen while
-        # no extrinsic was ever sent. The exit code was already 1, which is what
-        # a script reads -- but a person reads the last line, and that line said
-        # the opposite of what happened. Spent ten minutes checking the chain,
-        # then the database, then the ingest logs, for a commitment that had
-        # been deliberately not sent.
+        # Ordered the other way round, a refused announce ends with
+        # "📡 committing on chain" as the last thing on screen while no extrinsic
+        # was ever sent. The exit code is 1 either way, which is what a script
+        # reads -- but a person reads the last line, and that line would say the
+        # opposite of what happened: ten minutes of checking the chain, then the
+        # database, then the ingest logs, for a commitment deliberately not sent.
         burn_block = int(state.get("burn_block", 0) or 0)
         if not _burn_window_ok(settings, burn_block, current_block):
             say("   → nothing was sent on chain, and no transaction fee was paid")

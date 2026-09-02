@@ -439,31 +439,28 @@ def judge(
             + REFRESH_HINT
         )
 
-    # 🔴 **A changed `base_repo` does not block the payment** (a gate removed on
-    # 2026-09-01).
+    # 🔴 **A changed `base_repo` does not block the payment**, and
+    # `(base_repo, base_revision)` are deliberately **not** compared here.
     #
-    # This used to compare `(base_repo, base_revision)`, on the stated grounds
-    # that "a checkpoint you trained on the old base will be judged against the
-    # new one, so the fee buys an evaluation of the wrong model". **That is not
-    # true**, and this file's own `Competition.training` docstring says why:
     # `base_repo` is the **leaderboard's `delta_vs_base` reference**, while the
-    # miner's training starting point is `params.training` (on the π0.5 season
-    # the two were plainly different addresses). Changing the baseline only
-    # changes what the Δ column compares against, not how this checkpoint is
-    # judged.
+    # miner's training starting point is `params.training` -- this file's own
+    # `Competition.training` docstring says so, and on the π0.5 season the two
+    # are plainly different addresses. Changing the baseline only changes what
+    # the Δ column compares against, not how this checkpoint is judged.
     #
-    # It bit for real on 2026-09-01: operations pointed LingBot's baseline at the
-    # repository that carries the evaluation results (a display-only reference),
-    # and **every miner who had already run `init` could no longer pay** -- with
-    # an error telling them to retrain, which is a falsehood that costs a training run.
+    # Gating on it costs real money. On 2026-09-01 operations pointed LingBot's
+    # baseline at the repository that carries the evaluation results (a
+    # display-only reference), and **every miner who had already run `init` was
+    # blocked from paying** -- with an error telling them to retrain, a falsehood
+    # that costs a training run.
     #
-    # ⚠️ **The thing that really should be gated has not gone away**: a changed
-    # *training starting point* does invalidate a training run. But that value
-    # lives in `params.training` (`base_weights` / `checkpoint`), not in these
-    # two columns. It is deliberately not added here on the way past: a gate that
+    # ⚠️ **What really should be gated is still ungated**: a changed *training
+    # starting point* does invalidate a training run. But that value lives in
+    # `params.training` (`base_weights` / `checkpoint`), not in these two
+    # columns, and it is deliberately not added here on the way past: a gate that
     # refuses payment has to be thought through on its own, because refusing
-    # wrongly costs a miner a whole training run -- and the lesson of this
-    # incident is precisely a gate watching the wrong field. Tracked in
+    # wrongly costs a miner a whole training run -- and a gate watching the wrong
+    # field is exactly the failure above. Tracked in
     # `08-31-competition-is-the-only-source`.
 
     return Verdict(live=live, fee=live_fee, window=window)

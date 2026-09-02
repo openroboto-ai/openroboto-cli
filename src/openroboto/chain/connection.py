@@ -88,17 +88,12 @@ def get_metagraph(netuid: int, network: str, subtensor: Any = None) -> Any:
 def open_wallet(settings: Settings) -> Any:
     """Load the wallet from config. If no password is configured, let the SDK ask.
 
-    The old implementation (`rt.py::_read_wallet_password`) built its own interactive
-    prompt: a worker thread + a 60-second timeout + three retries + a "verify the
-    password" step. That code **never once worked** — the verification branch
-    referenced a variable that does not exist (`password=password`), so any
-    interactive input was a `NameError`; it only worked when `wallet_password` was
-    hard-coded in miner.yaml.
-
-    And it could not verify anything anyway: `bt.Wallet(...)` only opens files, the
-    coldkey is not decrypted until signing time. So the whole thing is deleted here
-    and not rebuilt — the SDK itself prompts and validates when a signature is
-    needed, and its error messages are more accurate than our paraphrase of them.
+    🔴 **No interactive password prompt of our own** — no worker thread, no
+    timeout, no retries, no "verify the password" step. There is nothing here that
+    could verify one anyway: `bt.Wallet(...)` only opens files, and the coldkey is
+    not decrypted until signing time. The SDK prompts and validates when a
+    signature is needed, and its error messages are more accurate than our
+    paraphrase of them.
     """
     return get_wallet(
         settings.coldkey,

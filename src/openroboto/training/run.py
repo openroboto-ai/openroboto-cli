@@ -1,9 +1,8 @@
 """Run one training pass: download data, run the container, collect metrics and
 the training proof.
 
-Corresponds to the old `miner/trainer_vla.py::train_vla`. Two artifact files, both
-uploaded along with the model: `metrics.json` (training metrics) and
-`training_proof.json` (the training proof).
+Two artifact files, both uploaded along with the model: `metrics.json` (training
+metrics) and `training_proof.json` (the training proof).
 """
 
 from __future__ import annotations
@@ -47,13 +46,12 @@ def resolve_checkpoint(configured: str) -> str:
 
     Anything starting with `gs://` is always replaced by the local cache directory
     (created empty if it does not exist); every other path is returned unchanged.
-    Matches the branching in the old `miner.py`.
 
-    🔴 **Empty stays empty.** This used to substitute
-    `gs://openpi-assets/checkpoints/pi05_base` for a missing value, which was a
-    base model guessed by the client: the LingBot image was handed a π0.5 path
-    it silently ignored, and any competition after it would have been handed the
-    same one. Empty means no `CHECKPOINT_PATH` reaches `docker run`, so the
+    🔴 **Empty stays empty**, and is **never** substituted with
+    `gs://openpi-assets/checkpoints/pi05_base`: that is a base model guessed by
+    the client, handed to every competition alike -- the LingBot image silently
+    ignores a π0.5 path, and the competition after it would be handed the same
+    one. Empty means no `CHECKPOINT_PATH` reaches `docker run`, so the
     image falls back to the base it was built around -- see
     `training/container.py::build_docker_command`. Seasons that do need a
     specific one say so in `params.training.checkpoint`; π0.5's is recorded
@@ -171,9 +169,9 @@ def train_once(
     # --gpus all`; `_gpu_stats()` reads the *host* process, which on a laptop
     # driving a remote box has no CUDA at all and answers `("cpu", 0.0)`.
     #
-    # That answer used to be written straight into `training_proof.json` and
-    # published to the miner's public HF repo. Measured on 2026-08-26: the proof
-    # said `gpu_device: "cpu"` and `gpu_memory_peak_gb: 0.0` for a run that the
+    # That answer must not reach `training_proof.json`, which is published to
+    # the miner's public HF repo. Measured on 2026-08-26: the host reading gave
+    # `gpu_device: "cpu"` and `gpu_memory_peak_gb: 0.0` for a run that the
     # container's own `proof.json`, in the same directory, recorded as an
     # A100-SXM4-80GB peaking at 20.64 GiB. The file exists so a miner can show
     # how a checkpoint was produced -- one that contradicts the run it describes
@@ -200,13 +198,13 @@ def train_once(
     proof = {
         "miner_uid": hotkey,
         "dataset_hash": file_hash(train_json_path),
-        # Hashes the whole output directory, which is the checkpoint root. It
-        # used to hash `output_dir/adapter` -- the subdirectory the bundled
-        # strategies wrote a LoRA adapter into, a layout that is rejected before
-        # evaluation and is no longer written by anything. The **key** keeps its
-        # name: `training_proof.json` is uploaded to the miner's HF repo, and
-        # renaming a field there breaks whoever is reading it (no consumer in
-        # our own four repositories, which is not the same as no consumer).
+        # Hashes the whole output directory, which is the checkpoint root --
+        # **not** `output_dir/adapter`. A LoRA adapter in a subdirectory is a
+        # layout that is rejected before evaluation, and nothing writes it. The
+        # **key** keeps the name `adapter_hash`: `training_proof.json` is
+        # uploaded to the miner's HF repo, and renaming a field there breaks
+        # whoever is reading it (no consumer in our own four repositories, which
+        # is not the same as no consumer).
         "adapter_hash": directory_hash(Path(output_dir)),
         "base_model_hash": (
             directory_hash(Path(checkpoint_path)) if checkpoint_path else ""

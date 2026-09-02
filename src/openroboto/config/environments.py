@@ -160,11 +160,11 @@ def check_coherent(
 
     `competition_source` is the backend that served the season in this workspace
     (`competition.source`, written by `openroboto init`). 🔴 **Without it the five
-    self-describing fields can be perfectly consistent and still be wrong**, and
-    they were: `init --backend-url <local backend>` used to take the season from
-    that backend and write a mainnet workspace around it. Every field agreed with
-    every other field -- mainnet, finney, 80, production URLs -- because the one
-    fact that disagreed, *where the season came from*, was not among them. Empty
+    self-describing fields can be perfectly consistent and still be wrong**:
+    `init --backend-url <local backend>` takes the season from that backend, and a
+    mainnet workspace written around it has every field agreeing with every other
+    -- mainnet, finney, 80, production URLs -- because the one fact that
+    disagrees, *where the season came from*, is not among them. Empty
     means the workspace does not say (written before the key existed); that is not
     checked rather than assumed to be fine, which is why `init` writes it.
     """

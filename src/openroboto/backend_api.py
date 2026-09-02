@@ -258,9 +258,9 @@ def fetch_netuid(base_url: str) -> int:
     """Which subnet this backend watches, from its own liveness probe.
 
     For a self-hosted backend this is the **only** honest answer to "which chain
-    is this workspace on". `openroboto init` used to answer it from a static
-    template instead, which is how asking a testnet backend for the season
-    produced a mainnet workspace around it.
+    is this workspace on" -- **not** a static template. A templated answer is how
+    asking a testnet backend for the season produces a mainnet workspace around
+    it.
 
     ⚠️ `/healthz` is deliberately **not** enveloped (backend ADR 02 §3.3: probes
     stay bare JSON so orchestrators can read fixed field paths), so this is the

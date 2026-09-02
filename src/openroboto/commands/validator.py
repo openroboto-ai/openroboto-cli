@@ -1,5 +1,4 @@
-"""`openroboto validator run` -- the external validator's long-running process
-(the old `validator.py`).
+"""`openroboto validator run` -- the external validator's long-running process.
 
 A validator **does not run evaluations**: the backend computes the weights,
 and it is only responsible for reading them back and setting them on chain.
@@ -10,12 +9,13 @@ the way -- a validator does not have to be restarted when the key rotates.
 the whole reason the URL has to keep answering: it is an external validator's
 only channel to the key, and their code is not ours to upgrade. The rest of the
 file is a miner-side artifact on its way out; the `payment` block in particular
-used to be applied to `Settings` on every cycle, which set a burn rate on a
-process that never burns anything.
+is **not** applied to `Settings` on every cycle, which would set a burn rate on
+a process that never burns anything.
 
-The old loop called `scan_chain_submissions()` every 60 seconds but **used the
-return value in exactly zero places** -- a full metagraph sync plus reading the
-commitment of every hotkey one by one, pure wasted RPC. It is removed here.
+🔴 **The loop makes no chain scan.** `scan_chain_submissions()` is a full
+metagraph sync plus a commitment read for every hotkey, one by one, and this
+process has no use for the return value -- calling it every 60 seconds is pure
+wasted RPC.
 """
 
 from __future__ import annotations

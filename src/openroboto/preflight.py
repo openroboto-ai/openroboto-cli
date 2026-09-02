@@ -5,12 +5,11 @@ is burned for nothing and is not refunded. So both `burn` and `submit` run
 this pass **before spending anything**: are the fields that should be in the
 checkpoint all there, can the payload be encoded, does it exceed 512 bytes.
 
-The old `rt.py::check_announce_ready` treated `h` (the block hash) as an empty
-string when estimating the payload size, while on chain it is 64 hexadecimal
-characters -- meaning **it undercounted by 64 bytes every single time**. An
-hf_repo_id sitting right on the boundary would sail through the preflight,
-burn the TAO, and then blow up at the on-chain step. Here the estimate uses a
-64-character placeholder hash, preferring to overestimate.
+🔴 **The size estimate uses a 64-character placeholder block hash**, never an
+empty string: on chain `h` is 64 hexadecimal characters, so estimating with `""`
+undercounts by 64 bytes every single time. An hf_repo_id sitting right on the
+boundary then sails through the preflight, burns the TAO, and blows up at the
+on-chain step. Overestimating is the safe direction.
 """
 
 from __future__ import annotations

@@ -37,11 +37,6 @@ DEFAULT_OUTPUT_ROOT = Path("./tmp/robot_train_vla_miner")
 """Root directory for training output."""
 
 
-class StateError(Exception):
-    """The workspace cannot say which competition it is operating on. The
-    message must say what to do next."""
-
-
 def state_path(competition_id: int, base: Path = STATE_DIR) -> Path:
     return base / f"competition_{competition_id}.json"
 

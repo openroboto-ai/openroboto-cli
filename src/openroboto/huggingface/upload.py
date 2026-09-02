@@ -60,13 +60,11 @@ def push_model(
 
     Returns the URL and the commit SHA.
 
-    The old implementation threw `upload_folder` into a worker thread with a
-    600-second timeout, and on timeout treated it as a failure and returned `None`.
-    A complete π0.5 checkpoint is several GB; 600 seconds is simply not enough to
-    transfer it on ordinary home bandwidth — so that timeout manufactured **fake
-    failures**: the files were in fact still uploading, and the miner, seeing
-    "upload failed", would rerun. The timeout is removed here, leaving it to
-    `huggingface_hub`'s own chunked retries.
+    🔴 **No timeout around `upload_folder`, and no worker thread.** A complete
+    π0.5 checkpoint is several GB, which ordinary home bandwidth does not move in
+    600 seconds — a timeout there manufactures **fake failures**: the files are
+    still uploading, and the miner, seeing "upload failed", reruns. A stalled
+    transfer is `huggingface_hub`'s own chunked retries to handle.
     """
     from huggingface_hub import HfApi, create_repo, upload_folder
 
@@ -90,9 +88,9 @@ def push_model(
     )
 
     try:
-        # 🔴 Do not flip an existing repository's visibility. This used to call
-        # `update_repo_visibility(..., "public")` unconditionally, which silently
-        # published a miner's private weights on the first upload -- and
+        # 🔴 Do not flip an existing repository's visibility -- **never** call
+        # `update_repo_visibility(..., "public")` here. Unconditionally, it
+        # silently publishes a miner's private weights on the first upload, and
         # publishing is not undoable: whoever fetched them while the repo was
         # open still has them.
         #
@@ -146,9 +144,10 @@ def _write_run_info(
 ) -> None:
     """Put a `run_info.json` into the model directory, uploaded with the model.
 
-    `model` used to be the literal `"pi05"`, written next to a LingBot checkpoint
-    just as readily as next to a pi0.5 one. This file ships inside the miner's
-    repository, so the wrong value there is a claim about the artifact it sits in.
+    `model` is the season's base model, **never** a literal `"pi05"`: a constant
+    is written next to a LingBot checkpoint just as readily as next to a pi0.5
+    one. This file ships inside the miner's repository, so the wrong value there
+    is a claim about the artifact it sits in.
 
     An empty `base_model` writes `""` rather than guessing: the season names the
     base model (`competition.base_model_family`), and a workspace whose season has

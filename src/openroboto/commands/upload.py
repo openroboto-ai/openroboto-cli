@@ -1,5 +1,4 @@
-"""`openroboto upload` -- push the training artifact to HuggingFace (the old
-`rt.py upload`)."""
+"""`openroboto upload` -- push the training artifact to HuggingFace."""
 
 from __future__ import annotations
 
