@@ -86,7 +86,7 @@ def _resolve_checkpoint(configured: str) -> str:
 
     The CLI mounts a host cache directory here and creates it with
     `mkdir(parents=True, exist_ok=True)` *before* `docker run`
-    (`training/round.py::_checkpoint_path`). So on a first run the path always
+    (`training/run.py::_checkpoint_path`). So on a first run the path always
     exists and is always empty. The old test was `not os.path.exists(cp)`,
     which is therefore never true, and nothing ever downloaded the base model.
 

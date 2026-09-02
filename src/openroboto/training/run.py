@@ -1,4 +1,4 @@
-"""Run one training round: download data, run the container, collect metrics and
+"""Run one training pass: download data, run the container, collect metrics and
 the training proof.
 
 Corresponds to the old `miner/trainer_vla.py::train_vla`. Two artifact files, both
@@ -37,7 +37,7 @@ directory.
 
 A `gs://` path cannot be mounted into the container directly, so an empty directory
 is prepared and mounted instead, letting the openpi inside the container do the
-download itself — the next training round then hits the cache instead of
+download itself — the next training run then hits the cache instead of
 re-downloading several GB.
 """
 
@@ -75,7 +75,7 @@ def resolve_checkpoint(configured: str) -> str:
 
 @dataclass
 class TrainParams:
-    """Hyperparameters for one training round.
+    """Hyperparameters for one training run.
 
     Comes from the `training:` section of `miner.yaml` — the miner's own. The
     defaults here and the defaults in `Settings` are the same five numbers,
@@ -92,7 +92,7 @@ class TrainParams:
 
 @dataclass
 class TrainOutcome:
-    """The result of one training round."""
+    """The result of one training run."""
 
     metrics: dict[str, Any] = field(default_factory=dict)
     proof: dict[str, Any] = field(default_factory=dict)
@@ -123,7 +123,7 @@ def download_dataset(url: str, dest: str) -> str:
     raise OSError(f"Dataset download failed for {url}: {last_error}")
 
 
-def train_round(
+def train_once(
     *,
     train_json_path: str,
     output_dir: str,

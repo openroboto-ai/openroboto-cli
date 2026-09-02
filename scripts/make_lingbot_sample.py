@@ -364,8 +364,8 @@ def config_slices() -> dict[str, tuple[str, int, int]]:
     slices: dict[str, tuple[str, int, int]] = {}
     for category in ("states", "actions"):
         for entry in config[category]:
-            (feature, info), = entry.items()
-            (origin,), = (item.items() for item in info["origin_keys"])
+            ((feature, info),) = entry.items()
+            ((origin,),) = (item.items() for item in info["origin_keys"])
             raw_key, bounds = origin
             slices[feature] = (raw_key, int(bounds["start"]), int(bounds["end"]))
     return slices
@@ -383,7 +383,11 @@ def build(out: Path) -> Path:
         ) from None
 
     features = {
-        key: {"dtype": "image", "shape": IMAGE_SHAPE, "names": ["height", "width", "channel"]}
+        key: {
+            "dtype": "image",
+            "shape": IMAGE_SHAPE,
+            "names": ["height", "width", "channel"],
+        }
         for key in CAMERA_KEYS
     }
     features["observation.state"] = {
@@ -391,11 +395,17 @@ def build(out: Path) -> Path:
         "shape": (STATE_DIM,),
         "names": ["state"],
     }
-    features["action"] = {"dtype": "float32", "shape": (ACTION_DIM,), "names": ["actions"]}
+    features["action"] = {
+        "dtype": "float32",
+        "shape": (ACTION_DIM,),
+        "names": ["actions"],
+    }
 
     dataset_root = out / "dataset"
     if dataset_root.exists():
-        raise SystemExit(f"{dataset_root} already exists -- remove it or pick another --out")
+        raise SystemExit(
+            f"{dataset_root} already exists -- remove it or pick another --out"
+        )
 
     dataset = LeRobotDataset.create(
         repo_id=REPO_ID,
@@ -445,7 +455,7 @@ def build(out: Path) -> Path:
     norm_path.parent.mkdir(parents=True, exist_ok=True)
     norm_path.write_text(
         json.dumps(
-            {"norm_stats": stats, "count": int(len(raw["observation.state"]))}, indent=2
+            {"norm_stats": stats, "count": len(raw["observation.state"])}, indent=2
         ),
         encoding="utf-8",
     )

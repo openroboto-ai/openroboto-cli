@@ -28,7 +28,6 @@ from openroboto_protocol.schemas import (
     Reason,
     SubmissionHistoryItem,
 )
-from openroboto_protocol.status import normalize_status
 
 from openroboto.backend_api import (
     BackendError,
@@ -56,7 +55,12 @@ def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) 
     parser.add_argument(
         "--hotkey", default="", help="hotkey SS58; defaults to the one in miner.yaml"
     )
-    parser.add_argument("--round", type=int, default=0, help="Only show this round")
+    parser.add_argument(
+        "--competition",
+        type=int,
+        default=0,
+        help="competition id to report on; defaults to the one this workspace mines",
+    )
     parser.add_argument(
         "--limit", type=int, default=DEFAULT_LIMIT, help="Max rows shown per section"
     )
@@ -72,22 +76,27 @@ def run(args: argparse.Namespace) -> int:
             "or set subnet.hotkey_ss58 in miner.yaml"
         )
 
+    competition = args.competition or _workspace_competition(settings)
+    if not competition:
+        raise ConfigError(
+            "Don't know which competition to report on -- pass "
+            "`--competition <id>`, or run this from a workspace whose "
+            "miner.yaml has a `competition:` section"
+        )
+
     say(f"backend: {settings.backend_url}")
     say(f"hotkey: {hotkey}")
     say("")
 
-    history = fetch_submissions(
-        settings.backend_url, hotkey, args.limit, round_num=args.round
-    )
+    history = fetch_submissions(settings.backend_url, competition, hotkey, args.limit)
     submissions = history.data
     say(f"Submissions ({len(submissions)})")
     if not submissions:
         say("  (No records. If you just ran announce, wait one chain-scan cycle.)")
     for row in submissions:
-        # 🔴 No `round=` here. The field is gone from the response (protocol
-        # 0.9.0); `--round` still works, but it is applied by the backend now.
-        # `task_id` is what a miner quotes when asking us to look something up,
-        # so it earns the space the round number used to take.
+        # The season is not in the response -- the backend filtered on it, so
+        # every row here belongs to `competition`. `task_id` is what a miner
+        # quotes when asking us to look something up, so it takes the space.
         say(
             f"  task={row.task_id} "
             f"status={display_status(row)} "
@@ -97,12 +106,10 @@ def run(args: argparse.Namespace) -> int:
         )
     say_more_hint(history.meta.page.has_more, history.meta.page.total)
 
-    rejected = fetch_rejections(
-        settings.backend_url, hotkey, args.limit, round_num=args.round
-    )
+    rejected = fetch_rejections(settings.backend_url, hotkey, args.limit)
     rejections = rejected.data
     say("")
-    say(f"Rejected during chain scan ({len(rejections)})")
+    say(f"Rejected during chain scan, all competitions ({len(rejections)})")
     if not rejections:
         say("  (No rejections.)")
     for rejection in rejections:
@@ -208,25 +215,32 @@ def say_more_hint(has_more: bool, total: int) -> None:
 
 
 def display_status(row: SubmissionHistoryItem) -> str:
-    """Map the status word returned by the backend onto the protocol
-    vocabulary.
+    """The lifecycle status the backend reported, verbatim.
 
     Reads `eval_status` only. **The old `status` column does not appear here,
-    because the model does not have it at all** -- the two columns disagree on
-    52 rows, and reading `status` first is exactly the root cause of the 33
-    out of 95 records that historically displayed the wrong status.
+    because the model does not have it at all** -- two status keys in one
+    response means the one read first decides, and it is the un-normalized one.
 
-    TODO(blocking issue ①): the worker only knows `done` / `scored` /
-    `failed`, while the backend gives `evaluated` / `eval_failed`. Here we
-    display uniformly using the protocol's vocabulary; once both sides settle
-    it, if a reverse conversion is needed (protocol word → worker word), add
-    it next to this function and do not scatter it across the call sites.
+    🔴 **Not passed through `normalize_status`.** That table maps the pre-1.0
+    worker vocabulary (`done` / `failed` / `benchmark_*`), and the backend sends
+    only the eight storable words; mapping words that cannot arrive would only
+    hide it if one ever did.
     """
-    return normalize_status(row.eval_status) if row.eval_status else "?"
+    return row.eval_status or "?"
 
 
 def _when(moment: datetime | None) -> str:
     return moment.isoformat() if moment is not None else "?"
+
+
+def _workspace_competition(settings: Settings) -> int:
+    """The competition this workspace mines, or `0` if it does not say.
+
+    `0` rather than an exception: this is the troubleshooting command, and
+    `--competition` is the documented way to ask about any season from anywhere.
+    """
+    snapshot = load_snapshot(settings)
+    return snapshot.id if snapshot is not None else 0
 
 
 def _load_settings(path: str) -> Settings:

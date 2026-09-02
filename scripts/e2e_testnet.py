@@ -42,7 +42,6 @@ is what sends them on to pay for a checkpoint the backend will reject.
     E2E_HF_TOKEN          HuggingFace token with write + create-repo
     E2E_HF_USERNAME       HuggingFace account name
     E2E_BACKEND_URL       backend base URL, e.g. http://127.0.0.1:8000
-    E2E_CONTROL_JSON      control.json URL the miner should read
     E2E_NETUID            defaults to 313
     E2E_NETWORK           defaults to "test"
     E2E_WALLET_NAME       local wallet name (developer machines)
@@ -222,8 +221,6 @@ def write_config(
         f'  wallet_path: "{os.environ.get("E2E_WALLET_PATH", "")}"\n'
         "backend:\n"
         f'  url: "{env("E2E_BACKEND_URL")}"\n'
-        "urls:\n"
-        f'  control_json: "{env("E2E_CONTROL_JSON")}"\n'
         "huggingface:\n"
         f'  token: "{env("E2E_HF_TOKEN")}"\n'
         f'  username: "{env("E2E_HF_USERNAME")}"\n'
@@ -233,21 +230,23 @@ def write_config(
     return config
 
 
-def poll_for_submission(backend: str, hotkey: str, burn_tx: str) -> dict[str, object]:
+def poll_for_submission(
+    backend: str, competition_id: int, hotkey: str, burn_tx: str
+) -> dict[str, object]:
     """Wait for the chain scanner to admit the submission we just announced.
 
     Matches on the payment transaction hash rather than "the newest row": a wallet
     is reused across runs, so it already carries older rows, and taking the
     newest one would let a scanner that never ran pass the step by reporting the
     previous run's success. The burn hash is unique per run and is the one value
-    that appears both in the local round state and on the scanner's row.
+    that appears both in the local checkpoint and on the scanner's row.
     """
     from openroboto.backend_api import fetch_submissions
 
     deadline = time.monotonic() + SCAN_TIMEOUT_SEC
     seen: list[object] = []
     while time.monotonic() < deadline:
-        envelope = fetch_submissions(backend, hotkey=hotkey, limit=20)
+        envelope = fetch_submissions(backend, competition_id, hotkey=hotkey, limit=20)
         for row in envelope.data:
             record = row.model_dump() if hasattr(row, "model_dump") else dict(row)
             if str(record.get("burn_tx_hash", "")).lower() == burn_tx.lower():
@@ -315,8 +314,6 @@ def main() -> int:
                 "submit",
                 "--config",
                 str(config),
-                "--round",
-                "1",
                 "--output-dir",
                 str(checkpoint),
             ],
@@ -327,16 +324,18 @@ def main() -> int:
 
         step(3, "scan -- the backend admits the submission")
         state = json.loads(
-            (workspace / "state/round_1.json").read_text(encoding="utf-8")
+            (workspace / f"state/competition_{competition.id}.json").read_text(
+                encoding="utf-8"
+            )
         )
         burn_tx = str(state.get("burn_tx_hash") or "")
         if not burn_tx:
             raise E2EError(
-                "the local round state carries no burn_tx_hash, so there is "
+                "the local checkpoint carries no burn_tx_hash, so there is "
                 "nothing to match the scanner's row against (the key holds the "
                 "payment tx for both fee kinds)"
             )
-        record = poll_for_submission(backend, hotkey, burn_tx)
+        record = poll_for_submission(backend, competition.id, hotkey, burn_tx)
         print(f"   scanner row: {json.dumps(record, default=str)[:400]}")
 
         status = str(record.get("eval_status", ""))

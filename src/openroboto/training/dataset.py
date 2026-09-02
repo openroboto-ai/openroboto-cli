@@ -8,7 +8,7 @@ touched when it was moved here.
 Field validation for episodes used to depend on the now-deleted
 `protocol/types.py::VLAEpisode`: that was a dataclass, so a missing field made
 `cls(**clean)` raise `TypeError` outright, and the caller did not catch it — one
-bad sample could crash a whole training round at the loading stage. This was
+bad sample could crash a whole training run at the loading stage. This was
 changed to validate entry by entry, skipping and counting, so bad data only costs
 you that one entry.
 """

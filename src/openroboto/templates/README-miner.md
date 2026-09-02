@@ -18,11 +18,11 @@ workspace mines (and what entering it costs), your HF token, your wallet
 balance, Docker, GPU and the training image. It runs offline. It exists so that
 "paid the entry fee, then found out the environment was wrong" cannot happen.
 
-## Each round
+## Each attempt
 
 ```bash
 openroboto build           # once: build the training image (~20 min first time)
-openroboto train           # one round; writes tmp/robot_train_vla_miner/round_N/
+openroboto train           # trains; writes tmp/robot_train_vla_miner/competition_<id>/
 openroboto check           # verify the checkpoint format — free, do not skip
 openroboto submit          # upload → pay the entry fee → announce
 openroboto status          # what the subnet made of it, and why
@@ -30,7 +30,7 @@ openroboto status          # what the subnet made of it, and why
 
 **`check` before `submit`, every time.** The bundled `train_strategy.py` does not
 train and **exports no checkpoint** — the export is the step marked for you to
-write, and it is the one that decides whether the round is worth anything. Two
+write, and it is the one that decides whether the attempt is worth anything. Two
 rules for it:
 
 - the training output directory **is the checkpoint root** (`submit` uploads it
@@ -52,8 +52,8 @@ or transferred, whichever this season charges — and it is **not refunded**.
 | `miner.yaml` | Your configuration. Holds your wallet password and HF token — **never commit it**. The `environment` field at the top picks mainnet / dev / local as one setting |
 | `train_strategy.py` | Your training logic. This is the file to edit |
 | `.gitignore` | Keeps credentials, state and multi-GB caches out of version control |
-| `state/round_N.json` | Per-round progress. `submit` reads it to resume **and to reuse a fee already paid instead of paying twice** |
-| `tmp/robot_train_vla_miner/round_N/` | Training output — the checkpoint `check` and `submit` look at |
+| `state/competition_<id>.json` | Progress for the season this workspace mines. `submit` reads it to resume **and to reuse a fee already paid instead of paying twice** |
+| `tmp/robot_train_vla_miner/competition_<id>/` | Training output — the checkpoint `check` and `submit` look at |
 | `cache/` | Base checkpoint for this season's base model, downloaded once (several GB) |
 | `logs/` | Log files |
 
@@ -84,8 +84,8 @@ Want a more heavily commented starting point? `openroboto init -s example`.
 openroboto status          # rejection reasons, straight from the subnet
 ```
 
-- **Paid but not announced** → `openroboto submit --round N`. It resumes from
-  `state/round_N.json`: the upload is not repeated and the fee recorded there is
+- **Paid but not announced** → `openroboto submit`. It resumes from
+  `state/competition_<id>.json`: the upload is not repeated and the fee recorded there is
   reused, so **you do not pay twice**. Only the on-chain commitment is sent. The
   payment must reach that commitment within 50 blocks (~10 minutes), and `submit`
   says so if the window has already closed instead of charging you again.

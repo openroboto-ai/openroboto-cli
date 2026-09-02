@@ -70,7 +70,7 @@ def test_local_checkpoint_is_mounted_where_openpi_downloads_to() -> None:
     writes anything it downloads. This used to mount at `/data/checkpoint` --
     a path nothing else in the image knows -- so the base model landed in the
     container's own writable layer and vanished with the container. The host
-    cache stayed empty forever, `training/round.py`'s "cache hit" branch could
+    cache stayed empty forever, `training/run.py`'s "cache hit" branch could
     never run, and every `train` re-downloaded several GB in silence.
 
     Still mounted by **parent** directory: the name has to survive so that
@@ -177,7 +177,7 @@ def test_every_bind_mount_source_is_an_absolute_path(tmp_path: Path) -> None:
     `Path("./tmp/robot_train_vla_miner")`, `Path` normalises the `./` away, `str()`
     comes out as `tmp/...`, and so `openroboto train` with default arguments **could
     not start a container at all**. The base-model cache case is nastier: no error, it
-    just re-downloads several GB every round.
+    just re-downloads several GB every run.
 
     Pin "all absolute" rather than pinning each specific path -- the next mount point
     someone adds gets caught by this one too.

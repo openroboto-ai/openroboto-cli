@@ -241,7 +241,7 @@ def resolve_weights(
 
     Tier 3 is correct but expensive, and expensive in a place a miner cannot
     see: without a `-v` for the cache it lands in the container's writable
-    layer and is re-fetched next round.
+    layer and is re-fetched next run.
     """
     if os.path.isdir(checkpoint_path) and local_name == os.path.basename(
         checkpoint_path.rstrip("/")
@@ -558,7 +558,7 @@ def build_policy(cfg: dict, init_device: str = "cuda"):
     # yields `{"self", "kwargs"}`, every yaml key is filtered out, the overlay
     # becomes a no-op, and the failure resurfaces 200 lines later as the same
     # `tensor a (14) ... tensor b (55)` this whole block exists to fix. That
-    # cost a GPU round on 2026-08-26; hence the guard below.
+    # cost a GPU run; hence the guard below.
     import inspect
 
     import yaml

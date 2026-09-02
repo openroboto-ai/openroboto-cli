@@ -100,7 +100,7 @@ def test_every_sdk_return_shape_is_read_correctly(result: Any, expected: bool) -
 def test_no_positive_weights_sends_no_transaction() -> None:
     """No weights means no extrinsic -- sending one only burns the fee.
 
-    It also has to be visible: emissions going nowhere this round is not a
+    It also has to be visible: emissions going nowhere this cycle is not a
     routine event, so it is logged as a warning rather than passed over.
     """
     subtensor = FakeSubtensor()
@@ -235,7 +235,7 @@ def test_an_unexpected_error_does_not_kill_it_either(
 def test_an_empty_weight_table_skips_the_round_loudly(
     one_cycle: Any, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """🔴 The backend returning nothing means no miner is paid this round.
+    """🔴 The backend returning nothing means no miner is paid this cycle.
 
     Production has been here: the response shape changed, every lookup missed,
     and `set_weights` was never called. No exception, no non-2xx -- just no
@@ -257,7 +257,7 @@ def test_hotkeys_missing_from_the_metagraph_are_dropped(one_cycle: Any) -> None:
     is pinned here rather than assumed.
 
     ⚠️ The proportions matter now. This used to drop 3.0 out of 4.0, three
-    quarters of the round, which no real snapshot ever does: a miner holds at
+    quarters of the weight, which no real snapshot ever does: a miner holds at
     most 0.07. Since `set_weights_on_chain` refuses when most of the weight
     goes missing, those numbers described a case that must be blocked while
     claiming to describe one that must go through. Kept at a share a miner
@@ -370,7 +370,7 @@ def test_losing_the_burn_address_sends_nothing() -> None:
 
     A normal snapshot is 0.9 on the burn address and 0.1 split across the top
     three miners. If the burn address is not on this subnet, normalisation
-    renormalises the remaining 0.1 to 1.0 and the whole round's emission goes
+    renormalises the remaining 0.1 to 1.0 and the whole cycle's emission goes
     to miners rather than being destroyed -- a tenfold payout produced by a
     perfectly ordinary-looking extrinsic.
 
@@ -399,7 +399,7 @@ def test_a_deregistered_miner_does_not_stop_the_round() -> None:
     """The other side of the same rule: miners come and go, and that is normal.
 
     A miner holds at most 0.07, so dropping one leaves the burn address in
-    place and the round should proceed. A guard that also blocked this would
+    place and the cycle should proceed. A guard that also blocked this would
     stop emissions every time someone deregistered.
     """
     subtensor = FakeSubtensor()

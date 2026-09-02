@@ -27,17 +27,18 @@ from __future__ import annotations
 from typing import Any
 
 from openroboto.chain import get_subtensor, open_wallet
+from openroboto.commands.announce import _competition_seq
 from openroboto.competition import Verdict
+from openroboto.competition_state import save_state
 from openroboto.config import Settings
 from openroboto.console import fail, say
 from openroboto.payment import BurnReceipt, execute_stake_burn, execute_transfer
 from openroboto.preflight import check_announce_ready, payload_size, payload_track
-from openroboto.round_state import save_state
 
 
 def perform_burn(
     settings: Settings,
-    round_num: int,
+    competition_id: int,
     state: dict[str, Any],
     verdict: Verdict,
 ) -> bool:
@@ -50,7 +51,7 @@ def perform_burn(
     together with that answer. See the module docstring for what the fee bought
     while it was optional.
     """
-    if not _ready_to_spend(settings, round_num, state, doing="burning"):
+    if not _ready_to_spend(settings, competition_id, state, doing="burning"):
         return False
 
     # The amount stays a local. Writing it back onto `settings` would put a
@@ -73,13 +74,13 @@ def perform_burn(
     finally:
         subtensor.close()
 
-    _record(round_num, state, receipt)
+    _record(competition_id, state, receipt)
     return True
 
 
 def perform_transfer(
     settings: Settings,
-    round_num: int,
+    competition_id: int,
     state: dict[str, Any],
     verdict: Verdict,
 ) -> bool:
@@ -101,7 +102,7 @@ def perform_transfer(
     defaulting keeps that guarantee where it is enforced instead of quietly
     growing a second, weaker copy of it here.
     """
-    if not _ready_to_spend(settings, round_num, state, doing="paying"):
+    if not _ready_to_spend(settings, competition_id, state, doing="paying"):
         return False
 
     amount_tao = verdict.amount_tao
@@ -127,7 +128,7 @@ def perform_transfer(
     finally:
         subtensor.close()
 
-    _record(round_num, state, receipt)
+    _record(competition_id, state, receipt)
     return True
 
 
@@ -205,7 +206,7 @@ def pays_as_the_hotkeys_owner(
 
 
 def _ready_to_spend(
-    settings: Settings, round_num: int, state: dict[str, Any], *, doing: str
+    settings: Settings, competition_id: int, state: dict[str, Any], *, doing: str
 ) -> bool:
     """The last look at the commitment before any money moves. Shared by both
     ways of paying, because the thing being protected is the same either way: a
@@ -214,20 +215,22 @@ def _ready_to_spend(
     settings.require_for_chain()
 
     # The track decides which fields the payload must carry.
-    reasons = check_announce_ready(state, round_num, payload_track(settings))
+    reasons = check_announce_ready(
+        state, _competition_seq(settings), payload_track(settings)
+    )
     if reasons:
-        fail(f"Pre-chain self-check failed (round {round_num}); **not** {doing}:")
+        fail(f"Pre-chain self-check failed; **not** {doing}:")
         for reason in reasons:
             say(f"   • {reason}")
         return False
     say(
         f"✅ self-check passed | commitment payload "
-        f"{payload_size(state, round_num)}/512 bytes"
+        f"{payload_size(state, _competition_seq(settings))}/512 bytes"
     )
     return True
 
 
-def _record(round_num: int, state: dict[str, Any], receipt: BurnReceipt) -> None:
+def _record(competition_id: int, state: dict[str, Any], receipt: BurnReceipt) -> None:
     """Write the payment proof into the checkpoint.
 
     The keys keep their `burn_` names on both tracks: they are what `announce`
@@ -239,4 +242,4 @@ def _record(round_num: int, state: dict[str, Any], receipt: BurnReceipt) -> None
     state["burn_block"] = receipt.block_number
     state["step"] = "burn"
     state["status"] = "completed"
-    save_state(round_num, state)
+    save_state(competition_id, state)

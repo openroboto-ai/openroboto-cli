@@ -11,7 +11,7 @@ competitions at once and they do not accept the same thing, so `init` asks the
 backend which ones are open, the miner picks one, and that season's whole spec
 is written into `miner.yaml`. **Every later command reads that snapshot off
 disk**: `build` / `train` / `check` never touch the network, and a competition
-edited mid-round cannot silently change how a checkpoint is built.
+edited mid-season cannot silently change how a checkpoint is built.
 
 Two rules hold this together:
 

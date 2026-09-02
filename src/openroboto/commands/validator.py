@@ -3,7 +3,7 @@
 
 A validator **does not run evaluations**: the backend computes the weights,
 and it is only responsible for reading them back and setting them on chain.
-control.json refreshes `public_key` every round, so the loop updates it along
+control.json refreshes `public_key`, so the loop updates it along
 the way -- a validator does not have to be restarted when the key rotates.
 
 🔴 **`public_key` is the only thing this loop takes out of that file**, and it is

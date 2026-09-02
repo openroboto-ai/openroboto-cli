@@ -6,7 +6,7 @@ Two halves, deliberately separated:
 - **the snapshot** -- `openroboto init` writes the competition's whole spec into
   `miner.yaml` and every later command reads it from there, offline. Training
   does not need the network, and a competition that changed under a miner
-  mid-round must not silently change how their checkpoint is built;
+  mid-season must not silently change how their checkpoint is built;
 - **the check** -- `judge()` compares that snapshot against what the backend
   serves *now*, and it is the last gate before a fee is paid.
 
@@ -137,6 +137,16 @@ class Snapshot:
         return int(self.raw.get("seq", 0) or 0)
 
     @property
+    def id(self) -> int:
+        """The competition id **as this backend numbered it**, written by `init`.
+
+        🔴 Local to one database, so it is never the id sent on chain -- that one
+        is re-resolved from `(track, seq)` at payment time (`Verdict.cid`). Its
+        one job here is naming this workspace's files.
+        """
+        return int(self.raw.get("id", 0) or 0)
+
+    @property
     def label(self) -> str:
         return str(self.raw.get("label", "")) or self.name
 
@@ -229,6 +239,28 @@ def load_snapshot(settings: Settings) -> Snapshot | None:
     if not section.get("track") or not section.get("seq"):
         return None
     return Snapshot(section)
+
+
+def workspace_competition_id(settings: Settings) -> int:
+    """Which competition this workspace operates on, for naming local files.
+
+    Every command that reads or writes the checkpoint needs this one number, and
+    the workspace already carries it -- so no command asks for it on the command
+    line. A workspace that cannot answer is refused rather than guessed at: the
+    alternative is `train` writing one file and `submit` reading another.
+
+    Raises:
+        ConfigError: no competition section, or one written without an `id`.
+    """
+    snapshot = load_snapshot(settings)
+    if snapshot is not None and snapshot.id:
+        return snapshot.id
+    raise ConfigError(
+        "This workspace does not say which competition it mines, so there is no "
+        "checkpoint to read or write.\n"
+        "  \u2192 run `openroboto init --refresh` to write the `competition:` "
+        "section from the backend"
+    )
 
 
 def fee_of(params: Mapping[str, Any], *, where: str) -> Fee:
@@ -422,14 +454,14 @@ def judge(
     # It bit for real on 2026-09-01: operations pointed LingBot's baseline at the
     # repository that carries the evaluation results (a display-only reference),
     # and **every miner who had already run `init` could no longer pay** -- with
-    # an error telling them to retrain, which was a falsehood that costs a round.
+    # an error telling them to retrain, which is a falsehood that costs a training run.
     #
     # ⚠️ **The thing that really should be gated has not gone away**: a changed
     # *training starting point* does invalidate a training run. But that value
     # lives in `params.training` (`base_weights` / `checkpoint`), not in these
     # two columns. It is deliberately not added here on the way past: a gate that
     # refuses payment has to be thought through on its own, because refusing
-    # wrongly costs a miner a whole round of training -- and the lesson of this
+    # wrongly costs a miner a whole training run -- and the lesson of this
     # incident is precisely a gate watching the wrong field. Tracked in
     # `08-31-competition-is-the-only-source`.
 

@@ -61,7 +61,7 @@ def build_payload(
     hotkey_ss58: str,
     block_hash: str,
     hf_commit: str,
-    round_num: int,
+    competition_seq: int,
     hf_repo_id: str,
     burn_tx_hash: str,
     burn_block: int,
@@ -88,16 +88,21 @@ def build_payload(
 
     - `competition_id`: which season, on chain `cid`. Absent for every
       commitment written before 0.7.0, which the backend reads as
-      `(sim, seq=round_num)`.
+      `(sim, seq=competition_seq)`.
     - `model_hash`: the weights fingerprint, on chain `m`. Required on the real
       track, where the repository may be private and the backend therefore
       cannot compute it itself.
     """
+    # 🔴 The first four are **positional on purpose.** The fourth field is the
+    # season ordinal that goes on chain as `r`; the protocol package is renaming
+    # it (`round_num` → `claimed_competition_seq`) without changing the wire
+    # format or the field order, and a keyword here would break on that bump
+    # while positional survives it.
     return CommitmentPayload(
-        hotkey_ss58=hotkey_ss58,
-        block_hash=block_hash,
-        hf_commit=hf_commit,
-        round_num=round_num,
+        hotkey_ss58,
+        block_hash,
+        hf_commit,
+        competition_seq,
         hf_repo_id=hf_repo_id,
         burn_tx_hash=burn_tx_hash,
         burn_block=burn_block,
@@ -134,7 +139,7 @@ def submit_announcement(
 
     data = encode(payload)  # over 512 bytes raises CommitmentTooLargeError
     logger.info(
-        "Committing on chain | repo=%s round=%d size=%d bytes",
+        "Committing on chain | repo=%s seq=%d size=%d bytes",
         payload.hf_repo_id,
         payload.round_num,
         len(data),

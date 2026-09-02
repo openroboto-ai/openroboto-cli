@@ -171,10 +171,12 @@ def test_fetch_control_returns_payload_and_etag(
     monkeypatch.setattr(
         control_module,
         "urlopen",
-        lambda *a, **k: _FakeResponse(json.dumps({"round": 1}).encode(), etag="abc"),
+        lambda *a, **k: _FakeResponse(
+            json.dumps({"public_key": "k1"}).encode(), etag="abc"
+        ),
     )
     fetched = fetch_control("https://example.invalid/control.json")
-    assert fetched.control == {"round": 1}
+    assert fetched.control == {"public_key": "k1"}
     assert fetched.etag == "abc"
 
 
@@ -461,7 +463,7 @@ def test_the_bounds_themselves_are_reachable() -> None:
 
 
 def test_require_for_chain_reports_the_interval_with_everything_else() -> None:
-    """Reported together with the other problems, not in a second round.
+    """Reported together with the other problems, not in a second pass.
 
     One command re-run per problem just to learn the next one is the experience
     this check exists to avoid.

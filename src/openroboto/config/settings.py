@@ -142,7 +142,7 @@ class Settings:
 
     # ─── Public HTTP resources ─────────────────────────
     #: Where the subnet publishes `public_key`. That is **all** it is read for
-    #: now: the round, the status, the dataset and the base checkpoint moved to
+    #: now: the season, the status, the dataset and the base checkpoint moved to
     #: the competition row, and the fee has come from `params.fee` since the
     #: pre-payment check landed. `urls.dataset_train` / `dataset_val` are gone
     #: with them -- a dataset URL that is not the one this season publishes is

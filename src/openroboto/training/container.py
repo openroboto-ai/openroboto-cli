@@ -91,7 +91,7 @@ def build_docker_command(
     # config **cannot start the container at all**.
     # The base-model cache is the nastier one: `cache` has no slash, raises no
     # error, it just never sees the host cache — several GB re-downloaded every
-    # round, while the "cache hit" log line prints as usual.
+    # run, while the "cache hit" log line prints as usual.
     output_mount = Path(output_dir).resolve()
 
     command = [
@@ -125,7 +125,7 @@ def build_docker_command(
             # `OPENPI_DATA_HOME=/data/cache` -- so openpi downloaded the base
             # model into the container's own writable layer and it went away
             # with the container. The host cache therefore stayed empty, the
-            # "Local base-model cache hit" branch in `training/round.py` could
+            # "Local base-model cache hit" branch in `training/run.py` could
             # never be true, and **every `train` re-downloaded several GB**.
             #
             # Nothing reported this: the download is quiet, and the only visible
@@ -210,7 +210,7 @@ def detect_free_gpus() -> str:
 
 
 def remove_stale_container(name: str = CONTAINER_NAME) -> None:
-    """Remove a leftover container of the same name from the previous round.
+    """Remove a leftover container of the same name from the previous run.
 
     Otherwise `docker run --name` fails outright.
     """

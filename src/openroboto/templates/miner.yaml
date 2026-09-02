@@ -57,7 +57,7 @@ backend:
 # and the previous version is kept as miner.yaml.bak).
 #
 # Everything about a season lives here, so `build` / `train` / `check` never
-# have to go online: which round it is, which image to build, which dataset to
+# have to go online: which season it is, which image to build, which dataset to
 # train on, which base checkpoint to start from, which starting script, which
 # checkpoint layout your model is judged by (pi0.5 and LingBot-VLA 2.0 accept
 # completely different trees), and what the entry fee is.
@@ -129,7 +129,7 @@ log_dir: logs
 # Typical flow:
 #   openroboto doctor      # check GPU / Docker / config before spending anything
 #   openroboto build       # build this season's training image
-#   openroboto train       # train one round
+#   openroboto train       # train
 #   openroboto check       # verify the checkpoint layout BEFORE paying
 #   openroboto submit      # upload -> pay the entry fee -> announce
 #   openroboto status      # what the subnet thinks of your submission

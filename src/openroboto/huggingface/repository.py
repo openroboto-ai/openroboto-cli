@@ -33,7 +33,7 @@ did not exist during that season.
 
 ⚠️ Within one season the repository still accumulates: several submissions to
 the same competition share it, so `submit` still has to judge the **HF listing**
-rather than this round's output directory.
+rather than this training run's output directory.
 
 ## The value comes from the competition row
 

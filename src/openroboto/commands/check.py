@@ -53,9 +53,10 @@ from openroboto_protocol.model_format import (
 )
 
 from openroboto import adapters
+from openroboto.competition import workspace_competition_id
+from openroboto.competition_state import resolve_output_dir
 from openroboto.config import ConfigError, Settings
 from openroboto.console import say
-from openroboto.round_state import resolve_output_dir, resolve_round
 
 
 def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
@@ -68,22 +69,23 @@ def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) 
         "path",
         nargs="?",
         default="",
-        help="checkpoint directory, defaults to this round's training output directory",
-    )
-    parser.add_argument(
-        "--round", type=int, default=0, help="round number, auto-detected by default"
+        help="checkpoint directory, defaults to this competition's training "
+        "output directory",
     )
     parser.add_argument("--config", default="miner.yaml")
     parser.set_defaults(handler=run)
 
 
 def run(args: argparse.Namespace) -> int:
-    directory = Path(args.path or resolve_output_dir(resolve_round(args.round)))
+    settings = competition_settings(args.config)
+    directory = Path(
+        args.path or resolve_output_dir(workspace_competition_id(settings))
+    )
     if not directory.is_dir():
         say(f"❌ Directory does not exist: {directory}")
         return 1
 
-    layout = resolve_layout(competition_settings(args.config))
+    layout = resolve_layout(settings)
     report = check_directory(directory, layout=layout)
     return report_result(directory, report, layout=layout)
 

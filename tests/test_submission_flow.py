@@ -26,16 +26,16 @@ from openroboto.commands import announce as announce_command
 from openroboto.commands import burn as burn_command
 from openroboto.commands import submit as submit_command
 from openroboto.commands import upload as upload_module
+from openroboto.competition_state import (
+    announced_commit,
+    load_state,
+    paid_competition_id,
+    save_state,
+)
 from openroboto.config import Settings
 from openroboto.huggingface import UploadResult
 from openroboto.huggingface import tree as tree_module
 from openroboto.preflight import payload_size, payload_track
-from openroboto.round_state import (
-    announced_commit,
-    competition_id,
-    load_state,
-    save_state,
-)
 
 HOTKEY = "5" + "M" * 47
 COMMIT = "a" * 40
@@ -402,11 +402,13 @@ def test_parse_extrinsic_result_confirms_only_with_a_real_block() -> None:
 
 
 def _payload() -> CommitmentPayload:
+    # Positional for the same reason as the production call sites: the fourth
+    # field is being renamed in the protocol package without moving.
     return CommitmentPayload(
-        hotkey_ss58=HOTKEY,
-        block_hash="c" * 64,
-        hf_commit=COMMIT,
-        round_num=1,
+        HOTKEY,
+        "c" * 64,
+        COMMIT,
+        1,
         hf_repo_id="kyleab/pi05-abcdefghijkl",
         burn_tx_hash="0x" + "d" * 64,
         burn_block=8_888_880,
@@ -466,20 +468,20 @@ def test_submit_announcement_does_not_swallow_our_own_bugs(
 # ─── submit ──────────────────────────────────────────────────
 
 
-def test_submit_skips_a_finished_round(
+def test_submit_skips_a_finished_submission(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.chdir(tmp_path)
-    save_state(1, {"step": "announce", "status": "completed"})
+    save_state(SEASON_ID, {"step": "announce", "status": "completed"})
     monkeypatch.setattr(
-        submit_command.Settings, "load", staticmethod(lambda path: _settings())
+        submit_command.Settings, "load", staticmethod(lambda path: _season_settings())
     )
 
     def _explode(*args: Any, **kwargs: Any) -> None:
-        raise AssertionError("a finished round must not run through the pipeline again")
+        raise AssertionError("a finished submission must not run the pipeline again")
 
     monkeypatch.setattr(submit_command, "perform_upload", _explode)
-    args = argparse.Namespace(config="miner.yaml", round=1, output_dir="", force=False)
+    args = argparse.Namespace(config="miner.yaml", output_dir="", force=False)
     assert submit_command.run(args) == 0
 
 
@@ -490,10 +492,10 @@ def test_submit_reuses_an_existing_burn(
     monkeypatch.chdir(tmp_path)
     state = _uploaded_state()
     state.update({"burn_tx_hash": "0x" + "d" * 64, "burn_block": 8_888_880})
-    save_state(2, state)
+    save_state(SEASON_ID, state)
 
     monkeypatch.setattr(
-        submit_command.Settings, "load", staticmethod(lambda path: _settings())
+        submit_command.Settings, "load", staticmethod(lambda path: _season_settings())
     )
     monkeypatch.setattr(submit_command, "perform_upload", lambda *a, **k: None)
 
@@ -505,7 +507,7 @@ def test_submit_reuses_an_existing_burn(
     monkeypatch.setattr(submit_command, "perform_burn", _explode)
     monkeypatch.setattr(submit_command, "perform_announce", lambda *a, **k: True)
 
-    args = argparse.Namespace(config="miner.yaml", round=2, output_dir="", force=False)
+    args = argparse.Namespace(config="miner.yaml", output_dir="", force=False)
     assert submit_command.run(args) == 0
 
 
@@ -517,11 +519,11 @@ def test_submit_force_clears_the_previous_burn(
     state.update(
         {"step": "announce", "status": "completed", "burn_tx_hash": "0x" + "d" * 64}
     )
-    save_state(3, state)
+    save_state(SEASON_ID, state)
 
     _, paid = _submitting(monkeypatch, _season_settings())
 
-    args = argparse.Namespace(config="miner.yaml", round=3, output_dir="", force=True)
+    args = argparse.Namespace(config="miner.yaml", output_dir="", force=True)
     assert submit_command.run(args) == 0
     assert paid == [0.25]
 
@@ -552,6 +554,10 @@ def _season_settings(**fee: Any) -> Settings:
         }
     )
 
+
+#: The competition id `_season_settings()` writes; the checkpoint file is
+#: named after it, so every `save_state` in this file uses it.
+SEASON_ID = 2
 
 FEE_COLDKEY = "5Feqsy76Do37q6NaKkGnu4191g2gog85rLvNdx3iVHLKugtD"
 
@@ -731,7 +737,7 @@ def _submitting(
 
     def _burn(
         cfg: Settings,
-        round_num: int,
+        competition_id: int,
         state: dict[str, Any],
         verdict: Any = None,
     ) -> bool:
@@ -743,7 +749,7 @@ def _submitting(
 
     def _transfer(
         cfg: Settings,
-        round_num: int,
+        competition_id: int,
         state: dict[str, Any],
         verdict: Any = None,
     ) -> bool:
@@ -765,10 +771,10 @@ def test_submit_checks_the_competition_even_when_check_was_skipped(
     """Also the "the gate is not welded shut" case: a repository the rules
     accept goes all the way through and pays."""
     monkeypatch.chdir(tmp_path)
-    save_state(4, _uploaded_state())
+    save_state(SEASON_ID, _uploaded_state())
     checked, paid = _submitting(monkeypatch, _season_settings())
 
-    args = argparse.Namespace(config="miner.yaml", round=4, output_dir="", force=False)
+    args = argparse.Namespace(config="miner.yaml", output_dir="", force=False)
     assert submit_command.run(args) == 0
     assert len(checked) == 1
     # and the payment was handed this run's verdict, carrying the season's own
@@ -783,10 +789,10 @@ def test_force_does_not_skip_the_competition_check(
     monkeypatch.chdir(tmp_path)
     state = _uploaded_state()
     state.update({"burn_tx_hash": "0x" + "d" * 64})
-    save_state(5, state)
+    save_state(SEASON_ID, state)
     checked, _ = _submitting(monkeypatch, _season_settings())
 
-    args = argparse.Namespace(config="miner.yaml", round=5, output_dir="", force=True)
+    args = argparse.Namespace(config="miner.yaml", output_dir="", force=True)
     assert submit_command.run(args) == 0
     assert len(checked) == 1
 
@@ -795,7 +801,7 @@ def test_a_failed_check_spends_nothing(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.chdir(tmp_path)
-    save_state(6, _uploaded_state())
+    save_state(SEASON_ID, _uploaded_state())
     _, paid = _submitting(monkeypatch, _season_settings())
 
     def _refuse(*args: Any, **kwargs: Any) -> Any:
@@ -808,7 +814,7 @@ def test_a_failed_check_spends_nothing(
         lambda *a, **k: pytest.fail("announced without paying"),
     )
 
-    args = argparse.Namespace(config="miner.yaml", round=6, output_dir="", force=False)
+    args = argparse.Namespace(config="miner.yaml", output_dir="", force=False)
     assert submit_command.run(args) == 1
     assert paid == []
 
@@ -826,7 +832,7 @@ def test_a_season_paid_by_transfer_is_not_quietly_burned_instead(
     paying.
     """
     monkeypatch.chdir(tmp_path)
-    save_state(7, _uploaded_state())
+    save_state(SEASON_ID, _uploaded_state())
     _, paid = _submitting(monkeypatch, _season_settings())
     monkeypatch.setattr(
         submit_command,
@@ -834,7 +840,7 @@ def test_a_season_paid_by_transfer_is_not_quietly_burned_instead(
         lambda *a, **k: _verdict(amount_tao=2.0, cid=3, kind="transfer"),
     )
 
-    args = argparse.Namespace(config="miner.yaml", round=7, output_dir="", force=False)
+    args = argparse.Namespace(config="miner.yaml", output_dir="", force=False)
     assert submit_command.run(args) == 0
     assert paid == [("transfer", 2.0)]
 
@@ -856,7 +862,7 @@ def test_a_config_from_before_competitions_is_refused_before_it_uploads(
     miner has.
     """
     monkeypatch.chdir(tmp_path)
-    save_state(8, _uploaded_state())
+    save_state(SEASON_ID, _uploaded_state())
     checked, paid = _submitting(monkeypatch, _settings())
     monkeypatch.setattr(
         submit_command,
@@ -864,32 +870,10 @@ def test_a_config_from_before_competitions_is_refused_before_it_uploads(
         lambda *a, **k: pytest.fail("pushed gigabytes for a run that cannot pay"),
     )
 
-    args = argparse.Namespace(config="miner.yaml", round=8, output_dir="", force=False)
+    args = argparse.Namespace(config="miner.yaml", output_dir="", force=False)
     assert submit_command.run(args) == 1
     assert (checked, paid) == ([], [])
     assert "openroboto init --refresh" in capsys.readouterr().err
-
-
-def test_a_paid_round_still_announces_without_a_competition_section(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """The one exemption to the refusal above, and the reason it is worth having.
-
-    If the fee is already gone, the only thing that can still make it count is
-    the commitment. Refusing here would turn an unsupported config into a total
-    loss -- money spent, nothing on chain -- which is strictly worse than the
-    rejection it was heading for anyway.
-    """
-    monkeypatch.chdir(tmp_path)
-    state = _uploaded_state()
-    state["burn_tx_hash"] = "0x" + "e" * 64
-    state["burn_block"] = 8_888_880
-    save_state(12, state)
-    _, paid = _submitting(monkeypatch, _settings())
-
-    args = argparse.Namespace(config="miner.yaml", round=12, output_dir="", force=False)
-    assert submit_command.run(args) == 0
-    assert paid == []  # not paid a second time
 
 
 def test_the_fee_that_is_burned_is_the_one_the_verdict_carries(
@@ -911,7 +895,7 @@ def test_the_fee_that_is_burned_is_the_one_the_verdict_carries(
     monkeypatch.setattr(burn_command, "execute_stake_burn", _burn)
     state = _uploaded_state()
     state["competition_id"] = 2
-    save_state(9, state)
+    save_state(SEASON_ID, state)
 
     assert burn_command.perform_burn(settings, 9, state, verdict=_verdict(0.25)) is True
     assert burned["amount_tao"] == 0.25
@@ -946,7 +930,7 @@ def test_the_transfer_goes_to_the_address_the_verdict_carries(
     # The real track puts the fingerprint on chain because the repository may be
     # private -- without it the self-check refuses before any money moves.
     state["model_hash"] = "9" * 64
-    save_state(21, state)
+    save_state(SEASON_ID, state)
 
     assert (
         burn_command.perform_transfer(settings, 21, state, verdict=_real_verdict())
@@ -974,13 +958,13 @@ def test_a_transfer_is_not_sent_when_the_payload_would_not_encode(
         burn_command,
         "get_subtensor",
         lambda network: pytest.fail(
-            "opened a chain connection for an unsendable round"
+            "opened a chain connection for an unsendable payload"
         ),
     )
     monkeypatch.setattr(
         burn_command,
         "execute_transfer",
-        lambda **k: pytest.fail("paid for a round whose payload does not encode"),
+        lambda **k: pytest.fail("paid for a submission whose payload does not encode"),
     )
 
     assert (
@@ -1039,7 +1023,7 @@ def test_a_wallet_that_does_not_own_the_hotkey_pays_nothing(
     state = _uploaded_state()
     state["competition_id"] = 3
     state["model_hash"] = "9" * 64
-    save_state(30, state)
+    save_state(SEASON_ID, state)
 
     assert (
         burn_command.perform_transfer(
@@ -1051,7 +1035,7 @@ def test_a_wallet_that_does_not_own_the_hotkey_pays_nothing(
     assert "Nothing was paid" in printed
     assert HOTKEY in printed  # which hotkey
     assert OWNER_COLDKEY in printed  # and who was about to pay for it
-    # the checkpoint records no payment, so the round can be redone once fixed
+    # the checkpoint records no payment, so it can be redone once fixed
     assert "burn_tx_hash" not in load_state(30)
 
 
@@ -1068,7 +1052,7 @@ def test_a_burn_is_guarded_by_the_same_ownership_check(
         "execute_stake_burn",
         lambda **k: pytest.fail("burned TAO for a submission the subnet will reject"),
     )
-    save_state(31, _uploaded_state())
+    save_state(SEASON_ID, _uploaded_state())
 
     assert (
         burn_command.perform_burn(
@@ -1107,7 +1091,7 @@ def test_an_unreadable_coldkey_is_refused_rather_than_guessed(
     state = _uploaded_state()
     state["competition_id"] = 3
     state["model_hash"] = "9" * 64
-    save_state(32, state)
+    save_state(SEASON_ID, state)
 
     assert (
         burn_command.perform_transfer(
@@ -1196,9 +1180,9 @@ def test_neither_burn_nor_submit_opens_control_json(
         return SimpleNamespace(tx_hash="0x" + "f" * 64, block_number=1)
 
     monkeypatch.setattr(burn_command, "execute_stake_burn", _burn)
-    save_state(21, _uploaded_state())
+    save_state(SEASON_ID, _uploaded_state())
 
-    args = argparse.Namespace(config="miner.yaml", round=21, output_dir="", force=False)
+    args = argparse.Namespace(config="miner.yaml", output_dir="", force=False)
     assert submit_command.run(args) == 0
     assert burned["amount_tao"] == 0.25  # it really did get as far as paying
 
@@ -1224,7 +1208,7 @@ def test_neither_burn_nor_submit_opens_control_json(
 
 
 def _refused(
-    monkeypatch: pytest.MonkeyPatch, round_num: int, tree: Any, force: bool = False
+    monkeypatch: pytest.MonkeyPatch, tree: Any, force: bool = False
 ) -> tuple[list[Any], list[Any], int]:
     """Run `submit` over `tree` and return (season checks, payments, exit code).
 
@@ -1233,7 +1217,7 @@ def _refused(
     state = _uploaded_state()
     if force:
         state["burn_tx_hash"] = "0x" + "d" * 64
-    save_state(round_num, state)
+    save_state(SEASON_ID, state)
     checked, paid = _submitting(monkeypatch, _season_settings())
     if isinstance(tree, Exception):
         monkeypatch.setattr(
@@ -1249,9 +1233,7 @@ def _refused(
         lambda *a, **k: pytest.fail("announced a submission that was never paid for"),
     )
 
-    args = argparse.Namespace(
-        config="miner.yaml", round=round_num, output_dir="", force=force
-    )
+    args = argparse.Namespace(config="miner.yaml", output_dir="", force=force)
     return checked, paid, submit_command.run(args)
 
 
@@ -1270,7 +1252,6 @@ def test_a_repository_the_rules_refuse_is_never_paid_for(
     monkeypatch.chdir(tmp_path)
     checked, paid, code = _refused(
         monkeypatch,
-        20,
         [
             {"type": "file", "path": "config.json", "size": 31},
             {"type": "file", "path": "adapter_config.json", "size": 500},
@@ -1301,18 +1282,17 @@ def test_the_gate_judges_the_repository_not_this_round_s_directory(
     `build_repo_id` is `{user}/{base_model_family}-{last 12 of the hotkey}` --
     **one repository per season** -- and `upload_folder` never deletes. Several
     submissions to the same competition share it, so the
-    repository this fee buys a verdict on is round 7 laid on top of rounds 1 to
+    repository this fee buys a verdict on is the seventh attempt laid on top of the
     6, and a `.cache/` left behind by an earlier push is `LEFTOVER_UPLOAD_STATE`
     to admission: a terminal rejection, with the fee gone.
 
     Everything below `.cache/` is invisible to anything that walks *this
-    round's* output directory, which is exactly what makes a local-only check a
+    attempt's* output directory, which is exactly what makes a local-only check a
     guess at the verdict rather than the verdict.
     """
     monkeypatch.chdir(tmp_path)
     checked, paid, code = _refused(
         monkeypatch,
-        21,
         [*GOOD_TREE, {"type": "file", "path": ".cache/huggingface/x", "size": 12}],
     )
 
@@ -1336,7 +1316,6 @@ def test_a_nested_checkpoint_stops_the_run_and_names_the_directory(
     deep = "checkpoints/global_step_50000/hf_ckpt"
     checked, paid, code = _refused(
         monkeypatch,
-        22,
         [
             {"type": "file", "path": f"{deep}/{entry['path']}", **_size(entry)}
             for entry in GOOD_TREE
@@ -1371,7 +1350,7 @@ def test_a_listing_hf_would_not_serve_is_not_paid_through(
     """
     monkeypatch.chdir(tmp_path)
     checked, paid, code = _refused(
-        monkeypatch, 23, submit_command.TreeError("HuggingFace returned HTTP 503")
+        monkeypatch, submit_command.TreeError("HuggingFace returned HTTP 503")
     )
 
     assert code == 1
@@ -1392,7 +1371,7 @@ def test_force_does_not_skip_the_layout_gate(
     """`--force` means "burn again", not "burn without looking" -- and there is
     no flag that means the second thing."""
     monkeypatch.chdir(tmp_path)
-    _, paid, code = _refused(monkeypatch, 24, [], force=True)
+    _, paid, code = _refused(monkeypatch, [], force=True)
 
     assert code == 1
     assert paid == []
@@ -1411,7 +1390,7 @@ def test_the_gate_judges_the_revision_that_goes_on_chain(
     state = _uploaded_state()
     state["hf_url"] = f"https://huggingface.co/kyleab/pi05-abcdefghijkl/commit/{COMMIT}"
     state["hf_commit"] = "9" * 40  # stale, and not what announce would send
-    save_state(25, state)
+    save_state(SEASON_ID, state)
     _submitting(monkeypatch, _season_settings())
 
     asked: list[tuple[str, str]] = []
@@ -1422,10 +1401,10 @@ def test_the_gate_judges_the_revision_that_goes_on_chain(
 
     monkeypatch.setattr(submit_command, "fetch_tree", _tree)
 
-    args = argparse.Namespace(config="miner.yaml", round=25, output_dir="", force=False)
+    args = argparse.Namespace(config="miner.yaml", output_dir="", force=False)
     assert submit_command.run(args) == 0
     assert asked == [("kyleab/pi05-abcdefghijkl", COMMIT)]
-    assert announced_commit(load_state(25)) == COMMIT
+    assert announced_commit(load_state(SEASON_ID)) == COMMIT
 
 
 def test_a_round_that_already_paid_is_not_stopped_by_the_gate(
@@ -1436,13 +1415,13 @@ def test_a_round_that_already_paid_is_not_stopped_by_the_gate(
     The money is gone and the only thing that can still make it count is the
     commitment; a gate that fired here would turn "rejected for its layout" into
     "paid and not even submitted". The gate belongs strictly before the payment,
-    and `--force`, which clears the burn, puts the round back in front of it.
+    and `--force`, which clears the payment, puts it back in front of the gate.
     """
     monkeypatch.chdir(tmp_path)
     state = _uploaded_state()
     state["burn_tx_hash"] = "0x" + "d" * 64
     state["burn_block"] = 8_888_880
-    save_state(26, state)
+    save_state(SEASON_ID, state)
     _submitting(monkeypatch, _season_settings())
     monkeypatch.setattr(
         submit_command,
@@ -1450,7 +1429,7 @@ def test_a_round_that_already_paid_is_not_stopped_by_the_gate(
         lambda *a, **k: pytest.fail("judged a layout whose fee is already spent"),
     )
 
-    args = argparse.Namespace(config="miner.yaml", round=26, output_dir="", force=False)
+    args = argparse.Namespace(config="miner.yaml", output_dir="", force=False)
     assert submit_command.run(args) == 0
 
 
@@ -1480,7 +1459,7 @@ def test_a_repository_with_no_lfs_object_is_never_paid_for(
         {key: value for key, value in entry.items() if key != "lfs"}
         for entry in GOOD_TREE
     ]
-    _, paid, code = _refused(monkeypatch, 27, pointers_only)
+    _, paid, code = _refused(monkeypatch, pointers_only)
 
     assert code == 1
     assert paid == []
@@ -1510,7 +1489,7 @@ def test_a_commit_the_backend_already_has_is_not_paid_for_twice(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     monkeypatch.chdir(tmp_path)
-    save_state(28, _uploaded_state())
+    save_state(SEASON_ID, _uploaded_state())
     _, paid = _submitting(
         monkeypatch, _season_settings(), roster=_roster(_entry(COMMIT))
     )
@@ -1520,7 +1499,7 @@ def test_a_commit_the_backend_already_has_is_not_paid_for_twice(
         lambda *a, **k: pytest.fail("announced a submission that was never paid for"),
     )
 
-    args = argparse.Namespace(config="miner.yaml", round=28, output_dir="", force=False)
+    args = argparse.Namespace(config="miner.yaml", output_dir="", force=False)
     assert submit_command.run(args) == 1
     assert paid == []
     printed = capsys.readouterr().err
@@ -1544,12 +1523,12 @@ def test_force_pays_for_a_new_model_and_refuses_to_pay_twice_for_the_old_one(
     monkeypatch.chdir(tmp_path)
     state = _uploaded_state()
     state.update({"step": "announce", "burn_tx_hash": "0x" + "d" * 64})
-    save_state(29, state)
+    save_state(SEASON_ID, state)
     _, paid = _submitting(
         monkeypatch, _season_settings(), roster=_roster(_entry(COMMIT))
     )
 
-    args = argparse.Namespace(config="miner.yaml", round=29, output_dir="", force=True)
+    args = argparse.Namespace(config="miner.yaml", output_dir="", force=True)
     assert submit_command.run(args) == 1
     assert paid == []
 
@@ -1566,14 +1545,14 @@ def test_a_rejected_entry_does_not_block_the_same_model_from_being_fixed(
     the direction that spends.
     """
     monkeypatch.chdir(tmp_path)
-    save_state(33, _uploaded_state())
+    save_state(SEASON_ID, _uploaded_state())
     _, paid = _submitting(
         monkeypatch,
         _season_settings(),
         roster=_roster(_entry(COMMIT, counts_as_submitted=False)),
     )
 
-    args = argparse.Namespace(config="miner.yaml", round=33, output_dir="", force=False)
+    args = argparse.Namespace(config="miner.yaml", output_dir="", force=False)
     assert submit_command.run(args) == 0
     assert paid == [0.25]
 
@@ -1583,12 +1562,12 @@ def test_another_model_in_the_same_season_is_a_normal_second_entry(
 ) -> None:
     """The dedup key is per model. A season is not entered once."""
     monkeypatch.chdir(tmp_path)
-    save_state(34, _uploaded_state())
+    save_state(SEASON_ID, _uploaded_state())
     _, paid = _submitting(
         monkeypatch, _season_settings(), roster=_roster(_entry("b" * 40))
     )
 
-    args = argparse.Namespace(config="miner.yaml", round=34, output_dir="", force=False)
+    args = argparse.Namespace(config="miner.yaml", output_dir="", force=False)
     assert submit_command.run(args) == 0
     assert paid == [0.25]
 
@@ -1598,7 +1577,7 @@ def test_a_backend_that_cannot_answer_the_dedup_question_is_not_paid_through(
 ) -> None:
     """The same answer this path gives everywhere else it cannot get one."""
     monkeypatch.chdir(tmp_path)
-    save_state(35, _uploaded_state())
+    save_state(SEASON_ID, _uploaded_state())
     _, paid = _submitting(monkeypatch, _season_settings())
     monkeypatch.setattr(
         submit_command,
@@ -1606,7 +1585,7 @@ def test_a_backend_that_cannot_answer_the_dedup_question_is_not_paid_through(
         lambda *a, **k: _raise(submit_command.BackendError("connection refused")),
     )
 
-    args = argparse.Namespace(config="miner.yaml", round=35, output_dir="", force=False)
+    args = argparse.Namespace(config="miner.yaml", output_dir="", force=False)
     assert submit_command.run(args) == 1
     assert paid == []
     assert "nothing was paid" in capsys.readouterr().err.lower()
@@ -1621,7 +1600,7 @@ def test_the_dedup_question_is_asked_about_this_hotkey_and_this_season(
     would answer "not submitted" about a season nobody is entering.
     """
     monkeypatch.chdir(tmp_path)
-    save_state(36, _uploaded_state())
+    save_state(SEASON_ID, _uploaded_state())
     asked: list[Any] = []
     _submitting(monkeypatch, _season_settings())
     monkeypatch.setattr(
@@ -1632,7 +1611,7 @@ def test_the_dedup_question_is_asked_about_this_hotkey_and_this_season(
         ),
     )
 
-    args = argparse.Namespace(config="miner.yaml", round=36, output_dir="", force=False)
+    args = argparse.Namespace(config="miner.yaml", output_dir="", force=False)
     assert submit_command.run(args) == 0
     assert asked == [(2, HOTKEY)]
 
@@ -1662,7 +1641,7 @@ def test_the_real_track_is_not_judged_by_a_book_admission_will_not_open(
     so the payment must be reached.
     """
     monkeypatch.chdir(tmp_path)
-    save_state(1, _uploaded_state())
+    save_state(SEASON_ID, _uploaded_state())
     # A LingBot listing: nothing in it satisfies the openpi rules, which is
     # exactly the shape that used to be refused here.
     _, paid = _submitting(monkeypatch, _real_season_settings())
@@ -1683,7 +1662,7 @@ def test_the_real_track_is_not_judged_by_a_book_admission_will_not_open(
         ),
     )
 
-    args = argparse.Namespace(config="miner.yaml", round=1, output_dir="", force=False)
+    args = argparse.Namespace(config="miner.yaml", output_dir="", force=False)
     assert submit_command.run(args) == 0
     assert len(paid) == 1, "the real track never reached the payment"
     assert "missing_weights" not in capsys.readouterr().out
@@ -1701,7 +1680,7 @@ def test_the_rule_book_comes_from_the_live_row_not_from_miner_yaml(
     against, which is this gate promising something it did not do.
     """
     monkeypatch.chdir(tmp_path)
-    save_state(37, _uploaded_state())
+    save_state(SEASON_ID, _uploaded_state())
     _, paid = _submitting(monkeypatch, _season_settings())
     monkeypatch.setattr(
         submit_command,
@@ -1714,7 +1693,7 @@ def test_the_rule_book_comes_from_the_live_row_not_from_miner_yaml(
         ),
     )
 
-    args = argparse.Namespace(config="miner.yaml", round=37, output_dir="", force=False)
+    args = argparse.Namespace(config="miner.yaml", output_dir="", force=False)
     assert submit_command.run(args) == 1
     assert paid == []
     printed = capsys.readouterr()
@@ -1735,7 +1714,7 @@ def test_nothing_is_confirmed_that_a_later_gate_would_have_refused(
     """
     monkeypatch.chdir(tmp_path)
     order: list[str] = []
-    save_state(38, _uploaded_state())
+    save_state(SEASON_ID, _uploaded_state())
     _submitting(monkeypatch, _season_settings(), roster=_roster(_entry(COMMIT)))
     monkeypatch.setattr(
         submit_command,
@@ -1753,7 +1732,7 @@ def test_nothing_is_confirmed_that_a_later_gate_would_have_refused(
         lambda *a, **k: order.append("layout") or GOOD_TREE,
     )
 
-    args = argparse.Namespace(config="miner.yaml", round=38, output_dir="", force=False)
+    args = argparse.Namespace(config="miner.yaml", output_dir="", force=False)
     assert submit_command.run(args) == 1
     assert order == ["layout", "dedup"]  # and never "asked"
 
@@ -1855,8 +1834,6 @@ def test_an_unfit_workspace_costs_nothing_end_to_end(
     exit_code = main(
         [
             "submit",
-            "--round",
-            "3",
             "--config",
             "miner.yaml",
             "--output-dir",
@@ -1871,7 +1848,7 @@ def test_an_unfit_workspace_costs_nothing_end_to_end(
         f"/tree/{COMMIT}?recursive=true"
     ]
     # nothing on chain, nothing paid, and the checkpoint records no payment
-    state = load_state(3)
+    state = load_state(2)
     assert "burn_tx_hash" not in state
     assert state.get("step") == "upload"
     printed = capsys.readouterr()
@@ -2009,7 +1986,7 @@ def test_the_payment_credential_keys_are_the_historical_ones(
 def test_a_real_track_announcement_without_a_season_is_not_sent(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Without `cid` the backend reads the submission as `(sim, seq=round_num)`
+    """Without `cid` the backend reads the submission as `(sim, seq=r)`
     -- the entry fee would buy a place on the wrong leaderboard. Refuse, and say
     so without claiming anything was sent."""
     monkeypatch.chdir(tmp_path)
@@ -2076,7 +2053,7 @@ def test_an_empty_model_hash_really_does_reach_the_chain() -> None:
         hotkey_ss58=HOTKEY,
         block_hash="c" * 64,
         hf_commit=COMMIT,
-        round_num=1,
+        competition_seq=1,
         hf_repo_id="kyleab/pi05-abcdefghijkl",
         burn_tx_hash="0x" + "d" * 64,
         burn_block=8_888_880,
@@ -2088,14 +2065,14 @@ def test_an_empty_model_hash_really_does_reach_the_chain() -> None:
 def test_the_checkpoint_readers_turn_an_empty_value_into_none() -> None:
     """Which is why nothing in this repo ever hands `""` over: the two readers
     every command goes through map absent and empty onto the same `None`."""
-    from openroboto.round_state import model_hash
+    from openroboto.competition_state import model_hash
 
     assert model_hash({}) is None
     assert model_hash({"model_hash": ""}) is None
     assert model_hash({"model_hash": MODEL_HASH}) == MODEL_HASH
 
-    assert competition_id({}) is None
-    assert competition_id({"competition_id": CID}) == CID
+    assert paid_competition_id({}) is None
+    assert paid_competition_id({"competition_id": CID}) == CID
 
 
 # ─── size: the new keys are paid for before the fee, not after ───
