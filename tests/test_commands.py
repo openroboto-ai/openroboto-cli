@@ -1,4 +1,5 @@
-"""Command layer: init / doctor / check / build / status / competition_state / preflight.
+"""Command layer: init / doctor / check / build / status / competition_state,
+plus preflight.
 
 All pure local logic: no network, no GPU, no chain.
 """
@@ -37,7 +38,7 @@ from openroboto.commands import doctor as doctor_command
 from openroboto.commands import init as init_command
 from openroboto.commands import status as status_command
 from openroboto.commands import train as train_command
-from openroboto.competition import workspace_competition_id
+from openroboto.competition import Snapshot, workspace_competition_id
 from openroboto.competition_state import (
     is_step_done,
     load_state,
@@ -2099,6 +2100,54 @@ def test_status_prints_a_row_without_touching_a_field_that_no_longer_exists(
 
 def _page_meta() -> dict[str, Any]:
     return {"total": 1, "limit": 20, "offset": 0, "has_more": False}
+
+
+def test_status_needs_a_competition_and_says_so_when_it_has_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """🔴 The backend requires the competition on the history query.
+
+    Sending nothing is a 422, not "everything", so guessing here would show a
+    miner an error from the backend instead of the one sentence that fixes it.
+    """
+    monkeypatch.setattr(status_command, "load_snapshot", lambda _settings: None)
+    args = argparse.Namespace(config="nope.yaml", hotkey="5X", competition=0, limit=20)
+    with pytest.raises(ConfigError) as excinfo:
+        status_command.run(args)
+    assert "--competition" in str(excinfo.value)
+
+
+def test_status_defaults_to_the_competition_this_workspace_mines(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A miner in their own workspace should not have to type an id they
+    already wrote down."""
+    asked: list[int] = []
+
+    def _submissions(url: str, competition: int, *args: Any, **kwargs: Any) -> Any:
+        asked.append(competition)
+        return ListEnvelope[SubmissionHistoryItem].model_validate(
+            {"data": [], "meta": {"request_id": "r-1", "page": _page_meta()}}
+        )
+
+    monkeypatch.setattr(status_command, "fetch_submissions", _submissions)
+    monkeypatch.setattr(
+        status_command,
+        "fetch_rejections",
+        lambda *a, **k: ListEnvelope[ScanRejection].model_validate(
+            {"data": [], "meta": {"request_id": "r-1", "page": _page_meta()}}
+        ),
+    )
+    monkeypatch.setattr(
+        status_command,
+        "load_snapshot",
+        lambda _settings: Snapshot({"id": 42, "track": "sim", "seq": 7}),
+    )
+    monkeypatch.setattr(status_command, "say_roster", lambda *a, **k: None)
+
+    args = argparse.Namespace(config="nope.yaml", hotkey="5X", competition=0, limit=20)
+    assert status_command.run(args) == 0
+    assert asked == [42], "the workspace's own competition was not used"
 
 
 def test_status_explains_a_rejection_reason() -> None:
