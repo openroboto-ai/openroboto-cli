@@ -38,11 +38,15 @@ what the fee costs and when it is wasted is in [PAYMENT.md](./PAYMENT.md).
 
 ## 3. Prize pool and settlement
 
-- The track has its **own prize-pool hotkey**, registered on this subnet. While a
-  season's submission window is open, **20% of the subnet's emissions** accrue to that
-  hotkey.
+- The track has its **own prize-pool hotkey**, registered on this subnet as **UID 2**:
+  `5HVjAxFQ36vsNPcAWP5LBefutCtw8ishCCQj6VRfsDvERAZo`. While a season's submission window
+  is open, **20% of the subnet's emissions** accrue to that hotkey.
 - The pool holds nothing but this track's rewards, so its balance — and every payout
-  that leaves it — can be checked on chain against the season record.
+  that leaves it — can be checked on chain against the season record:
+
+  ```bash
+  btcli subnet metagraph --netuid 80 --network finney   # UID 2 and its share
+  ```
 - Settlement happens **once per season**, on what accrued during that season:
   - **95%** to the single champion, vested linearly over **120 days**;
   - **5%** shared equally by every entry that clears the qualification bar, vested over
