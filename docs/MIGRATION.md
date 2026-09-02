@@ -184,7 +184,7 @@ money you are about to spend buy you a score".
   you inside it.
 - **The custom-strategy contract** `train(cfg, episodes, policy) -> (metrics, proof)`
   is unchanged — your own training script keeps its shape.
-- **There is still no `openroboto merge`, and there will not be one.** A bare LoRA
+- **There is no `openroboto merge`, and there will not be one.** A bare LoRA
   adapter is rejected; exporting a full merged checkpoint is part of training, and
   `openroboto check` catches an unmerged upload before you pay.
 

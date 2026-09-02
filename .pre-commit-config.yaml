@@ -13,15 +13,6 @@
 # `ty` was not copied either: it checks the SQLModel / SQLAlchemy layer, and this repo
 # does not have a single line of ORM.
 
-# `my-test-miner/` is **generated output**, not source: it is what `openroboto init`
-# writes, kept in the repo as a sample of a real miner's workspace. Its
-# `train_strategy.py` is a byte-for-byte copy of
-# `src/openroboto/templates/simple/train_strategy.py`, which pyproject already excludes
-# from ruff (it runs inside the training container and is diffed against the container
-# side). Letting the hooks reformat the copy would make the sample stop matching what a
-# miner actually gets, which is the only reason the directory exists. Regenerate it with
-# `openroboto init my-test-miner --force`, never by hand.
-exclude: ^my-test-miner/
 
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks

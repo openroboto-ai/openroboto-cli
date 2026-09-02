@@ -1,4 +1,4 @@
-"""Command layer: init / doctor / check / build / status / round_state / preflight.
+"""Command layer: init / doctor / check / build / status / competition_state / preflight.
 
 All pure local logic: no network, no GPU, no chain.
 """

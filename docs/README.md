@@ -52,7 +52,7 @@ Run both before `openroboto submit`. The rules they enforce are documented in
 
 Recorded here rather than left to be discovered by a miner losing money:
 
-- **There is no `openroboto merge`, and there will not be one** (decided 2026-08-25).
+- **There is no `openroboto merge`, and there will not be one.**
   Exporting a full checkpoint is part of **training**, so it belongs in your training
   script, not in this CLI (merging needs the model libraries, which cannot be
   installed alongside `bittensor` in one interpreter). The bundled strategies leave
