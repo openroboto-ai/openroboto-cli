@@ -87,6 +87,16 @@ model:
 huggingface:
   token: ""                        # write token; required by `openroboto upload`
   username: ""                     # your HF account name
+  repo_id: ""                      # optional. Empty = openroboto uploads to
+                                   # <username>/<base_model_family>-<last 12 of
+                                   # hotkey>, i.e. one repository per season,
+                                   # named after the base model that season runs.
+                                   # Set it to keep a repository you already use
+                                   # — miners who started before 2026-09-02 have
+                                   # one named <username>/pi05-<...>, from back
+                                   # when every season shared one repository.
+                                   # Either works; the backend pulls whatever
+                                   # repository the commitment points at.
 
 # ─── Training ───────────────────────────────────────────────
 custom_train_script: "train_strategy.py"   # mounted into the container as

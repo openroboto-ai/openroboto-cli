@@ -33,7 +33,7 @@ this command that spends money without a season attached to it.
 🔴 **It judges the repository listing, not the local directory.** The fee buys
 a verdict on `hf_repo_id` at the commit that goes on chain, and that is not the
 same set of files: `upload_folder` never deletes, and the repository id is
-`{user}/pi05-{hotkey suffix}` -- one repository for the miner's whole career, so
+`{user}/{base_model_family}-{hotkey suffix}` -- one repository per season, so
 round 7 is uploaded on top of rounds 1 to 6. A `.cache/` or a `*.tmp` left in
 there by an earlier round is `LEFTOVER_UPLOAD_STATE` / `INCOMPLETE_FILE` to
 admission and is **invisible** to anything that walks this round's output

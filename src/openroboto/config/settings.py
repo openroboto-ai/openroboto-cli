@@ -214,6 +214,13 @@ class Settings:
     # ─── HuggingFace ───────────────────────────────────
     hf_token: str = ""
     hf_username: str = ""
+    #: Explicit repository to upload to, used verbatim when set.
+    #:
+    #: Miners who already have a repository -- everyone who mined before
+    #: 2026-09-02, when the default stopped naming a base model -- set this to
+    #: keep it. Otherwise the first upload after upgrading creates a second
+    #: repository and re-pushes several GB for no reason.
+    hf_repo_id: str = ""
     hf_merged_model_id: str = ""
 
     # ─── Logging ───────────────────────────────────────
@@ -405,6 +412,7 @@ class Settings:
         hf = _section(data, "huggingface")
         cfg.hf_token = hf.get("token", cfg.hf_token)
         cfg.hf_username = hf.get("username", cfg.hf_username)
+        cfg.hf_repo_id = hf.get("repo_id", cfg.hf_repo_id)
         cfg.hf_merged_model_id = hf.get("merged_model_id", cfg.hf_merged_model_id)
 
         cfg.log_level = data.get("log_level", cfg.log_level)

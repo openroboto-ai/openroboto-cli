@@ -61,7 +61,7 @@ If you have mined the π0.5 competition, this is the part to read first.
 |---|---|---|
 | The exam | **LIBERO**, the same task suites in simulation. Only the textbook changed | `openroboto-backend/docs/业务说明-换底座与真机赛道.md` §1 |
 | What you deliver | Upload to HuggingFace, then announce on chain. Two artefacts, same order | `commands/submit.py::run` |
-| Your repository name | `{hf-username}/pi05-{last 12 chars of your hotkey}` — **yes, still `pi05-`** | `huggingface/repository.py::build_repo_id` |
+| Your repository name | `{hf-username}/lingbot-vla-2.0-{last 12 chars of your hotkey}` — one repository per season. Already have a `pi05-…` one? Put it in `huggingface.repo_id` and keep using it. | `huggingface/repository.py::build_repo_id` |
 | One miner, one repository | Round N is uploaded on top of rounds 1..N-1. `upload_folder` never deletes | `huggingface/upload.py::push_model` |
 | Entry fee | **0.1 TAO, burned**, not transferred | competition row `sim/2` in `0003_competitions.sql` |
 | Chain announcement | Same encoder, **≤512 bytes**, burn→announce within **50 blocks** | `preflight.py::check_burn_window`, `openroboto_protocol.commitment.MAX_COMMITMENT_BYTES` = 512, `constants.BURN_BLOCK_WINDOW` = 50 |
@@ -381,7 +381,7 @@ openroboto submit
 One command, three steps, resumable:
 
 1. **Upload** — pushes your checkpoint directory verbatim as your HuggingFace
-   repository root, to `{username}/pi05-{last 12 of hotkey}`. Same repository as
+   repository root, to `{username}/{base_model_family}-{last 12 of hotkey}`. Same repository as
    every previous round; `upload_folder` never deletes, so this round is laid on
    top of the last one.
 2. **Burn** — **0.1 TAO**, burned, not transferred. The amount comes from the
