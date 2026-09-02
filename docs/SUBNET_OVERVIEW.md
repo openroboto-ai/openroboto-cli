@@ -226,7 +226,7 @@ The miner's announcement is a JSON payload stored on chain via Commitments (fits
 
 This single payload binds together the miner's identity (`s`), the exact model artifact (`i` + `c`), the fee payment (`b` + `bb`), and the round (`r`). The backend's chain scanner decodes it, runs the §4 payment checks, and creates the evaluation task.
 
-**Repo naming:** the CLI generates `{hf-username}/{base_model_family}-{last 12 characters of the hotkey SS58}` — one repository per season, named after the base model that season runs — and any repository the miner can read is accepted — the backend fetches whatever the commitment's `i` field points at.
+**Repo naming:** the CLI generates `{hf-username}/{base_model_family}-{last 12 characters of the hotkey SS58}` — one repository per season, named after the base model that season runs. A workspace whose `competition:` section predates that field keeps the older `pi05-` name, so upgrading never moves an existing repository. Any repository the miner can read is accepted — the backend fetches whatever the commitment's `i` field points at.
 
 ⚠️ This paragraph previously said the suffix was **required** and that it made "repo squatting and impersonation detectable at scan time". No such check exists in the backend or in `openroboto-protocol` (grepped 2026-09-02), and a submission named nothing like it has been scored on the live leaderboard. Stating an unimplemented rule is worse than stating none: it reads as a defence somebody may rely on.
 
