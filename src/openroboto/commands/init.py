@@ -303,7 +303,6 @@ def _config_text(subnet: Subnet) -> str:
         # something `Settings` can hold.
         network=subnet.network or '""',
         netuid=subnet.netuid,
-        control_json=f"{subnet.backend_url}/control.json",
         backend_url=subnet.backend_url,
     )
 

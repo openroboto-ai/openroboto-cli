@@ -26,6 +26,27 @@ openroboto init --validator    # writes validator.yaml
 
 Set the Bittensor network, netuid, local wallet selection, public `control.json` URL, and read-only result-service URL. Leave the public read credential empty if the deployed read endpoint does not require it.
 
+### The `control.json` contract
+
+`control.json` is a public, read-only JSON document served over plain HTTP at
+`https://<backend host>/control.json`. **One field concerns you:**
+
+```jsonc
+{ "public_key": "<read-only API key>" }
+```
+
+That key goes into `backend.public_key` in `validator.yaml`; `GET /api/weights`
+answers 401 without it. `openroboto validator run` re-fetches the document every
+cycle with an `If-None-Match` conditional request, so a rotated key is picked up
+without restarting the process — which is why the URL must keep answering rather
+than 404.
+
+Treat every other key in the document as absent: they are not part of this
+contract, they are not read by this CLI, and a value taken from one of them
+describes the subnet rather than any particular competition. Everything about a
+season — its status, dataset, base checkpoint and entry fee — is served per
+season by `GET /api/v1/competitions`.
+
 ## Run
 
 ```bash

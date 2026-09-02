@@ -22,7 +22,6 @@ you find the same rule stated in two files, that is a bug — report it.
 | set up a real machine (GPU, Docker, systemd) | [MINER_DEPLOY.md](./MINER_DEPLOY.md) |
 | know what every `miner.yaml` field does | [CONFIG.md](./CONFIG.md) |
 | know exactly what the evaluation fee costs me and when it is wasted | [PAYMENT.md](./PAYMENT.md) |
-| read the round contract the subnet publishes | [control_json.md](./control_json.md) |
 | verify my evaluation seed was not rigged | [SEED_GENERATION.md](./SEED_GENERATION.md) |
 | run an external weight-setting validator | [VALIDATOR.md](./VALIDATOR.md) |
 | write my own training logic | [custom-training.md](./custom-training.md) |

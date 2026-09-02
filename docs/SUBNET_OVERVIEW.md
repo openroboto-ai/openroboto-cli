@@ -265,7 +265,7 @@ This single payload binds together the miner's identity (`s`), the exact model a
 
 Everything about a season — its round, status, fee, dataset, base model and reference training parameters — is published on **the competition row**, served by `GET /api/v1/competitions`. `openroboto init` copies the row of the season you pick into your `miner.yaml`, so `build` / `train` / `check` never go online, and `openroboto submit` re-reads it from the backend in the moment before the fee is paid. There is no privileged channel between the operator and any miner.
 
-`control.json` still exists and still must not 404, but **only external validators read it, and only for `public_key`**. Every per-season field it used to carry has moved to the competition row; see [control_json.md](./control_json.md) for the mapping.
+`control.json` still exists and still must not 404, but **only external validators read it, and only for `public_key`**. Everything a season decides is a column on the competition row; see [VALIDATOR.md](./VALIDATOR.md#the-controljson-contract).
 
 ## 13. Links
 
@@ -283,6 +283,6 @@ Everything about a season — its round, status, fee, dataset, base model and re
 | Miner guide | [MINER.md](./MINER.md) · [MINER_DEPLOY.md](./MINER_DEPLOY.md) |
 | Validator guide | [VALIDATOR.md](./VALIDATOR.md) |
 | Seed derivation spec | [SEED_GENERATION.md](./SEED_GENERATION.md) |
-| control.json contract (validators) | [control_json.md](./control_json.md) |
+| control.json contract (validators) | [VALIDATOR.md](./VALIDATOR.md#the-controljson-contract) |
 | Evaluation fee rules | [PAYMENT.md](./PAYMENT.md) |
 | Doc index | [README.md](./README.md) |

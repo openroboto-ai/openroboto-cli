@@ -141,16 +141,13 @@ def test_init_releases_config_and_strategy(
 def test_the_workspace_points_where_the_backend_url_points(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """🔴 The one that was broken: **ask a testnet backend, get a testnet
-    workspace.**
+    """🔴 **Ask a testnet backend, get a testnet workspace.**
 
-    `init` used to write a static mainnet block around whatever season it had
-    just fetched. Asking a local backend on netuid 313 produced a `competition:`
-    from that backend inside `environment: mainnet` / `netuid: 80` / production
-    URLs, with no `backend:` section at all -- so `submit` would confirm the
-    season against **production**, match it by `(track, seq)` (both sides seed
-    the same tracks), and burn mainnet TAO for a season nobody there had heard
-    of. Nothing in the file was inconsistent with anything else in it.
+    A `competition:` from one backend wrapped in another backend's chain
+    settings is the shape that has nothing inconsistent in it: `submit` confirms
+    the season against production, matches it by `(track, seq)` (both sides seed
+    the same tracks), and burns mainnet TAO for a season nobody there has heard
+    of.
     """
     _serving(monkeypatch, _row(), netuid=313)
     args = _init_args(tmp_path / "w", backend_url="http://127.0.0.1:8011")
@@ -161,7 +158,6 @@ def test_the_workspace_points_where_the_backend_url_points(
     assert written.environment == "local"
     assert written.network != "finney"
     assert written.backend_url == "http://127.0.0.1:8011"
-    assert written.control_json_url == "http://127.0.0.1:8011/control.json"
     # and the season carries where it came from, which is the fact no field
     # above can contradict on its own.
     assert written.competition_source == "http://127.0.0.1:8011"

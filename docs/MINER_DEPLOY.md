@@ -77,11 +77,6 @@ subnet:
   hotkey: <your-hotkey>
   hotkey_ss58: 5MinerCexampleexampleexampleexampleeCCCCCCCCCCCC  # Full SS58
 
-urls:
-  # Miners read nothing from this file; it is written by `init` and only external
-  # validators fetch it (for `public_key`). The path is `/control.json`.
-  control_json: https://<host>/control.json
-
 competition:
   # 🔴 Required, and **written by `openroboto init` — do not hand-write it**.
   # `submit` refuses a workspace without it. `openroboto init --refresh` rewrites
@@ -220,8 +215,8 @@ openroboto doctor
 wrong" impossible. It checks Python, the protocol package, every required config
 field, the season this workspace mines and what entering it costs, HF
 permissions, wallet balance against **that** fee, Docker, the NVIDIA toolkit, the
-GPU and the training image — **before** anything costs money. It stopped fetching
-`control.json` on 2026-08-26 and now runs entirely offline.
+GPU and the training image — **before** anything costs money. It runs entirely
+offline.
 
 ### Train
 
@@ -353,7 +348,7 @@ docker run --rm --gpus all -v /data:/data <that-image>:latest nvidia-smi
 - `openroboto submit` runs the post-training pipeline (upload → pay the entry fee → announce).
 - State is saved to `state/round_N.json` — re-running `openroboto submit` resumes from the last completed step and reuses an existing burn instead of paying twice.
 - Backend scanner picks up submissions within ~60 seconds.
-- The entry fee comes from the season (`competition.params.fee.amount_tao`), not from `control.json` and not from `miner.yaml`. An amount says how much, never which competition, so neither is a way to pay: `openroboto submit` confirms the fee against the backend in the moment before paying, and refuses a workspace with no `competition` section instead of guessing. A wrong amount is rejected by the backend and the TAO is not refunded.
+- The entry fee comes from the season (`competition.params.fee.amount_tao`), and nowhere else. An amount says how much, never which competition, so a number typed into `miner.yaml` is not a way to pay: `openroboto submit` confirms the fee against the backend in the moment before paying, and refuses a workspace with no `competition` section instead of guessing. A wrong amount is rejected by the backend and the TAO is not refunded.
 - Backend verifies burn tx using **strict exact match** (no `startswith` prefix matching).
 - Anti-plagiarism: backend computes LFS fingerprint (`repo_hash`) for each submission; same hash from different hotkey → rejected.
 - Seed computation failure is auto-retried (`seed_failed` status), no manual intervention needed.

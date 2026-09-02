@@ -5,24 +5,23 @@
 > **Note**: Season-scoped values (fee, dataset, base checkpoint) are **not** here
 > either — `openroboto init` copies them into the `competition:` section of this
 > same file, from the backend. They no longer come from `control.json`; see
-> [control_json.md](./control_json.md) for what is left in that file.
+> [VALIDATOR.md](./VALIDATOR.md) for the one field validators still read.
 
 Real configuration files are local-only. Copy an example, fill its placeholders, and keep the resulting YAML outside Git.
 
-## `environment` — one name for four coupled settings
+## `environment` — one name for three coupled settings
 
-`subnet.network`, `subnet.netuid`, `urls.control_json` and `backend.url` all
-describe the same decision: which subnet you are on, and which backend watches it.
-They used to be four independent switches, and changing only some of them is not a
-harmless mistake — both half-states cost money and neither announces itself:
+`subnet.network`, `subnet.netuid` and `backend.url` all describe the same
+decision: which subnet you are on, and which backend watches it. They are three
+independent switches, and changing only some of them costs money without
+announcing itself:
 
-- **control.json from dev, netuid still 80.** The dev backend publishes
-  `burn_rate_tao: 0.01` while production publishes `0.1`. The burn goes to
-  *mainnet* at a tenth of the required fee, production rejects it on the amount,
-  and burns are not refunded.
 - **netuid 313, backend still production.** The submission goes to testnet while
   `openroboto status` asks production about it. Nothing is ever found, and no error
   anywhere explains why.
+- **A season from one backend, a chain from another.** Every field agrees with
+  every other field, and the fee still leaves on the subnet *this* file names.
+  That is what `competition.source` exists to catch.
 
 So set one field:
 
@@ -37,7 +36,6 @@ So set one field:
 environment: local
 subnet:   { netuid: 313, network: test }
 backend:  { url: "http://localhost:8001" }
-urls:     { control_json: "http://localhost:8001/control.json" }
 ```
 
 Anything below the environment can still be set individually; the preset only
@@ -79,7 +77,6 @@ openroboto init my-miner    # miner.yaml + train_strategy.py + README.md + .giti
 | `subnet` | `network`, `netuid` | Bittensor network and subnet |
 | `subnet` | `wallet_path`, `coldkey`, `hotkey`, `hotkey_ss58` | Local wallet selection |
 | `subnet` | `wallet_password` | Optional local unlock value; never commit it |
-| `urls` | `control_json` | Where the subnet publishes `public_key`. Miners need nothing from it; external validators have no other way to get that key |
 | `competition` | the whole section | Which competition this workspace mines. **Written by `openroboto init`, rewritten by `openroboto init --refresh`** — the season's own spec, kept on disk so `build` / `train` / `check` never go online. 🔴 Not optional: `openroboto submit` refuses a workspace without it, before uploading anything, because a fee paid with no season attached is filed under whichever season the backend defaults to |
 | `competition` | `track`, `seq` | The durable key. `id` is stored too, but it is local to one backend database and is re-resolved from `(track, seq)` before it is sent anywhere |
 | `competition` | `adapter` | `sim_openpi` \| `sim_lingbot` \| `real_xarm6`. Decides only whether **this package ships a container** `openroboto train` can run for the season. 🔴 It does **not** say which base model: `real_xarm6` names a robot arm |
@@ -98,24 +95,22 @@ openroboto init my-miner    # miner.yaml + train_strategy.py + README.md + .giti
 | `training` | `epochs`, `batch_size`, `learning_rate`, `lora_r`, `lora_alpha` | **Yours to tune** — that is the competition. They reach the container as `EPOCHS` / `BATCH_SIZE` / `LR` / `LORA_R` / `LORA_ALPHA`, which your strategy script reads out of `cfg`. Defaults `3 / 4 / 1e-4 / 32 / 64` are the values the subnet used to hand everybody. ⚠️ Write the learning rate `1.0e-4`, not `1e-4` — YAML reads the second as text |
 | root | `log_level`, `log_dir` | Local logging |
 
-Nothing else in this file is fetched. `openroboto train` opens no URL beyond the
-dataset the season names: the round is `competition.seq`, the status is
-`competition.status`, and the five hyperparameters above are yours.
+Nothing in this file is fetched. `openroboto train` opens no URL beyond the
+dataset the season names: which competition, its status and its spec are all in
+the `competition:` section, and the five hyperparameters above are yours.
 
-> **A workspace with a `competition` section does not read `control.json` for its
-> fee.** That season's `params.fee` is the fee, and `openroboto submit` confirms it
-> against the backend in the moment before paying — printing which season, how long
-> it has left, how much and to whom, and asking. That check cannot be turned off, and
-> `--force` does not skip it. A backend it cannot reach is a refusal, not a warning:
-> without an answer there is no way to say who the money would be going to.
-
-> **`payment.burn_rate_tao` has no effect, wherever you set it.** Not in
-> `miner.yaml` and not in `control.json`: an amount says how much, never *which
-> competition*, and a fee paid with no season attached is filed under whichever
-> season the backend defaults to — with the TAO already gone. The fee comes from
-> `competition.params.fee` and nowhere else, and a workspace with no `competition`
-> section is refused rather than charged a subnet-wide rate. There is deliberately
-> no built-in default fee.
+> **The fee is `competition.params.fee`, and there is no other way to set one.**
+> `openroboto submit` confirms it against the backend in the moment before paying
+> — printing which season, how long it has left, how much and to whom, and asking.
+> That check cannot be turned off, and `--force` does not skip it. A backend it
+> cannot reach is a refusal, not a warning: without an answer there is no way to
+> say who the money would be going to.
+>
+> An amount typed anywhere in this file is ignored. A number says how much, never
+> *which competition*, and a fee paid with no season attached is filed under
+> whichever season the backend defaults to — with the TAO already gone. A
+> workspace with no `competition` section is refused rather than charged. There is
+> deliberately no built-in default fee.
 
 ## Weight-setting validator
 
@@ -128,7 +123,7 @@ openroboto init --validator    # writes validator.yaml, no strategy script
 | root | `environment` | Same as for miners |
 | `subnet` | `network`, `netuid` | Bittensor network and subnet |
 | `subnet` | wallet fields | Local validator wallet selection |
-| `urls` | `control_json` | Public control document |
+| `urls` | `control_json` | Where the subnet publishes `public_key`. **Validators only** — see [VALIDATOR.md](./VALIDATOR.md#the-controljson-contract). No miner command opens it |
 | `backend` | `url` | Read-only result service base URL |
 | `backend` | `public_key` | Optional public read credential |
 | root | `weight_interval_min` | Minutes between `set_weights` calls; default 60. Bounded on both sides by the chain and both bounds bite silently: below ~20 min (`weights_rate_limit`, 100 blocks) the extrinsic is rejected, and going quiet for more than ~16.7 h (`activity_cutoff`, 5000 blocks) makes the subnet treat your weights as absent |
