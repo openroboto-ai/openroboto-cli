@@ -512,7 +512,7 @@ def _entry_fee(settings: Settings) -> tuple[str, Fee] | None:
     try:
         return snapshot.name, snapshot.fee()
     except ConfigError:
-        # The unparseable half. Naming the broken key belongs to the command
+        # The unparsable half. Naming the broken key belongs to the command
         # that acts on it; here the honest report is "unknown", which is what
         # the caller prints.
         return None
