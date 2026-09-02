@@ -1344,8 +1344,9 @@ def test_the_gate_judges_the_repository_not_this_round_s_directory(
     """🔴 The reason this reads the HuggingFace listing rather than the local
     checkpoint directory.
 
-    `build_repo_id` is `{user}/pi05-{last 12 of the hotkey}` -- **one repository
-    for the miner's whole career** -- and `upload_folder` never deletes. So the
+    `build_repo_id` is `{user}/{base_model_family}-{last 12 of the hotkey}` --
+    **one repository per season** -- and `upload_folder` never deletes. Several
+    submissions to the same competition share it, so the
     repository this fee buys a verdict on is round 7 laid on top of rounds 1 to
     6, and a `.cache/` left behind by an earlier push is `LEFTOVER_UPLOAD_STATE`
     to admission: a terminal rejection, with the fee gone.
@@ -1832,6 +1833,9 @@ def test_an_unfit_workspace_costs_nothing_end_to_end(
                     "seq": 2,
                     "label": "LingBot-VLA 2.0",
                     "adapter": "sim_lingbot",
+                    # The repo name is derived from this (one repository per
+                    # season), so a workspace without it cannot upload at all.
+                    "base_model_family": "lingbot-vla-2.0",
                     "params": {
                         "fee": {"kind": "burn", "amount_tao": 0.25, "coldkey": None}
                     },
@@ -1851,7 +1855,7 @@ def test_an_unfit_workspace_costs_nothing_end_to_end(
         upload_module,
         "push_model",
         lambda **kwargs: UploadResult(
-            f"https://huggingface.co/kyleab/pi05-{HOTKEY[-12:]}/commit/{COMMIT}",
+            f"https://huggingface.co/kyleab/lingbot-vla-2.0-{HOTKEY[-12:]}/commit/{COMMIT}",
             COMMIT,
         ),
     )
@@ -1909,7 +1913,7 @@ def test_an_unfit_workspace_costs_nothing_end_to_end(
     assert exit_code != 0
     # the listing really was fetched, at the commit that would have gone on chain
     assert served == [
-        f"https://huggingface.co/api/models/kyleab/pi05-{HOTKEY[-12:]}"
+        f"https://huggingface.co/api/models/kyleab/lingbot-vla-2.0-{HOTKEY[-12:]}"
         f"/tree/{COMMIT}?recursive=true"
     ]
     # nothing on chain, nothing paid, and the checkpoint records no payment
@@ -1958,6 +1962,10 @@ def _competition_settings(track: str = "real") -> Settings:
                 "track": track,
                 "seq": 1,
                 "adapter": "real_xarm6" if track == "real" else "sim_openpi",
+                # 🔴 Not derived from `adapter` -- the `_openpi` / `_lingbot`
+                # suffixes are historical and must not be read as the base model
+                # (protocol 0.8.0). The repo name follows this field.
+                "base_model_family": "pi0.5",
                 "params": {"fee": {"kind": "burn", "amount_tao": 0.1}},
             },
         }

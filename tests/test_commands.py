@@ -1908,10 +1908,104 @@ def test_commit_sha_is_parsed_from_the_commit_url() -> None:
     assert commit_sha_from_url("https://huggingface.co/u/r") == ""
 
 
-def test_repo_id_follows_the_public_format() -> None:
-    settings = Settings.from_mapping({"huggingface": {"username": "kyleab"}})
+def test_repo_id_names_this_season_s_base_model() -> None:
+    """🔴 The name follows the season, so it cannot go stale in place.
+
+    It was a fixed `{user}/pi05-{suffix}` until 2026-09-02, and one repository
+    served a miner's whole career -- so `pi05` was still in every name a month
+    after π0.5 was archived. On 2026-09-02 eight queued submissions all read
+    `<user>/pi05-…` while every one of them held a LingBot model; three separate
+    readings of that table concluded the miners had submitted the wrong base
+    model, and one proposed rejecting all eight at admission with the fees
+    already burned.
+    """
+    settings = Settings.from_mapping(
+        {
+            "huggingface": {"username": "kyleab"},
+            "competition": {"base_model_family": "lingbot-vla-2.0"},
+        }
+    )
     address = "5FH32ZXmRZqCuLCS2vhMme6jwznP6NpywGjSqXgcGfvRk2Xp"
-    assert build_repo_id(settings, address) == "kyleab/pi05-qXgcGfvRk2Xp"
+
+    assert build_repo_id(settings, address) == "kyleab/lingbot-vla-2.0-qXgcGfvRk2Xp"
+
+
+def test_a_different_season_gets_a_different_repository() -> None:
+    """The second half of the fix: seasons stop piling up in one directory.
+
+    `upload_folder` never deletes, so a career-long repository is season 7 laid
+    on season 1..6, and a `.cache/` left by an earlier push is
+    `LEFTOVER_UPLOAD_STATE` to admission -- terminal, fee gone. Files from a
+    season cannot be left behind by a repository that did not exist then.
+    """
+    address = "5FH32ZXmRZqCuLCS2vhMme6jwznP6NpywGjSqXgcGfvRk2Xp"
+
+    def repo_for(family: str) -> str:
+        return build_repo_id(
+            Settings.from_mapping(
+                {
+                    "huggingface": {"username": "kyleab"},
+                    "competition": {"base_model_family": family},
+                }
+            ),
+            address,
+        )
+
+    assert repo_for("pi0.5") != repo_for("lingbot-vla-2.0")
+
+
+def test_repo_id_refuses_when_the_season_has_no_base_model() -> None:
+    """🔴 Refuse, never fall back to a fixed word.
+
+    A fixed word is exactly what this module stopped doing, and the value is one
+    `openroboto init --refresh` away. Guessing it judges a paid submission by
+    rules nobody chose for that season -- the same reason `init` refuses to
+    default this field.
+    """
+    settings = Settings.from_mapping({"huggingface": {"username": "kyleab"}})
+
+    with pytest.raises(ConfigError) as caught:
+        build_repo_id(settings, "5FH32ZXmRZqCuLCS2vhMme6jwznP6NpywGjSqXgcGfvRk2Xp")
+
+    assert "base_model_family" in str(caught.value)
+    assert "--refresh" in str(caught.value), "the error has to say how to fix it"
+
+
+def test_a_base_model_name_hf_cannot_take_is_refused_not_mangled() -> None:
+    """A name we quietly rewrite is a name the miner cannot find on the website."""
+    settings = Settings.from_mapping(
+        {
+            "huggingface": {"username": "kyleab"},
+            "competition": {"base_model_family": "pi0.5 (libero)"},
+        }
+    )
+
+    with pytest.raises(ConfigError) as caught:
+        build_repo_id(settings, "5FH32ZXmRZqCuLCS2vhMme6jwznP6NpywGjSqXgcGfvRk2Xp")
+
+    assert "huggingface.repo_id" in str(caught.value)
+
+
+def test_an_explicit_repo_id_is_used_verbatim() -> None:
+    """The transition for miners who already have a repository.
+
+    Without it, the first upload after upgrading silently pushes several GB to a
+    brand-new repository. Verbatim and unvalidated: they have said where their
+    model goes, and the backend fetches whatever the commitment points at.
+    """
+    settings = Settings.from_mapping(
+        {"huggingface": {"username": "kyleab", "repo_id": "kyleab/pi05-qXgcGfvRk2Xp"}}
+    )
+
+    assert build_repo_id(settings, "5FH32ZXmRZqCuLCS2") == "kyleab/pi05-qXgcGfvRk2Xp"
+
+
+def test_an_explicit_repo_id_needs_nothing_else() -> None:
+    """It replaces every other input, so requiring them would be asking for parts
+    of a string we are not going to build -- including the season's base model."""
+    settings = Settings.from_mapping({"huggingface": {"repo_id": "someone/their-repo"}})
+
+    assert build_repo_id(settings, "") == "someone/their-repo"
 
 
 def test_repo_id_refuses_to_invent_a_fallback() -> None:
