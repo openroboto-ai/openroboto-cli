@@ -1,6 +1,6 @@
 # Real-Robot Track — prize pool, claim period and challenges
 
-> **Status**: current · **Updated**: 2026-09-02 · **Audience**: miners entering the
+> **Status**: current · **Updated**: 2026-09-05 · **Audience**: miners entering the
 > xArm 6 seasons. Where a number here disagrees with the season row on
 > `GET /api/v1/competitions`, the season row wins.
 
@@ -23,6 +23,32 @@ what the fee costs and when it is wasted is in [PAYMENT.md](./PAYMENT.md).
   rewarded, privacy ends — see §5.
 
 ## 2. Task set and qualification bar
+
+### Baseline task
+
+**Pick up one green block.** Place a single green block on the tabletop. The
+physical xArm 6 must grasp the block with its gripper and lift it clear of the
+tabletop.
+
+- **Object:** one green block, 35 mm high and 33 mm wide.
+- **Success:** the recorded trial shows the block held by the gripper with visible
+  separation from the tabletop.
+- Touching or pushing the block, or closing the gripper without lifting it, does
+  not count as success.
+- No basket, plate, placement step, or additional object is required.
+
+Reference photographs of the block (not to scale):
+
+<img src="./images/real-track/green-block-top.png" alt="Top view of the green baseline block on a wooden tabletop" width="300">
+<img src="./images/real-track/green-block-side.png" alt="Side view of the green baseline block on a wooden tabletop" width="300">
+
+Height: **35 mm**. Width: **33 mm**. The remaining dimension is not specified.
+
+This defines the baseline task, not a baseline score or evidence of a completed
+evaluation. The published, locked specification remains authoritative for each
+season; this documentation update does not change an already locked task set.
+
+### Qualification bar
 
 - The **task list, the success criteria and the qualification bar are published and
   locked at the submission deadline**. Nothing about how a season is scored changes
