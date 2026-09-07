@@ -1,7 +1,8 @@
 # Real-robot miner guide
 
-> Documentation draft · 2026-09-07. Numeric interface parameters and executable
-> examples are pending. This guide does not announce a new competition as open.
+> Updated 2026-09-07 with the confirmed workstation interface. Hardware TODOs
+> and executable runtime examples remain outstanding. This guide does not
+> announce a new competition as open.
 
 ## 1. Choose a model family and competition
 
@@ -25,15 +26,26 @@ mainnet. Do not copy a competition ID or fee from another environment.
 
 ## 2. Prepare a compatible checkpoint
 
-Use the selected competition's official base reference and real-robot model
-interface when they are published. Follow that model family's export procedure;
+Use the selected competition's official base reference and the published
+[workstation model interface](WORKSTATION_DATA.md). Follow that model family's export procedure;
 a shared observation/action contract does not make checkpoint formats identical.
 Provide a complete loadable checkpoint with its required configuration,
 preprocessing assets and normalization metadata, not an unmerged adapter alone.
 
 The official evaluator handles the hardware adapter. Miners are responsible for
-matching the published model-facing inputs and outputs. The exact interface
-reference is pending; do not guess the state or gripper dimensions from this draft.
+matching the published model-facing inputs and outputs:
+
+- State: `[q1, q2, q3, q4, q5, q6, g]`, measured absolute joint positions in radians.
+- Action: `[Δq1, Δq2, Δq3, Δq4, Δq5, Δq6, g]`; joint deltas use the same inference-start reference throughout a chunk, without accumulation.
+- Gripper: one continuous absolute target, canonical `0=open`, `1=closed`, after denormalization.
+- Prediction: `50 × 7`; the workstation executes the first 25 steps by default, synchronously.
+- Vision: one fixed third-person D415 RGB stream at 640 × 480 / 30 FPS; π0.5 uses 224 × 224 resize-with-padding, without extra cropping.
+- Stats: matching OpenPI-compatible `norm_stats.json`, with 7 values in every state/action statistics array. π0.5 uses q01/q99 quantile normalization.
+
+Do not train against assumed 50 Hz timing until streaming validation settles
+the final control rate. Collection, training and evaluation must use that same
+rate. Calibration, TCP, initial pose and numeric Cartesian safety boundaries
+remain TODO. See the interface document for the complete semantics and limits.
 
 This guide does not claim that `openroboto train` currently supplies an end-to-end
 real-robot training recipe. Training resources and a verified recipe will be
@@ -54,8 +66,9 @@ validation before payment.
 Before spending, verify that the official runtime can load the selected model
 and that the published sample-input test passes, once those resources are
 available. Confirm the exact HF revision and that the evaluator can download it.
-If the model contract or runtime reference needed to establish compatibility has
-not been published, this draft is not sufficient evidence to pay for an entry.
+The published model contract alone is not sufficient evidence to pay while the
+runtime reference and tests needed to establish compatibility are unavailable.
+This documentation update does not claim that those tests have passed.
 
 ## 4. Submit and verify
 

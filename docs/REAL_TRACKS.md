@@ -1,7 +1,8 @@
 # Parallel real-robot tracks
 
-> Documentation draft · 2026-09-07. This describes the intended parallel-track
-> structure. It is not a launch announcement or a complete model interface spec.
+> Updated 2026-09-07. The confirmed workstation interface is now published in
+> [WORKSTATION_DATA.md](WORKSTATION_DATA.md), with hardware validation TODOs
+> explicitly separated. This is not a competition-opening notice.
 > Only competitions published as open by the selected environment can be entered.
 
 OpenRoboto is preparing two parallel physical-robot tracks alongside simulation:
@@ -29,8 +30,11 @@ that the corresponding mainnet competition is open.
 
 ## Model interface and hardware adapter
 
-The two physical tracks are intended to use the same model-facing observation
-and action contract as the official π0.5 real-robot evaluator. The official
+The two physical tracks share the published joint-space model-facing contract:
+7-D state `[q1..q6, g]` and 7-D action `[Δq1..Δq6, g]`, with joints in radians
+and one continuous absolute gripper target. The 50-step prediction uses a single
+inference-start joint reference; the workstation executes the first 25 steps
+by default. The official
 evaluation program handles hardware-readout conversion, gripper-driver mapping,
 and xArm SDK calls. Miners do not need to implement those hardware adapters.
 
@@ -38,10 +42,12 @@ This shared interface does not mean that π0.5 and LingBot use the same checkpoi
 layout or loader. Export a complete checkpoint for the selected model family.
 Do not infer the real-robot interface from a LIBERO simulation example.
 
-The versioned interface reference and examples are pending publication. This
-draft intentionally does not specify dimensions, units, rotation conventions,
-gripper values, normalization settings or execution timing. Their omission does
-not mean that arbitrary values are accepted.
+See [the confirmed interface and remaining TODOs](WORKSTATION_DATA.md) for
+normalization, camera input, synchronous execution and safety semantics, and the
+[Chinese source protocol](WORKSTATION_PROTOCOL_ZH.md) for the supplied reference.
+50 Hz is recommended but still awaits streaming/timing validation. Intrinsics,
+extrinsics, TCP offset, initial joint pose and Cartesian safety-boundary values
+remain unresolved. Publishing the contract is not proof of a tested deployment.
 
 ## Tasks, qualification and rewards
 
@@ -51,7 +57,7 @@ family must not be assumed to qualify the other. Hardware faults and model
 failures must remain distinguishable in the evaluation record.
 
 Parallel-track emission allocations, their denominator, effective date and
-prize-pool accounting references require a separate published policy. This draft
+prize-pool accounting references require a separate published policy. This interface update
 does not change an existing season's locked rules or transfer its accrued rewards
 to another competition. The existing [real-track reward rules](REAL_TRACK.md)
 remain a separate reference, not a declaration that their historical allocation

@@ -1,64 +1,197 @@
-# Workstation and reference data
+# Workstation model interface and reference data
 
-> Documentation draft · 2026-09-07. No numeric hardware/interface parameters,
-> dataset download, calibration files or executable examples are released here.
+> Confirmed interface requirements published 2026-09-07, based on the
+> [workstation team's Chinese protocol](WORKSTATION_PROTOCOL_ZH.md).
+> This publishes a specification, not an end-to-end verification report or a
+> competition-opening notice. The remaining hardware TODOs below are unresolved.
 
-This document will describe the physical xArm workcell and public reference data
-used by the π0.5 and LingBot-VLA 2.0 real-robot tracks. Its purpose is to let miners
-understand the observations their model receives and reproduce the model-facing
-pipeline without implementing our hardware adapter.
+This is the model-facing joint-space contract for the physical xArm6 workstation,
+used by the parallel π0.5 and LingBot tracks. Model-family loading and export
+requirements remain separate. The source explicitly describes π0.5 preprocessing;
+shared I/O does not establish that a LingBot loader has been implemented or tested.
+Use the selected competition's official runtime reference.
 
-## Responsibility boundary
+## State and action contract
 
-| Miner supplies | Official evaluation program supplies |
-|---|---|
-| Complete checkpoint for the selected model family | Matching model loader and workcell runtime |
-| Compatibility with the published observation/action contract | Hardware-readout conversion into that contract |
-| Required model configuration, preprocessing assets and normalization metadata | Gripper-driver mapping and xArm SDK calls |
-| An accessible, fixed HF revision | Controlled physical trials and their evaluation records |
-
-The intended model-facing contract is shared with the official π0.5 real-robot
-evaluator. Each model family still has its own loading/export requirements.
-Hardware adaptation does not remove the need to publish observation and action
-semantics for training and inference.
-
-## Public reference package to be published
-
-| Artifact | Purpose | Status |
+| Field | Ordered physical representation | Meaning |
 |---|---|---|
-| Workcell overview and camera sample frames | Understand the physical scene and model viewpoint | Pending |
-| Versioned observation/action contract | Identify model fields, layout and meaning | Pending |
-| Complete example input and output | Test model-side integration without moving a robot | Pending |
-| Representative episode and data schema | Explain images, state, actions, instructions and timestamps | Pending |
-| Preprocessing and normalization reference | Reproduce the input/output transformations | Pending |
-| Official runtime reference and compatibility test | Verify each model family's loading and inference | Pending |
-| Task and baseline evidence references | Connect evaluation conditions to published qualification results | Per competition; pending references |
+| State, 7 values | `[q1, q2, q3, q4, q5, q6, g]` | Measured absolute joint positions and current absolute gripper position |
+| Action, 7 values per step | `[Δq1, Δq2, Δq3, Δq4, Δq5, Δq6, g]` | Joint-position deltas and an absolute gripper target |
+| Joint order and units | Native xArm6 Joint 1 through Joint 6, base to wrist | Radians |
+| Canonical gripper | Continuous `g ∈ [0, 1]` | `0` fully open; `1` fully closed; intermediate positions allowed |
 
-No array dimensions, unit conventions, rotation representation, gripper field
-count, control frequency, chunk execution length or normalization mode should be
-inferred from these placeholders. These will be filled from the verified runtime,
-not guessed from simulation or from the arm's physical degrees of freedom.
+Both state and action have one gripper dimension. The canonical gripper range
+describes physical values after action denormalization, not the model's raw
+normalized output. No binary threshold or LIBERO `-1=open/+1=close` rule applies.
 
-## Data publication requirements
+This contract does not provide end-effector position or rotation, joint velocity,
+joint torque, or force/torque sensor readings. EEF base/tool-frame rotation,
+axis-angle conventions and Cartesian deltas do not apply to these joint actions.
 
-When reference data is released, document its source, collection conditions,
-field definitions, preprocessing, splits, allowed use and limitations. Publish a
-fixed revision and checksums with any downloadable artifacts. Distinguish public
-training/reference episodes from evaluation-only records and held-out material.
-Do not describe a sample episode as a complete training dataset.
+## Delta reference and SDK conversion
 
-Evaluation records should identify the competition, model revision, workstation
-protocol version, task, outcome and video. A workcell fault must be distinguishable
-from model failure. Hardware configuration changes require a versioned record so
-the two tracks can be compared under documented conditions.
+All joint deltas in one predicted chunk use the same measured joint state captured
+at the start of that inference:
 
-## Operational details outside miner requirements
+```text
+q_ref = measured joint positions at inference start
+physical_actions = denormalize(model_actions, checkpoint norm_stats)
 
-Miners do not need robot login credentials, network addresses, device serial
-numbers, private camera feeds, raw gripper-driver conversions or emergency-stop
-operations to submit a model. Keep secrets and site-specific access instructions
-outside public documentation. Hardware operation and safety procedures remain
-with the official workcell operators.
+for each executed step k:
+    q_target[k] = q_ref + physical_actions[k, :6]
+    g_target[k] = physical_actions[k, 6]
+```
 
-See [the real-robot miner guide](MINER_REAL.md) and
-[parallel-track overview](REAL_TRACKS.md).
+This is a semantic example, not an executable robot-control script.
+Deltas are not relative to the preceding action and are not accumulated.
+The workstation does not reread the joint state to redefine each step's reference.
+It sends absolute joint targets through the xArm joint servo position interface.
+
+The workstation handles SDK units, communication, radians conversion, gripper
+registers and hardware-position conversion. Miners do not implement those adapters.
+
+## Prediction and synchronous execution
+
+The protocol requires a 50-step prediction horizon: π0.5 produces a `50 × 7`
+action chunk. Miners must not change the prediction horizon or action convention.
+The workstation executes the first 25 actions by default, discards the remaining
+25, then acquires a new state and image for the next inference.
+
+Execution is synchronous: read observation → infer → execute the prefix → hold
+the last target → read the next observation. Inference and action execution do
+not overlap. There is no asynchronous inference, temporal ensemble or Real-Time
+Chunking. The current protocol specifies no inference timeout; the local
+workstation waits for inference to complete.
+
+**Provisional execution rate: 50 Hz, pending physical streaming validation.**
+At that proposed rate a target is sent every 20 ms, and the 25-action prefix takes
+about 0.5 seconds excluding inference time. This is not a claim of 50 Hz inference
+or a guaranteed 2 Hz inference rate. Command timing and jitter remain to be tested.
+If 50 Hz is not stable, the final rate must be settled before formal data
+collection and fine-tuning. Collection, training and evaluation must use the
+same final rate; do not treat 50 Hz as already validated.
+
+## Camera and image preprocessing
+
+| Item | Confirmed specification |
+|---|---|
+| Camera | One Intel RealSense D415, fixed third-person RGB view |
+| Mount | In front of the robot, facing the robot and main work area |
+| Raw stream | RGB, 640 × 480, 30 FPS |
+| Acquisition | Continuous streaming throughout the episode; sample the latest frame for each observation |
+| π0.5 image input | RGB, 224 × 224 via OpenPI-compatible `resize_with_pad` |
+| Additional inputs | No wrist camera, second camera or depth input |
+| Cropping | No extra center crop or manually selected ROI crop by default |
+
+Camera FPS and inference frequency are distinct. The camera is not reinitialized
+for every inference. The pipeline is
+`D415 RGB 640×480 → resize with padding → RGB 224×224 → π0.5`.
+Exact calibration values and sample frames are not released by this document.
+
+## Normalization and checkpoint assets
+
+π0.5 state and actions use OpenPI-compatible quantile normalization from the
+checkpoint's actual fine-tuning `norm_stats.json`: the 1st and 99th percentiles
+map approximately to -1 and +1. No additional model-side action scaling is defined.
+Normalized outputs outside [-1, 1] are not clipped merely for exceeding that range.
+
+State statistics describe absolute joint positions and canonical gripper position.
+Action statistics describe joint deltas and the absolute canonical gripper target,
+not absolute joint targets. For training targets, convert absolute joint targets
+to deltas against the inference/chunk reference before normalization.
+
+The observation state is normalized before π0.5 inference. Model outputs are
+denormalized before forming absolute joint targets and running safety checks:
+
+```text
+state: hardware readings → absolute canonical [q1..q6, g] → normalization
+action: normalized output → denormalization → [Δq1..Δq6, g]
+        → q_ref + Δq → safety check → robot
+```
+
+Keep the native OpenPI schema:
+
+```json
+{
+  "norm_stats": {
+    "state":   { "mean": [], "std": [], "q01": [], "q99": [] },
+    "actions": { "mean": [], "std": [], "q01": [], "q99": [] }
+  }
+}
+```
+
+The empty arrays illustrate field names only and are not valid submission stats.
+Every array must contain 7 values in the state/action order specified above.
+The stats must exactly match those actually used for the submitted checkpoint's
+fine-tuning. Do not substitute another checkpoint's statistics. The protocol
+does not additionally require normalization-type, stats-version or reorder
+metadata. Retaining mean/std fields does not change the quantile convention.
+
+## Hardware and safety
+
+The arm is a fixed-base UFACTORY xArm6, with an Inspire-Robots EG2-4C2 single-DOF
+gripper. The miner interface does not depend on a particular xArm firmware or SDK
+version; the workstation owns that integration.
+
+The supplied protocol specifies enabled limits of **250 mm/s TCP speed** and
+**90°/s joint speed** throughout evaluation. These are specified limits, not new
+measurements performed for this documentation update. Targets must also respect
+legal xArm6 joint limits and the workstation's Cartesian safety boundary, which
+applies to every part of the arm.
+
+The workstation rejects unsafe commands and reports a safety error; a safety
+violation ends the episode as a failure. It does not clip dangerous targets into
+a safe range. The Cartesian boundary's numeric limits remain TODO.
+
+The flange-to-gripper TCP offset is used for geometry and safety checks, not for
+direct interpretation of joint-space actions. Each episode must use a common
+initial pose, represented as six absolute joint positions in radians. The offset
+and initial-pose values have not yet been determined.
+
+## Tasks and responsibilities
+
+Each public task release must contain its unique task name, the exact fixed
+language prompt passed to the model, and an example video illustrating the task
+and successful completion. This document specifies that release format; it does
+not itself release a task-video package or measured qualification scores.
+
+Miners supply the 7-D contract, 50-step predictions, one third-person RGB
+observation input, the fixed task prompt, a complete checkpoint and matching
+normalization statistics. The workstation integrates acquisition, preprocessing,
+normalization/denormalization, joint-target conversion, prefix execution, safety,
+TCP configuration and initial-pose control. A complete family-specific loader
+and runtime test remain necessary; `openroboto check` alone does not establish
+runtime compatibility or admission.
+
+## Remaining hardware TODOs
+
+| Unresolved item | Required confirmation |
+|---|---|
+| 50 Hz joint servo streaming | Measure actual command timing and jitter; settle a different final rate before collection/fine-tuning if needed |
+| D415 intrinsics | Read fx, fy, cx, cy, distortion model and coefficients from the deployed 640 × 480 RGB profile |
+| Camera extrinsics | Calibrate the fixed camera-to-xArm-base transform after final mounting |
+| EG2-4C2 TCP offset | Measure the installed flange-to-TCP offset |
+| Initial joint pose | Publish the common six-joint pose in radians |
+| Cartesian safety boundary | Measure limits around the tabletop/below it, behind the robot and on both sides |
+
+No placeholder calibration, geometry or safety-boundary values are supplied.
+These TODOs must be resolved before the protocol's formal operational release.
+
+## Reference-data publication
+
+The interface text and Chinese source are published here. Camera sample frames,
+complete executable example input/output, representative episodes, runtime test
+artifacts and per-task video/baseline evidence are not supplied in this update.
+
+When data is released, include its source, collection conditions, field schema,
+preprocessing, splits, allowed use, limitations, fixed revision and checksums.
+Distinguish public reference/training episodes from held-out evaluation material.
+A sample episode is not a complete training dataset. Evaluation records should
+identify competition, model revision, workstation protocol, task, outcome and
+video, distinguishing workcell faults from model failures.
+
+Keep robot credentials, private feeds and site access details outside public docs.
+Hardware operation remains with official operators; this document does not
+authorize robot execution.
+
+See [the miner guide](MINER_REAL.md) and [parallel-track overview](REAL_TRACKS.md).
