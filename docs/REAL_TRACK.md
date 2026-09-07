@@ -1,6 +1,6 @@
 # Real-Robot Track — prize pool, claim period and challenges
 
-> **Status**: current · **Updated**: 2026-09-05 · **Audience**: miners entering the
+> **Status**: current · **Updated**: 2026-09-07 · **Audience**: miners entering the
 > xArm 6 seasons. Where a number here disagrees with the season row on
 > `GET /api/v1/competitions`, the season row wins.
 
@@ -13,10 +13,9 @@ what the fee costs and when it is wasted is in [PAYMENT.md](./PAYMENT.md).
 Parallel π0.5 and LingBot physical-track documentation is available in
 [REAL_TRACKS.md](REAL_TRACKS.md), with a [miner guide](MINER_REAL.md) and the
 [confirmed workstation interface](WORKSTATION_DATA.md).
-The interface update does not
-announce a mainnet opening or change an existing season's locked task or reward
-terms. Do not apply the historical allocation below to a new parallel competition
-without its published allocation policy and effective date.
+The current allocation is 15% to simulation, 42.5% to real π0.5 and 42.5% to
+real LingBot-VLA 2.0. These track-level shares do not change the settlement split
+inside a real track's pool or retroactively redistribute accrued season rewards.
 
 - The track runs as **tournament seasons**, back-to-back, roughly one a month. Each
   season is a fixed submission window, then evaluation on a physical UFACTORY xArm 6
@@ -75,16 +74,21 @@ season; this documentation update does not change an already locked task set.
 
 ## 3. Prize pool and settlement
 
-- The track has its **own prize-pool hotkey**, registered on this subnet as **UID 2**:
-  `5HVjAxFQ36vsNPcAWP5LBefutCtw8ishCCQj6VRfsDvERAZo`. While a season's submission window
-  is open, **20% of the subnet's emissions** accrue to that hotkey.
-- The pool holds nothing but this track's rewards, so its balance — and every payout
-  that leaves it — can be checked on chain against the season record:
+The current [allocation across tracks](REAL_TRACKS.md#current-emission-allocation)
+is **15% simulation / 42.5% real π0.5 / 42.5% real LingBot-VLA 2.0**.
+
+- Each real track's 42.5% share funds its own seasonal reward accounting.
+  Keep competition and season records distinct when checking accruals and payouts.
+- Entry-fee payments are separate from prize-pool rewards. Do not infer the
+  prize-pool hotkey from an entry-fee recipient or reuse one track's accounting
+  reference for the other track.
+- Check on-chain weights alongside the relevant competition and season records:
 
   ```bash
-  btcli subnet metagraph --netuid 80 --network finney   # UID 2 and its share
+  btcli subnet metagraph --netuid 80 --network finney
   ```
-- Settlement happens **once per season**, on what accrued during that season:
+- Settlement happens **once per season for each real track**, on that track's
+  accrued pool. The following percentages are within the pool, not track allocations:
   - **95%** to the single champion, vested linearly over **120 days**;
   - **5%** shared equally by every entry that clears the qualification bar, vested over
     **30 days**.

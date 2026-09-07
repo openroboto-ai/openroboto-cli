@@ -176,7 +176,7 @@ The subnet does not rank by raw score alone; it uses a challenge system designed
 
 3. If the challenge succeeds, the challenger becomes the new champion, the old champion drops to Rank 2, and the rest shift down.
 4. If it fails, the challenger **does not appear on the board at all**.
-5. The board is capped at **Top 3**, with emission weights **70 / 20 / 10**.
+5. The simulation board is capped at **Top 3**, with relative weights **70 / 20 / 10** within the simulation track's **15%** emission allocation.
 
 Consequences worth noting: copying the current champion's weights cannot dethrone it (an identical copy ties, and a tie is a failed challenge); and a settled season's champion is **held** until someone clears the bar in a later season.
 
@@ -188,10 +188,14 @@ The backend resolves the ranking and exposes it via the API. A lightweight valid
 btcli subnet metagraph --netuid 80 --network finney
 ```
 
-Validator weight is how the **simulation** track pays its champion. The **real-robot**
-track is paid differently: its 20% share accrues to a dedicated prize-pool hotkey and is
-settled once per season, with a claim period during which the rewarded model must stay
-public and anyone can challenge it — see [REAL_TRACK.md](./REAL_TRACK.md).
+Current emissions allocated across tracks are **15% simulation**, **42.5% real
+π0.5**, and **42.5% real LingBot-VLA 2.0**. The simulation ranking weights are
+relative weights within its 15% share, not percentages of all track emissions.
+Each real track accounts for its own seasonal prize pool and settles it under the
+existing 95% champion / 5% qualified-entry rules, with a claim period during which
+rewarded models stay public and can be challenged. See the
+[allocation overview](REAL_TRACKS.md#current-emission-allocation) and
+[settlement rules](REAL_TRACK.md). Entry-fee recipients do not identify prize pools.
 
 ## 9. Anti-gaming summary
 

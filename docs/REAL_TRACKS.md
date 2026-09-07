@@ -4,7 +4,7 @@
 > [WORKSTATION_DATA.md](WORKSTATION_DATA.md). This is not a competition-opening notice.
 > Only competitions published as open by the selected environment can be entered.
 
-OpenRoboto is preparing two parallel physical-robot tracks alongside simulation:
+OpenRoboto runs two parallel physical-robot tracks alongside simulation:
 
 | Physical track | Model family | Relationship |
 |---|---|---|
@@ -52,12 +52,31 @@ A task description is not a measured baseline score; a baseline from one model
 family must not be assumed to qualify the other. Hardware faults and model
 failures must remain distinguishable in the evaluation record.
 
-Parallel-track emission allocations, their denominator, effective date and
-prize-pool accounting references require a separate published policy. This interface update
-does not change an existing season's locked rules or transfer its accrued rewards
-to another competition. The existing [real-track reward rules](REAL_TRACK.md)
-remain a separate reference, not a declaration that their historical allocation
-applies to both new tracks.
+## Current emission allocation
+
+Emissions allocated across the three tracks are distributed as follows:
+
+| Track | Share of track emissions |
+|---|---|
+| Simulation | 15% |
+| Real Robot — π0.5 | 42.5% |
+| Real Robot — LingBot-VLA 2.0 | 42.5% |
+| Total | 100% |
+
+This allocation is in effect. These percentages divide emissions between tracks;
+they are separate from ranking weights within simulation and settlement shares
+within a real-robot prize pool. Each real track accounts for its own seasonal
+rewards; an entry in one track does not share the other track's pool.
+
+The simulation Top 3 weights of 70 / 20 / 10 are relative weights within the
+simulation track's 15% allocation. Real-robot settlement remains 95% to the
+champion and 5% to qualified entries within that track's seasonal pool, with the
+existing vesting periods. See [the real-track settlement rules](REAL_TRACK.md).
+
+The current allocation does not retroactively redistribute previously accrued
+season rewards or change locked task specifications. Entry fees are separate
+from emission rewards. Do not identify a prize pool by its entry-fee recipient,
+or assume one hotkey is the accounting reference for both physical tracks.
 
 ## Read next
 
