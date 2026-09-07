@@ -32,6 +32,9 @@ without its published allocation policy and effective date.
 
 ## 2. Task set and qualification bar
 
+For the workstation camera view and model image preprocessing, see the
+[camera-view reference](WORKSTATION_DATA.md#camera-view-reference).
+
 ### Baseline task
 
 **Pick up one green block.** Place a single green block on the tabletop. The

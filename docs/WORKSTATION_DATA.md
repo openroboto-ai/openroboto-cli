@@ -79,6 +79,14 @@ Camera FPS and inference frequency are distinct. The camera is not reinitialized
 for every inference. The pipeline is
 `D415 RGB 640×480 → resize with padding → RGB 224×224 → π0.5`.
 
+### Camera-view reference
+
+![Workstation camera view showing the xArm6, gripper and tabletop work area](images/real-track/workstation-camera-view.png)
+
+Original viewer capture supplied by the workstation team, before model
+preprocessing. The visible objects illustrate the scene and do not define an
+evaluation task. The viewer controls are not part of the model image input.
+
 ## Normalization and checkpoint assets
 
 π0.5 state and actions use OpenPI-compatible quantile normalization from the
@@ -155,8 +163,8 @@ runtime compatibility or admission.
 
 ## Reference-data publication
 
-The confirmed interface is published here in English. Camera sample frames,
-complete executable example input/output, representative episodes, runtime test
+The camera-view reference above accompanies the confirmed interface.
+Complete executable example input/output, representative episodes, runtime test
 artifacts and per-task video/baseline evidence are not supplied in this update.
 
 When data is released, include its source, collection conditions, field schema,
