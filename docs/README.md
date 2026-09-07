@@ -25,8 +25,7 @@ you find the same rule stated in two files, that is a bug — report it.
 | know how the **real-robot** track pays — prize pool, claim period, challenges | [REAL_TRACK.md](./REAL_TRACK.md) |
 | understand the parallel π0.5 and LingBot real tracks | [REAL_TRACKS.md](./REAL_TRACKS.md) |
 | prepare a real-robot model submission using the confirmed interface | [MINER_REAL.md](./MINER_REAL.md) |
-| read the confirmed workstation interface, reference-data plan and remaining TODOs | [WORKSTATION_DATA.md](./WORKSTATION_DATA.md) |
-| read the supplied Chinese workstation protocol | [WORKSTATION_PROTOCOL_ZH.md](./WORKSTATION_PROTOCOL_ZH.md) |
+| read the confirmed workstation interface and reference-data plan | [WORKSTATION_DATA.md](./WORKSTATION_DATA.md) |
 | verify my evaluation seed was not rigged | [SEED_GENERATION.md](./SEED_GENERATION.md) |
 | run an external weight-setting validator | [VALIDATOR.md](./VALIDATOR.md) |
 | write my own training logic | [custom-training.md](./custom-training.md) |

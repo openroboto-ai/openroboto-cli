@@ -1,9 +1,9 @@
 # Workstation model interface and reference data
 
 > Confirmed interface requirements published 2026-09-07, based on the
-> [workstation team's Chinese protocol](WORKSTATION_PROTOCOL_ZH.md).
+> specification supplied by the workstation team.
 > This publishes a specification, not an end-to-end verification report or a
-> competition-opening notice. The remaining hardware TODOs below are unresolved.
+> competition-opening notice.
 
 This is the model-facing joint-space contract for the physical xArm6 workstation,
 used by the parallel π0.5 and LingBot tracks. Model-family loading and export
@@ -63,14 +63,6 @@ not overlap. There is no asynchronous inference, temporal ensemble or Real-Time
 Chunking. The current protocol specifies no inference timeout; the local
 workstation waits for inference to complete.
 
-**Provisional execution rate: 50 Hz, pending physical streaming validation.**
-At that proposed rate a target is sent every 20 ms, and the 25-action prefix takes
-about 0.5 seconds excluding inference time. This is not a claim of 50 Hz inference
-or a guaranteed 2 Hz inference rate. Command timing and jitter remain to be tested.
-If 50 Hz is not stable, the final rate must be settled before formal data
-collection and fine-tuning. Collection, training and evaluation must use the
-same final rate; do not treat 50 Hz as already validated.
-
 ## Camera and image preprocessing
 
 | Item | Confirmed specification |
@@ -86,7 +78,6 @@ same final rate; do not treat 50 Hz as already validated.
 Camera FPS and inference frequency are distinct. The camera is not reinitialized
 for every inference. The pipeline is
 `D415 RGB 640×480 → resize with padding → RGB 224×224 → π0.5`.
-Exact calibration values and sample frames are not released by this document.
 
 ## Normalization and checkpoint assets
 
@@ -141,12 +132,11 @@ applies to every part of the arm.
 
 The workstation rejects unsafe commands and reports a safety error; a safety
 violation ends the episode as a failure. It does not clip dangerous targets into
-a safe range. The Cartesian boundary's numeric limits remain TODO.
+a safe range.
 
 The flange-to-gripper TCP offset is used for geometry and safety checks, not for
 direct interpretation of joint-space actions. Each episode must use a common
-initial pose, represented as six absolute joint positions in radians. The offset
-and initial-pose values have not yet been determined.
+initial pose, represented as six absolute joint positions in radians.
 
 ## Tasks and responsibilities
 
@@ -163,23 +153,9 @@ TCP configuration and initial-pose control. A complete family-specific loader
 and runtime test remain necessary; `openroboto check` alone does not establish
 runtime compatibility or admission.
 
-## Remaining hardware TODOs
-
-| Unresolved item | Required confirmation |
-|---|---|
-| 50 Hz joint servo streaming | Measure actual command timing and jitter; settle a different final rate before collection/fine-tuning if needed |
-| D415 intrinsics | Read fx, fy, cx, cy, distortion model and coefficients from the deployed 640 × 480 RGB profile |
-| Camera extrinsics | Calibrate the fixed camera-to-xArm-base transform after final mounting |
-| EG2-4C2 TCP offset | Measure the installed flange-to-TCP offset |
-| Initial joint pose | Publish the common six-joint pose in radians |
-| Cartesian safety boundary | Measure limits around the tabletop/below it, behind the robot and on both sides |
-
-No placeholder calibration, geometry or safety-boundary values are supplied.
-These TODOs must be resolved before the protocol's formal operational release.
-
 ## Reference-data publication
 
-The interface text and Chinese source are published here. Camera sample frames,
+The confirmed interface is published here in English. Camera sample frames,
 complete executable example input/output, representative episodes, runtime test
 artifacts and per-task video/baseline evidence are not supplied in this update.
 

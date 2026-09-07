@@ -12,7 +12,7 @@ what the fee costs and when it is wasted is in [PAYMENT.md](./PAYMENT.md).
 
 Parallel π0.5 and LingBot physical-track documentation is available in
 [REAL_TRACKS.md](REAL_TRACKS.md), with a [miner guide](MINER_REAL.md) and the
-[confirmed workstation interface and remaining TODOs](WORKSTATION_DATA.md).
+[confirmed workstation interface](WORKSTATION_DATA.md).
 The interface update does not
 announce a mainnet opening or change an existing season's locked task or reward
 terms. Do not apply the historical allocation below to a new parallel competition

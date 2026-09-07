@@ -1,8 +1,7 @@
 # Parallel real-robot tracks
 
 > Updated 2026-09-07. The confirmed workstation interface is now published in
-> [WORKSTATION_DATA.md](WORKSTATION_DATA.md), with hardware validation TODOs
-> explicitly separated. This is not a competition-opening notice.
+> [WORKSTATION_DATA.md](WORKSTATION_DATA.md). This is not a competition-opening notice.
 > Only competitions published as open by the selected environment can be entered.
 
 OpenRoboto is preparing two parallel physical-robot tracks alongside simulation:
@@ -42,12 +41,9 @@ This shared interface does not mean that π0.5 and LingBot use the same checkpoi
 layout or loader. Export a complete checkpoint for the selected model family.
 Do not infer the real-robot interface from a LIBERO simulation example.
 
-See [the confirmed interface and remaining TODOs](WORKSTATION_DATA.md) for
-normalization, camera input, synchronous execution and safety semantics, and the
-[Chinese source protocol](WORKSTATION_PROTOCOL_ZH.md) for the supplied reference.
-50 Hz is recommended but still awaits streaming/timing validation. Intrinsics,
-extrinsics, TCP offset, initial joint pose and Cartesian safety-boundary values
-remain unresolved. Publishing the contract is not proof of a tested deployment.
+See [the confirmed interface](WORKSTATION_DATA.md) for
+normalization, camera input, synchronous execution and safety semantics.
+Publishing the contract is not proof of a tested deployment.
 
 ## Tasks, qualification and rewards
 

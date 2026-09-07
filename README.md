@@ -21,8 +21,8 @@ pip install openroboto
 Real-robot documentation: [parallel tracks](docs/REAL_TRACKS.md) ·
 [miner preparation](docs/MINER_REAL.md) · [workstation and reference data](docs/WORKSTATION_DATA.md).
 These pages describe π0.5 and LingBot as parallel physical tracks and publish the
-confirmed joint-space interface. Control-rate validation, calibration and geometry
-TODOs remain; publication does not announce a new competition as open.
+confirmed joint-space interface. Publication does not announce a new competition
+as open.
 
 ---
 

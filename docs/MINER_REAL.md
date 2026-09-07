@@ -1,8 +1,7 @@
 # Real-robot miner guide
 
-> Updated 2026-09-07 with the confirmed workstation interface. Hardware TODOs
-> and executable runtime examples remain outstanding. This guide does not
-> announce a new competition as open.
+> Updated 2026-09-07 with the confirmed workstation interface.
+> This guide does not announce a new competition as open.
 
 ## 1. Choose a model family and competition
 
@@ -42,10 +41,8 @@ matching the published model-facing inputs and outputs:
 - Vision: one fixed third-person D415 RGB stream at 640 × 480 / 30 FPS; π0.5 uses 224 × 224 resize-with-padding, without extra cropping.
 - Stats: matching OpenPI-compatible `norm_stats.json`, with 7 values in every state/action statistics array. π0.5 uses q01/q99 quantile normalization.
 
-Do not train against assumed 50 Hz timing until streaming validation settles
-the final control rate. Collection, training and evaluation must use that same
-rate. Calibration, TCP, initial pose and numeric Cartesian safety boundaries
-remain TODO. See the interface document for the complete semantics and limits.
+Collection, training and evaluation must use the same control rate.
+See the interface document for the complete semantics and limits.
 
 This guide does not claim that `openroboto train` currently supplies an end-to-end
 real-robot training recipe. Training resources and a verified recipe will be
