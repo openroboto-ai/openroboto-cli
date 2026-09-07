@@ -18,6 +18,11 @@ pip install openroboto
 [This season's base model](docs/MIGRATION.md) ·
 [Evaluation toolkit](https://github.com/openroboto-ai/openroboto-evaluation)
 
+Real-robot documentation drafts: [parallel tracks](docs/REAL_TRACKS.md) ·
+[miner preparation](docs/MINER_REAL.md) · [workstation and reference data](docs/WORKSTATION_DATA.md).
+These drafts describe π0.5 and LingBot as parallel physical tracks; they do not
+announce a new competition as open or supply a finalized model interface.
+
 ---
 
 ## Requirements

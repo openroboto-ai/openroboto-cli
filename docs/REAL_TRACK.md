@@ -10,6 +10,13 @@ what the fee costs and when it is wasted is in [PAYMENT.md](./PAYMENT.md).
 
 ## 1. Format
 
+Parallel π0.5 and LingBot physical-track documentation is being prepared in
+[REAL_TRACKS.md](REAL_TRACKS.md), with a [miner guide](MINER_REAL.md) and a
+[workstation/reference-data draft](WORKSTATION_DATA.md). Those drafts do not
+announce a mainnet opening or change an existing season's locked task or reward
+terms. Do not apply the historical allocation below to a new parallel competition
+without its published allocation policy and effective date.
+
 - The track runs as **tournament seasons**, back-to-back, roughly one a month. Each
   season is a fixed submission window, then evaluation on a physical UFACTORY xArm 6
   workcell, then **one champion**. The window and evaluation dates are on the season
