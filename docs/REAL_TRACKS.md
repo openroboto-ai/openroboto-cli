@@ -47,6 +47,11 @@ Publishing the contract is not proof of a tested deployment.
 
 ## Tasks, qualification and rewards
 
+Both physical tracks share the [seven-task evaluation catalog](REAL_TASKS.md),
+with 10 trials per task and 70 trials per submitted model in its selected
+competition. The catalog includes five single-object placement tasks,
+two-object rearrangement and plug insertion.
+
 Use the selected competition's published task specification and baseline evidence.
 A task description is not a measured baseline score; a baseline from one model
 family must not be assumed to qualify the other. Hardware faults and model

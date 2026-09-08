@@ -282,7 +282,7 @@ Everything about a season — its ordinal, status, fee, dataset, base model and 
 | Leaderboard | <https://www.openroboto.ai/#/benchmark> |
 | Public queue | <https://www.openroboto.ai/#/queue> |
 | API health | <https://api.openroboto.ai/healthz> |
-| Open Data Pool | <https://huggingface.co/buckets/openroboto-ai/datapool> |
+| Open Data Pool | <https://www.openroboto.ai/#/datapool> · [Training data guide](TRAINING_DATA.md) |
 | Base model, current season (LingBot-VLA 2.0, fine-tuned on LIBERO) | <https://huggingface.co/openroboto-ai/lingbot-vla-v2-6b-libero> |
 | Base model, archived season (openpi π0.5) | <https://github.com/Physical-Intelligence/openpi> |
 | LIBERO benchmark | <https://github.com/Lifelong-Robot-Learning/LIBERO> |

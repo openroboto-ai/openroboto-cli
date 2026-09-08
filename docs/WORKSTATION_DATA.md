@@ -148,10 +148,14 @@ initial pose, represented as six absolute joint positions in radians.
 
 ## Tasks and responsibilities
 
+The [real-robot task catalog](REAL_TASKS.md) lists the seven shared tasks and
+English instructions for π0.5 and LingBot-VLA 2.0. Each model runs 10 trials per
+task, for 70 trials in its selected competition.
+
 Each public task release must contain its unique task name, the exact fixed
 language prompt passed to the model, and an example video illustrating the task
-and successful completion. This document specifies that release format; it does
-not itself release a task-video package or measured qualification scores.
+and successful completion. The task catalog is not a training dataset or
+measured qualification result.
 
 Miners supply the 7-D contract, 50-step predictions, one third-person RGB
 observation input, the fixed task prompt, a complete checkpoint and matching

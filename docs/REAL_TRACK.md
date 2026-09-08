@@ -34,7 +34,17 @@ inside a real track's pool or retroactively redistribute accrued season rewards.
 For the workstation camera view and model image preprocessing, see the
 [camera-view reference](WORKSTATION_DATA.md#camera-view-reference).
 
-### Baseline task
+### Shared evaluation task set
+
+π0.5 and LingBot-VLA 2.0 use the same [seven-task catalog](REAL_TASKS.md).
+Each submitted model runs 10 trials per task, for 70 trials in its selected
+competition. The two tracks retain separate results and qualification baselines.
+Two-object Rearrangement counts as one task, with both stages in each trial.
+
+### Historical single-block baseline reference
+
+The earlier task below is retained as a historical reference. It is separate
+from the seven-task suite and does not add an eighth task.
 
 **Pick up one green block.** Place a single green block on the tabletop. The
 physical xArm 6 must grasp the block with its gripper and lift it clear of the
@@ -54,7 +64,7 @@ Reference photographs of the block (not to scale):
 
 Height: **35 mm**. Width: **33 mm**. The remaining dimension is not specified.
 
-This defines the baseline task, not a baseline score or evidence of a completed
+This describes the earlier baseline task, not a baseline score or evidence of a completed
 evaluation. The published, locked specification remains authoritative for each
 season; this documentation update does not change an already locked task set.
 
