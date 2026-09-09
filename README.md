@@ -104,9 +104,9 @@ checks two more rules that need the weight index on your disk.
 
 ## Things that will cost you TAO if you skip them
 
-The fee is published on the competition you are entering (`params.fee`) — 0.1 TAO
-on the mainnet simulation season today, a different number on the real-hardware
-one, which is why no single figure belongs in your config. Never hard-code it:
+The fee is published on the competition you are entering (`params.fee`), and the
+simulation and real-hardware seasons do not charge the same thing, which is why no
+figure belongs in your config — or in this file. Never hard-code it:
 `openroboto submit` confirms it against the backend in the moment before paying,
 and **refuses to pay at all** if it cannot, rather than reaching for an amount
 that says how much but not which competition.

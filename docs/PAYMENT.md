@@ -48,10 +48,11 @@ The simulation seasons charge a `burn`; the real track charges a `transfer`. Thr
 }
 ```
 
-These are example values that match the rate published at the time of writing
-(0.1 TAO). They are **historical**: `sim/1` really does charge 0.1 TAO, but
-`real/1` charges 2 — and it charges it by transfer, which this block has no way
-to express at all. The amount and the kind that are checked are the ones on the
+These are example values that match the rate published at the time of writing:
+`sim/1` did charge 0.1 TAO. <!-- docs-fee-check: historical, sim/1 is archived -->
+They are **historical**, and are kept only to show the shape of the block. The
+real-hardware seasons charge a different amount *and* charge it by transfer,
+which this block has no way to express at all. The amount and the kind that are checked are the ones on the
 competition row; a payment that does not match is rejected, and rejected
 payments are not refunded.
 

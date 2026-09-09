@@ -33,7 +33,7 @@ competition on that query, and earlier clients do not send it.
 | `openroboto build` / `openroboto train` | ✅ work — `runner/lingbot/` ships in the wheel and is selected by `competition.base_model_family` | — |
 | `openroboto check` | ✅ works | — |
 | `openroboto doctor` | ✅ works | — |
-| `openroboto submit` | ✅ unblocked — resolves the season, confirms the 0.1 TAO fee against the backend before paying | — |
+| `openroboto submit` | ✅ unblocked — resolves the season, confirms the fee against the backend before paying | — |
 | `openroboto status` | ✅ works | — |
 
 The catalogue blocker from the 2026-08-26 revision of this page is gone —
@@ -65,7 +65,7 @@ If you have mined the π0.5 competition, this is the part to read first.
 | What you deliver | Upload to HuggingFace, then announce on chain. Two artefacts, same order | `commands/submit.py::run` |
 | Your repository name | `{hf-username}/lingbot-vla-2.0-{last 12 chars of your hotkey}` for a workspace `openroboto init` created. A workspace whose season names no base model keeps its `pi05-…` name — upgrading never moves your repository. `openroboto init --refresh` adopts the season-scoped name (re-pushes the model once); `huggingface.repo_id` pins any repository. | `huggingface/repository.py::build_repo_id` |
 | One repository per **season** | Within this season, each attempt is uploaded on top of the last — `upload_folder` never deletes | `huggingface/upload.py::push_model`, `huggingface/repository.py` |
-| Entry fee | **0.1 TAO**, and this season's `params.fee.kind` is `burn` — destroyed, not transferred. (The real-hardware track transfers instead; see [PAYMENT.md](./PAYMENT.md)) | competition row `sim/2` in `0003_competitions.sql` |
+| Entry fee | `params.fee.amount_tao` on this season — **not quoted here**, it changes without a release. This season's `params.fee.kind` is `burn` — destroyed, not transferred. (The real-hardware track transfers instead; see [PAYMENT.md](./PAYMENT.md)) | `GET /api/v1/competitions` |
 | Chain announcement | Same encoder, **≤512 bytes**, burn→announce within **50 blocks** | `preflight.py::check_burn_window`, `openroboto_protocol.commitment.MAX_COMMITMENT_BYTES` = 512, `constants.BURN_BLOCK_WINDOW` = 50 |
 | Command sequence | `init → build → train → check → submit` | unchanged |
 | 10 MB floor · ≤2 levels of nesting · the leftover-file rules | Identical, rule for rule, to the π0.5 checker | `openroboto_protocol.model_format`: `MIN_TOTAL_SIZE_BYTES`, `MAX_CHECKPOINT_NESTING_DEPTH`, `_scan_files` |
@@ -407,9 +407,10 @@ One command, three steps, resumable:
    repository per **season**, shared by every attempt *within* this season.
    `upload_folder` never deletes, so each attempt is laid on top of the last one.
    Keeping an existing repository instead? Set `huggingface.repo_id`.
-2. **Pay** — **0.1 TAO**, and this season's `fee.kind` is `burn`, so it is
-   destroyed rather than transferred. The amount comes from the competition and is
-   confirmed against the backend in the moment before it is paid. It is not
+2. **Pay** — this season's `fee.kind` is `burn`, so the fee is destroyed rather
+   than transferred. The amount comes from the competition (`params.fee.amount_tao`)
+   and is confirmed against the backend in the moment before it is paid — this guide
+   deliberately does not quote it, because it changes without a release. It is not
    refundable.
 3. **Announce** — publishes the chain commitment and waits for it to be included
    in a block.

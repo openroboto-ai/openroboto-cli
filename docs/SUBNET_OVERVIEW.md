@@ -115,7 +115,7 @@ The simulation seasons burn; the real-hardware track transfers. `openroboto subm
 
 - **Why charge?** Each submission consumes real GPU hours (6 simulation suites per model). A per-submission fee makes flooding the queue economically irrational.
 - **Why burn on the simulation track?** There is no recipient, so the operator earns nothing from those fees and has no incentive to farm submissions or sell evaluation slots.
-- **How much?** Published on the competition row as `params.fee.amount_tao` — **0.1 TAO** on the simulation season, **2 TAO** on the real-hardware one. One number cannot serve both, which is why it is per season and not subnet-wide. An amount of 0 opens a free period (payment verification is skipped entirely).
+- **How much?** Read `params.fee.amount_tao` off the season you are entering (`GET /api/v1/competitions`) — the same field `openroboto submit` confirms against the backend seconds before it pays. **This page does not repeat the number**: it is a per-season operating value that changes without a release, so a copy here would be wrong and no one would notice. Simulation and real-hardware seasons charge different amounts, which is why it is per season and not subnet-wide. An amount of 0 opens a free period (payment verification is skipped entirely).
 - **Payment is bound to the submission.** The payment transaction hash (`b`) and block number (`bb`) are embedded in the commitment payload itself (see §11), so a submission cannot claim someone else's payment.
 
 The backend verifies each payment **against the chain, fail-closed**:

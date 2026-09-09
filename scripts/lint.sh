@@ -50,3 +50,13 @@ uv run ruff format --check src tests
 # command passes while checking nothing.
 uv run ruff check --isolated --select F821,F811,F841 \
     src/openroboto/templates src/openroboto/runner
+
+# Docs gate. The three tools above look at code; this one looks at what the docs
+# promise a miner they will pay.
+#
+# 2026-09-03 the simulation fee moved 0.1 -> 0.2 and six documents kept saying 0.1
+# for six days. Nothing was red, because the fee lives on the competition row and
+# changing it never ships a release — exactly the property that makes a copy in the
+# docs go stale without a signal. Burn verification is fail-closed, so a miner who
+# prepared the documented amount loses the TAO and gets no evaluation.
+uv run python scripts/check_docs_have_no_hardcoded_fees.py
