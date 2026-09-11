@@ -173,9 +173,22 @@ def fetch_submissions(
     hotkey: str = "",
     limit: int = DEFAULT_LIMIT,
     offset: int = 0,
-    round_num: int = 0,
+    *,
+    competition: int,
 ) -> ListEnvelope[SubmissionHistoryItem]:
     """Query the submission history.
+
+    `competition` is a `competitions.id` and is **required by the backend** --
+    keyword-only and without a default so that forgetting it is a TypeError here
+    rather than a 422 in front of a miner.
+
+    It used to send `round_num`, which the backend renamed to `competition` and
+    made mandatory on 2026-09-01. The old name was dropped on arrival (an
+    undeclared query parameter is now a 422, not a silent ignore), and
+    `round_num=0` was dropped by `_get` before it was ever sent -- so the request
+    carried no season at all and came back 422 with "1 field(s)" and no field
+    name. That is what a miner saw after `openroboto status`, and because they
+    had just run `submit`, it read as a failed submission.
 
     Returns the whole envelope instead of just the rows: `meta.page.has_more`
     is the only reliable answer to "you have submissions that were not
@@ -184,11 +197,13 @@ def fetch_submissions(
     getting it wrong once shows up as **silently displaying a few rows too
     few** -- neither the backend nor the CLI raises any error.
     """
-    # 🔴 `round_num` filters on the **server**, not here. The field is not in the
+    # 🔴 The season filter is applied on the **server**. The field is not in the
     # response at all any more (protocol 0.9.0 dropped it), so there is nothing
-    # left to filter on once the rows arrive -- while the backend still accepts
-    # the query parameter and selects rows by `competition_id`.
-    # 0 means "no filter": `_get` drops empty values rather than sending them.
+    # left to filter on once the rows arrive.
+    #
+    # 🔴 Never route `competition` through the `or ""` idiom the optional
+    # parameters use: `_get` drops empty values, so a falsy id would be dropped
+    # and produce exactly the 422 this signature exists to prevent.
     raw = _get(
         base_url,
         HISTORY_PATH,
@@ -196,7 +211,7 @@ def fetch_submissions(
             "hotkey": hotkey,
             "limit": limit,
             "offset": offset,
-            "round_num": round_num or "",
+            "competition": competition,
         },
     )
     return _parse(ListEnvelope[SubmissionHistoryItem], raw, HISTORY_PATH)
@@ -207,11 +222,20 @@ def fetch_rejections(
     hotkey: str = "",
     limit: int = DEFAULT_LIMIT,
     offset: int = 0,
-    round_num: int = 0,
+    claimed_seq: int = 0,
 ) -> ListEnvelope[ScanRejection]:
     """Query records rejected during the chain-scan stage -- the answer to
-    "it is on chain but not in the queue" is here."""
-    # Server-side filter, same as `fetch_submissions` -- see the note there.
+    "it is on chain but not in the queue" is here.
+
+    🔴 **This filter is not `competition`, unlike every other read endpoint.**
+    A chain-scan rejection happens *before* admission, so the row has no season
+    of ours to belong to; all the backend can filter on is
+    `claimed_competition_seq` -- the season number the miner put in the
+    commitment payload's `r` themselves. Sending `competition` here would be an
+    undeclared parameter, which is a 422 since 2026-09-01.
+
+    Optional: 0 means "every season", and `_get` drops it before sending.
+    """
     raw = _get(
         base_url,
         REJECTIONS_PATH,
@@ -219,7 +243,7 @@ def fetch_rejections(
             "hotkey": hotkey,
             "limit": limit,
             "offset": offset,
-            "round_num": round_num or "",
+            "claimed_competition_seq": claimed_seq or "",
         },
     )
     return _parse(ListEnvelope[ScanRejection], raw, REJECTIONS_PATH)

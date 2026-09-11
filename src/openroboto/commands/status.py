@@ -76,8 +76,12 @@ def run(args: argparse.Namespace) -> int:
     say(f"hotkey: {hotkey}")
     say("")
 
+    season = _reporting_season(settings, args.round)
+    say(f"season: {season.label} ({season.track}/{season.seq} · cid={season.id})")
+    say("")
+
     history = fetch_submissions(
-        settings.backend_url, hotkey, args.limit, round_num=args.round
+        settings.backend_url, hotkey, args.limit, competition=season.id
     )
     submissions = history.data
     say(f"Submissions ({len(submissions)})")
@@ -97,8 +101,11 @@ def run(args: argparse.Namespace) -> int:
         )
     say_more_hint(history.meta.page.has_more, history.meta.page.total)
 
+    # 🔴 Not `season.id`. Chain-scan rejections predate admission, so they carry
+    # no season of ours -- the only filter is the number the miner wrote into the
+    # commitment themselves. See `fetch_rejections`.
     rejected = fetch_rejections(
-        settings.backend_url, hotkey, args.limit, round_num=args.round
+        settings.backend_url, hotkey, args.limit, claimed_seq=args.round
     )
     rejections = rejected.data
     say("")
@@ -169,6 +176,52 @@ def say_roster(settings: Settings, hotkey: str) -> None:
             f"  ⚠️  more than {ROSTER_LIMIT} entries; the place above counts only "
             f"the {ROSTER_LIMIT} most recent"
         )
+
+
+def _reporting_season(settings: Settings, round_num: int) -> Competition:
+    """Which season this run reports on -- resolved to a `competitions.id`.
+
+    A miner knows a season **number** (it is what the leaderboard shows, and what
+    `--round` takes). The backend's read endpoints want `competitions.id`, which
+    is local to one database. This is the only place that translation happens.
+
+    Order, most explicit first:
+
+    1. `--round N` -- the simulation season numbered N;
+    2. the workspace's own season, from `competition.json`;
+    3. the one simulation season still taking submissions.
+
+    Raises rather than guessing when none of the three resolves: a wrong id here
+    would silently report an empty history for a miner whose submission is fine,
+    which is worse than saying we do not know which season to look at.
+    """
+    rows = fetch_competitions(settings.backend_url, include_archived=True).data
+    if round_num:
+        for row in rows:
+            if row.track == "sim" and row.seq == round_num:
+                return row
+        raise ConfigError(
+            f"{settings.backend_url} has no simulation season {round_num}. "
+            f"Run `openroboto status` without `--round` to use the live one."
+        )
+
+    snapshot = load_snapshot(settings)
+    if snapshot is not None:
+        for row in rows:
+            if row.track == snapshot.track and row.seq == snapshot.seq:
+                return row
+
+    live = [row for row in rows if row.track == "sim" and row.status == "active"]
+    if len(live) == 1:
+        return live[0]
+    raise ConfigError(
+        "Cannot tell which season to report on"
+        + (
+            f" -- {len(live)} simulation seasons are open. Pass `--round <n>`."
+            if live
+            else " -- no simulation season is open."
+        )
+    )
 
 
 def _live_competition(settings: Settings, snapshot: Snapshot) -> Competition:
