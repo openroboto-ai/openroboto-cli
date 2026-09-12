@@ -61,9 +61,9 @@ class TreeError(Exception):
 def fetch_tree(repo_id: str, revision: str, hf_token: str = "") -> list[Any]:
     """List every file in `repo_id` at `revision`.
 
-    The token is sent whenever there is one: the real track allows private
-    repositories, and without it those answer 404 -- indistinguishable from a
-    typo in the repo name.
+    The token is sent whenever there is one. A gated repository still serves
+    its listing anonymously, but a private one answers 404 -- indistinguishable
+    from a typo in the repo name -- and miners do set repositories private.
     """
     url = f"{HF_API}/api/models/{repo_id}/tree/{revision}?recursive=true"
     headers = {"Authorization": f"Bearer {hf_token}"} if hf_token else {}

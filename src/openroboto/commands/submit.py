@@ -130,6 +130,7 @@ from openroboto.competition_state import (
 from openroboto.config import Settings
 from openroboto.console import fail, say
 from openroboto.huggingface import TreeError, fetch_tree
+from openroboto.huggingface.access import AccessError, grant_to_of, lock_and_grant
 
 #: One request instead of a paging loop, the same figure `status` uses -- it is
 #: the backend's maximum page size, and it is asked for **one hotkey's** rows in
@@ -220,6 +221,8 @@ def run(args: argparse.Namespace) -> int:
                 return 1
             if not slot_is_free(settings, state, verdict):
                 return 1
+            if not evaluator_can_read(settings, state, verdict.live):
+                return 1
             confirm_payment(verdict, settings.netuid)
         except PrecheckFailed:
             return 1
@@ -288,6 +291,42 @@ def _no_season(config_path: str) -> None:
         f"   A fee paid with no season attached is filed under whichever season "
         f"the backend defaults to, and it is not refunded."
     )
+
+
+def evaluator_can_read(
+    settings: Settings, state: dict[str, Any], live: Competition
+) -> bool:
+    """Lock the weights and let the evaluator in. False = do not pay.
+
+    Runs **before the fee**, next to the other three gates, for the reason
+    spelled out at the top of this module: admission lists the repository
+    before it verifies payment, so a repository the evaluator cannot read is
+    rejected with the fee already spent and no refund.
+
+    A season that names no account is left alone -- see `access.grant_to_of`.
+    That is every simulation season today, so this gate is a no-op for them and
+    stays one until an operator sets the field.
+    """
+    grant_to = grant_to_of(live.params)
+    if not grant_to:
+        return True
+    try:
+        lock_and_grant(
+            # The repository `perform_upload` just wrote to, the same one the
+            # layout gate reads. `settings.hf_repo_id` is what `miner.yaml`
+            # asked for; only the state says where the weights landed.
+            repo_id=str(state.get("hf_repo_id", "")),
+            grant_to=grant_to,
+            hf_token=settings.hf_token,
+        )
+    except AccessError as exc:
+        # Not a verdict on the model -- say so, the same way `_unlistable`
+        # does. The miner fixes an access problem and re-runs, having spent
+        # nothing.
+        fail(str(exc))
+        return False
+    say(f"🔒 repository gated; {grant_to} can read it")
+    return True
 
 
 def layout_is_payable(

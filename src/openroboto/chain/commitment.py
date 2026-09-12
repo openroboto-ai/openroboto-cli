@@ -90,8 +90,8 @@ def build_payload(
       commitment written before 0.7.0, which the backend reads as
       `(sim, seq=competition_seq)`.
     - `model_hash`: the weights fingerprint, on chain `m`. Required on the real
-      track, where the repository may be private and the backend therefore
-      cannot compute it itself.
+      track, where it is the record of which weights were submitted -- the
+      repository is the miner's to change after the window closes.
     """
     # 🔴 Keyword, not positional. The pin is exact (`==`), so a renamed field
     # fails loudly at the call site; a reordered one would bind silently to the

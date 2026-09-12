@@ -24,10 +24,16 @@ inside a real track's pool or retroactively redistribute accrued season rewards.
 - An entry is the exact Hugging Face revision recorded at submission. Pushing new
   commits afterwards does not update it — resubmit instead. When the window closes the
   roster is locked; no model is replaced after that.
-- Private repositories are allowed **while the season is being evaluated**, provided
-  the official `openroboto-ai` account has read access before you submit. If the
-  recorded revision cannot be downloaded, the entry is disqualified. Once an entry is
-  rewarded, privacy ends — see §5.
+- Your weights stay out of everyone else's hands **while the season is being
+  evaluated**. `openroboto submit` makes the repository **gated** and puts the
+  official account on its access list before it pays the fee — you do not have to set
+  anything up, and we never hold a credential of yours. Other people can still see
+  that the repository exists and what files are in it; downloading them returns 401.
+  If the recorded revision cannot be downloaded by the official account, the entry is
+  disqualified. Once an entry is rewarded, the repository opens — see §5.
+  - Do **not** set the repository to private instead. Hugging Face checks visibility
+    before the access list, so a private repository refuses the official account as
+    well, and the entry is rejected with the fee already spent.
 
 ## 2. Task set and qualification bar
 
@@ -130,8 +136,9 @@ proof.
 - Rewards are paid over time — 120 days for the champion, 30 days for qualified
   entries — and that whole span is the **claim period**.
 - For as long as an entry is being paid, **its Hugging Face repository and the rewarded
-  revision must stay public**. Taking the repository private, deleting it or removing
-  the revision stops the payouts; whatever has not yet been paid is burned.
+  revision must stay public** — which means **removing the gate** `submit` put on it
+  once payouts begin. Leaving it gated, taking the repository private, deleting it or
+  removing the revision stops the payouts; whatever has not yet been paid is burned.
 - During the claim period **anyone** — a miner, a validator, anyone at all — can
   **challenge** a rewarded entry for cheating: a copied or trivially re-uploaded model,
   misrepresented training, tampering with the evaluation, or any other breach of the
@@ -155,7 +162,7 @@ proof.
 | Repository incomplete — missing weights, config, or processor files | Disqualified |
 | Checkpoint fails to load or crashes on the evaluation harness | Disqualified, reason shown on the roster |
 | Copy or trivial re-upload of another team's model | Disqualified, whatever the score |
-| Repository or rewarded revision made private or deleted during the claim period | Payouts stop; the unpaid remainder is burned |
+| Repository or rewarded revision left gated, made private or deleted during the claim period | Payouts stop; the unpaid remainder is burned |
 | Challenge upheld during the claim period | Unpaid remainder burned; the ruling is published |
 | No entry clears the qualification bar | The whole season's prize is burned, publicly recorded |
 
