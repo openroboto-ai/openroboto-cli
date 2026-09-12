@@ -1,6 +1,6 @@
 # Real-Robot Track — prize pool, claim period and challenges
 
-> **Status**: current · **Updated**: 2026-09-07 · **Audience**: miners entering the
+> **Status**: current · **Updated**: 2026-09-13 · **Audience**: miners entering the
 > xArm 6 seasons. Where a number here disagrees with the season row on
 > `GET /api/v1/competitions`, the season row wins.
 
@@ -21,6 +21,9 @@ inside a real track's pool or retroactively redistribute accrued season rewards.
   season is a fixed submission window, then evaluation on a physical UFACTORY xArm 6
   workcell, then **one champion**. The window and evaluation dates are on the season
   record.
+- **Every season boundary falls at 12:00 UTC** — submissions close at 12:00 UTC,
+  evaluation ends at 12:00 UTC. Read the exact dates off the season record; the hour
+  is the one thing you can assume without looking.
 - An entry is the exact Hugging Face revision recorded at submission. Pushing new
   commits afterwards does not update it — resubmit instead. When the window closes the
   roster is locked; no model is replaced after that.
@@ -89,6 +92,15 @@ is **15% simulation / 42.5% real π0.5 / 42.5% real LingBot-VLA 2.0**.
 
 - Each real track's 42.5% share funds its own seasonal reward accounting.
   Keep competition and season records distinct when checking accruals and payouts.
+- **A season's pool accrues from the moment submissions open until evaluation ends** —
+  not just while the submission window is open. Evaluation on physical hardware takes
+  weeks after the roster locks, and the share keeps accruing through all of it. Both
+  ends are on the season record: accrual starts at `submit_opens_at` and stops at
+  `eval_ends_at`.
+- Each track has **its own prize-pool hotkey**, one per season, published on that
+  season's record. Do not carry a hotkey over from one season or track to another:
+  they are different registrations, and the balance you would be reading would be
+  someone else's pool.
 - Entry-fee payments are separate from prize-pool rewards. Do not infer the
   prize-pool hotkey from an entry-fee recipient or reuse one track's accounting
   reference for the other track.

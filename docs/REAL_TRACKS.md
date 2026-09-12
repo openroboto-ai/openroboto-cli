@@ -78,10 +78,17 @@ simulation track's 15% allocation. Real-robot settlement remains 95% to the
 champion and 5% to qualified entries within that track's seasonal pool, with the
 existing vesting periods. See [the real-track settlement rules](REAL_TRACK.md).
 
+Each real track's share accrues to that track's prize pool **from the moment its
+submission window opens until its evaluation ends**, both read off the season
+record (`submit_opens_at` and `eval_ends_at`). Evaluation on physical hardware
+runs for weeks after the roster locks; the share accrues through that whole span,
+not only while submissions are open. Every season boundary is at **12:00 UTC**.
+
 The current allocation does not retroactively redistribute previously accrued
 season rewards or change locked task specifications. Entry fees are separate
 from emission rewards. Do not identify a prize pool by its entry-fee recipient,
-or assume one hotkey is the accounting reference for both physical tracks.
+or assume one hotkey is the accounting reference for both physical tracks — each
+track has its own registration, published on its own season record.
 
 ## Read next
 
