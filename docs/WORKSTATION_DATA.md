@@ -146,6 +146,15 @@ The flange-to-gripper TCP offset is used for geometry and safety checks, not for
 direct interpretation of joint-space actions. Each episode must use a common
 initial pose, represented as six absolute joint positions in radians.
 
+### Measured installation reference
+
+The [2026-09-12 workstation measurements](WORKSTATION_MEASUREMENTS.md) provide
+the normal-gripper TCP translation, a rounded reference initial pose with radian
+conversion, the camera-to-base transform and a one-second command-timing test.
+The [measurement JSON](data/workstation-measurements-2026-09-12.json) contains the
+same numerical reference. Installation-specific measurements supplement this
+interface; they do not change a season's model contract or runtime configuration.
+
 ## Tasks and responsibilities
 
 The [real-robot task catalog](REAL_TASKS.md) lists the seven shared tasks and

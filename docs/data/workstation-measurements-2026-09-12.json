@@ -1,0 +1,109 @@
+{
+  "schema_version": 1,
+  "report_date": "2026-09-12",
+  "source": "Workstation team measurement report",
+  "robot_model": "UFACTORY xArm6",
+  "camera_model": "Intel RealSense D415",
+  "normal_gripper_tcp_translation_mm": [
+    0,
+    0,
+    172
+  ],
+  "initial_joint_pose": {
+    "joint_order": [
+      "J1",
+      "J2",
+      "J3",
+      "J4",
+      "J5",
+      "J6"
+    ],
+    "degrees": [
+      -7.4,
+      -5.3,
+      -35.2,
+      22.9,
+      40,
+      -29
+    ],
+    "radians": [
+      -0.129154365,
+      -0.09250245,
+      -0.614355897,
+      0.399680399,
+      0.698131701,
+      -0.506145483
+    ],
+    "precision": "Approximate pose as rounded in the measurement report; radians are converted from those rounded values, not independent measurements.",
+    "usage": "Reference pose only; does not replace a more precise season runtime reset configuration."
+  },
+  "camera_to_base": {
+    "transform_name": "T_base_camera",
+    "mapping": "P_base = R_base_camera @ P_camera + t_base_camera",
+    "translation_unit": "m",
+    "T_base_camera_m": [
+      [
+        -0.7319189513381451,
+        0.3804961373064875,
+        -0.5652586471403261,
+        0.8027341003079799
+      ],
+      [
+        0.055828010326620485,
+        0.8602624807823175,
+        0.5067856523434969,
+        -0.6850595056419098
+      ],
+      [
+        0.6791007892316425,
+        0.3393687576267087,
+        -0.6508847550925313,
+        0.884938191853616
+      ],
+      [
+        0,
+        0,
+        0,
+        1
+      ]
+    ],
+    "rotation_quaternion_xyzw": [
+      0.1211438431907171,
+      0.9004257586293545,
+      0.23493175363459123,
+      -0.34549195878907235
+    ],
+    "quality": {
+      "fit_point_count": 10,
+      "fit_rms_mm": 3.0475240083634736,
+      "fit_max_mm": 4.323475138926838,
+      "accepted_validation_point_count": 2,
+      "accepted_validation_errors_mm": [
+        0.9907017515661574,
+        5.854556230248043
+      ],
+      "excluded_validation_point_count": 1,
+      "excluded_validation_error_mm": 8.244279804853411
+    },
+    "validity": "Applies only while the measured camera and robot base remain mechanically fixed. Recalibrate after changing their relative mounting. These sample errors are not a guaranteed workspace-wide accuracy bound."
+  },
+  "control_timing_test": {
+    "test_date": "2026-09-11",
+    "nominal_command_rate_hz": 50,
+    "duration_seconds": 1,
+    "command_count": 50,
+    "joint": "J6",
+    "excursion_degrees": 0.1,
+    "trajectory": "sin^3 out-and-back; other joints held at measured start positions; no gripper commands",
+    "measured_command_rate_hz": 50.000389,
+    "period_mean_ms": 19.999844,
+    "period_p95_ms": 20.020892,
+    "period_p99_ms": 20.040208,
+    "period_max_ms": 20.045645,
+    "sdk_call_p95_ms": 0.330204,
+    "sdk_call_p99_ms": 0.356543,
+    "sdk_call_max_ms": 0.366636,
+    "deadline_misses_over_2ms": 0,
+    "scope": "Command-send timing in this one-second, small-amplitude test. Not a model inference rate, camera FPS, long-duration validation, or a change to the competition runtime configuration."
+  }
+}
