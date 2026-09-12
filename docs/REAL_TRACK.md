@@ -1,6 +1,6 @@
 # Real-Robot Track — prize pool, claim period and challenges
 
-> **Status**: current · **Updated**: 2026-09-07 · **Audience**: miners entering the
+> **Status**: current · **Updated**: 2026-09-13 · **Audience**: miners entering the
 > xArm 6 seasons. Where a number here disagrees with the season row on
 > `GET /api/v1/competitions`, the season row wins.
 
@@ -89,6 +89,8 @@ is **15% simulation / 42.5% real π0.5 / 42.5% real LingBot-VLA 2.0**.
 
 - Each real track's 42.5% share funds its own seasonal reward accounting.
   Keep competition and season records distinct when checking accruals and payouts.
+- A season's share accrues to its pool **from when submissions open until evaluation
+  ends** — `submit_opens_at` to `eval_ends_at` on the season record.
 - Entry-fee payments are separate from prize-pool rewards. Do not infer the
   prize-pool hotkey from an entry-fee recipient or reuse one track's accounting
   reference for the other track.
