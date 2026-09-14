@@ -190,7 +190,7 @@ JSON payload committed on chain (BigRaw):
 | `b` | Payment tx hash (burn or transfer; bound to this submission) |
 | `bb` | Payment block number (must be within 50 blocks of the commitment) |
 | `cid` | Competition id, resolved from the backend at submit time. Added in protocol 0.7.0 |
-| `m` | Model fingerprint. Real track only — its repositories may be private, so the evaluator cannot compute it later |
+| `m` | Model fingerprint. Real track only — the on-chain record of which weights were submitted |
 
 ## Chain Submission Confirmation
 

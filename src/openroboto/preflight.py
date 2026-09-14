@@ -185,8 +185,8 @@ _FIELD_ADVICE = {
     "does not say which season the fee is for -- run `openroboto submit`, which "
     "resolves it from the backend before it pays",
     "m": "The model fingerprint for this submission is missing or malformed. The "
-    "real track needs it on chain because the repository may be private, so "
-    "the evaluator cannot compute it later -- run `openroboto submit` again",
+    "real track puts it on chain so the weights that were judged are the "
+    "weights that were submitted -- run `openroboto submit` again",
 }
 
 

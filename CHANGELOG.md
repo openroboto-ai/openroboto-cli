@@ -4,6 +4,31 @@ Every entry answers one question before it lists anything: **does a miner have t
 change something, and what breaks if they do not?** A diff summary without "who
 has to act" is not usable by the people who installed this.
 
+## 1.4.0
+
+### You do not have to act, but your repository changes
+
+`openroboto submit` now makes your model repository **gated** and puts the
+official evaluation account on its access list — before it pays the entry fee.
+Nothing to configure: it runs with the token already in your `miner.yaml`, on
+your machine, and we never hold a credential of yours.
+
+What changes for other people looking at your repository: they can still see
+that it exists, its file names and sizes, and your `README.md`. Downloading the
+weights returns 401. Until now those weights were downloadable by anyone for the
+whole time a season was being scored.
+
+| Situation | What to do |
+|---|---|
+| You want your weights withheld while the season is scored | Nothing. `submit` does it. |
+| You already set the repository **private** | Make it public again before submitting. Hugging Face checks visibility before the access list, so a private repository refuses the evaluator too — the submission is rejected and **the fee is not refunded**. `submit` gates it for you; private is never the right setting. |
+| Your entry starts being paid out | **Remove the gate.** A rewarded entry has to be public for the whole claim period, and a repository left gated stops the payouts. See `docs/REAL_TRACK.md` §5. |
+| `submit` says it could not gate or grant | Fix the access problem and run it again. It stops **before** the fee, so nothing has been spent, and re-running resumes the upload rather than repeating it. |
+
+Which account gets access is read from the season, not compiled into this CLI:
+a season that names none is left completely alone, which is every simulation
+season today. Nothing about mining one has changed.
+
 ## 1.3.0
 
 ### You have to act if you script this CLI

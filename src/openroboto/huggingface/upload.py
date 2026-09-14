@@ -94,12 +94,11 @@ def push_model(
         # publishing is not undoable: whoever fetched them while the repo was
         # open still has them.
         #
-        # A private repository is explicitly supported, not tolerated. The real
-        # track's spec says so in as many words (`docs/specs/10` §2.5): "a
-        # miner's HF repository **may stay private indefinitely**; it only has to
-        # add the official account as a read-only collaborator." The backend
-        # reads those repos with `settings.HF_READ_TOKEN` and reports the access
-        # verdict per submission, so this client has nothing to guarantee here.
+        # Withholding the weights is supported, and `submit` arranges it a few
+        # steps later: it makes the repository **gated** and puts the evaluator
+        # on its access list (`huggingface/access.py`). That is deliberately not
+        # done here -- an upload is not a submission, and `openroboto upload`
+        # alone must not change who can read a miner's repository.
         #
         # `exist_ok=True` leaves an existing repo exactly as it is. A repo this
         # call creates gets huggingface_hub's own default -- which is public, and

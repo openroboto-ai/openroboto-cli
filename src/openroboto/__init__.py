@@ -10,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Final
 
-__version__: Final = "1.3.0"
+__version__: Final = "1.4.0"
 """Client version.
 
 Every log line written before going on chain prints this number (so does

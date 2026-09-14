@@ -700,13 +700,16 @@ def _submitting(
     settings: Settings,
     tree: list[dict[str, Any]] | None = None,
     roster: Any = None,
+    verdict: Any = None,
 ) -> tuple[list[Any], list[Any]]:
     """Wire `submit` up to fakes and return (season checks, payment calls).
 
     `tree` is the HuggingFace listing the layout gate judges; it defaults to a
     repository that passes, because these cases are about the *season* gate. The
     layout gate has its own section further down, and so does the dedup gate,
-    whose `roster` defaults to an entry list this hotkey is not on.
+    whose `roster` defaults to an entry list this hotkey is not on. `verdict`
+    is the season the check resolves to, for the cases that turn on a field of
+    the row itself.
     """
     monkeypatch.setattr(
         submit_command.Settings, "load", staticmethod(lambda path: settings)
@@ -735,7 +738,7 @@ def _submitting(
 
     def _resolve(cfg: Settings, snapshot: Any, now: Any) -> Any:
         checked.append(snapshot)
-        return _verdict()
+        return _verdict() if verdict is None else verdict
 
     def _burn(
         cfg: Settings,
@@ -1878,9 +1881,9 @@ class _FakeResponse(io.BytesIO):
 # Everything a season can be looked up by stays **off** the payload: the track,
 # the base model, the fee, the format rules are all columns of the row `cid`
 # points at, and a second copy on chain is a second thing that can disagree with
-# the database. `m` is the one exception, and only because it cannot be looked
-# up -- the real track allows private repositories, so the backend cannot pull
-# the weights and fingerprint them itself.
+# the database. `m` is the one exception: it is not a fact about the season but
+# about this submission, and it is what binds the score to the weights that
+# were handed over.
 
 MODEL_HASH = "9" * 64
 CID = 3
@@ -1934,9 +1937,8 @@ def test_a_real_track_payload_carries_exactly_the_nine_keys(
 def test_a_simulation_season_carries_cid_but_no_fingerprint(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """A public repository is one the backend can fingerprint itself, so `m` is
-    not written at all -- and "not written" is a missing key, not an empty
-    one."""
+    """The simulation track does not carry a fingerprint at all -- and "not
+    written" is a missing key, not an empty one."""
     monkeypatch.chdir(tmp_path)
     captured = _capture_announcement(monkeypatch)
 
@@ -2272,3 +2274,180 @@ def test_an_empty_fingerprint_stops_the_run_before_any_payment(
 
     assert "no LFS file" in str(caught.value)
     assert "model_hash" not in state
+
+
+# --- the access gate -------------------------------------------------------
+#
+# What the fourth gate buys: a miner can keep the weights out of everyone
+# else's hands while the season is scored, and the evaluator can still fetch
+# them. `huggingface/access.py` has the measurements that rule out doing this
+# with a private repository.
+
+#: The account the season asks to be let in. Read off the row, never a constant
+#: in the CLI -- these tests use a stand-in name for exactly that reason.
+GRANT_TO = "an-account-nobody-hardcoded"
+MINER_TOKEN = "hf_" + "z" * 34
+
+
+def _gated_season() -> Any:
+    """A season whose row names an account to grant access to."""
+    row = _live_row()
+    params = dict(row.params)
+    params["hf"] = {"grant_to": GRANT_TO}
+    return SimpleNamespace(
+        live=_live_row(params=params), kind="burn", amount_tao=0.25, cid=2
+    )
+
+
+def _miner_settings() -> Settings:
+    """`_season_settings()` plus the miner's own HuggingFace token -- the only
+    credential this whole path uses."""
+    return Settings.from_mapping(
+        {
+            "subnet": {"netuid": 80, "network": "finney", "hotkey_ss58": HOTKEY},
+            "competition": {
+                "id": 2,
+                "track": "sim",
+                "seq": 2,
+                "label": "LingBot-VLA 2.0",
+                "adapter": "sim_lingbot",
+                "params": {"fee": {"kind": "burn", "amount_tao": 0.25}},
+            },
+            "huggingface": {"token": MINER_TOKEN},
+        }
+    )
+
+
+def _granting(
+    monkeypatch: pytest.MonkeyPatch, boom: Exception | None = None
+) -> list[tuple[str, str, str]]:
+    """Record what the gate asks HuggingFace to do, without asking it."""
+
+    def _lock(*, repo_id: str, grant_to: str, hf_token: str) -> None:
+        calls.append((repo_id, grant_to, hf_token))
+        if boom is not None:
+            raise boom
+
+    calls: list[tuple[str, str, str]] = []
+    monkeypatch.setattr(submit_command, "lock_and_grant", _lock)
+    return calls
+
+
+def test_a_season_that_names_an_account_gates_the_uploaded_repository(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The repository that was just uploaded to, and the miner's own token.
+
+    Not `settings.hf_repo_id`: that is what miner.yaml asked for, and the
+    checkpoint is what `perform_upload` actually wrote. On the season that
+    named nobody the two are indistinguishable, so this state names a third
+    repository to tell them apart.
+    """
+    monkeypatch.chdir(tmp_path)
+    state = _uploaded_state()
+    state["hf_repo_id"] = "kyleab/where-the-weights-really-went"
+    save_state(SEASON_ID, state)
+    calls = _granting(monkeypatch)
+    _, paid = _submitting(monkeypatch, _miner_settings(), verdict=_gated_season())
+
+    args = argparse.Namespace(config="miner.yaml", output_dir="", force=False)
+    assert submit_command.run(args) == 0
+    assert calls == [("kyleab/where-the-weights-really-went", GRANT_TO, MINER_TOKEN)]
+    assert paid == [0.25]
+
+
+def test_a_season_that_names_nobody_touches_nothing_on_huggingface(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Today's seasons, and the only behaviour that may be reached by default.
+
+    Gating a repository is visible to everyone watching it and is the miner's
+    call to make; doing it because the CLI was upgraded would be the CLI
+    changing a miner's repository on its own initiative.
+    """
+    monkeypatch.chdir(tmp_path)
+    save_state(SEASON_ID, _uploaded_state())
+    calls = _granting(monkeypatch)
+    _, paid = _submitting(monkeypatch, _miner_settings())
+
+    args = argparse.Namespace(config="miner.yaml", output_dir="", force=False)
+    assert submit_command.run(args) == 0
+    assert calls == []
+    assert paid == [0.25]
+
+
+def test_a_repository_the_evaluator_would_not_reach_is_not_paid_for(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """🔴 The whole reason this gate stands before the payment.
+
+    A repository the evaluator cannot read is rejected at admission -- and
+    admission lists it before it verifies the fee, so the fee is spent and not
+    refunded. Stopping here costs one command.
+    """
+    monkeypatch.chdir(tmp_path)
+    save_state(SEASON_ID, _uploaded_state())
+    calls = _granting(
+        monkeypatch, submit_command.AccessError("HuggingFace returned HTTP 403")
+    )
+    _, paid = _submitting(monkeypatch, _miner_settings(), verdict=_gated_season())
+
+    args = argparse.Namespace(config="miner.yaml", output_dir="", force=False)
+    assert submit_command.run(args) == 1
+    assert len(calls) == 1
+    assert paid == []
+    assert "HTTP 403" in capsys.readouterr().err
+
+
+def test_the_account_comes_from_the_row_and_only_from_the_row() -> None:
+    """Anything the season did not say is "grant to nobody".
+
+    A released CLI outlives the account it was cut with, so a default here
+    would have older miners granting access to whoever that name pointed at.
+    """
+    from openroboto.huggingface.access import grant_to_of
+
+    assert grant_to_of({"hf": {"grant_to": GRANT_TO}}) == GRANT_TO
+    assert grant_to_of(None) == ""
+    assert grant_to_of({}) == ""
+    assert grant_to_of({"fee": {"kind": "burn"}}) == ""
+    assert grant_to_of({"hf": {}}) == ""
+    assert grant_to_of({"hf": {"grant_to": ""}}) == ""
+    assert grant_to_of({"hf": {"grant_to": None}}) == ""
+    # jsonb is passed through verbatim, so a season can hold anything at all
+    assert grant_to_of({"hf": "Gopenroboto"}) == ""
+
+
+def test_an_account_that_is_already_on_the_list_is_success(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Re-running `submit` is the documented way out of half of the failures on
+    this path, so the second run must not be the one that breaks."""
+    from huggingface_hub.utils import HfHubHTTPError
+
+    from openroboto.huggingface import access
+
+    locked: list[Any] = []
+
+    class _Refused(HfHubHTTPError):
+        """What `grant_access` raises, minus the HTTP plumbing -- the branch
+        reads the message, and `HfHubHTTPError` cannot be built without a live
+        response object."""
+
+        def __init__(self, message: str) -> None:
+            Exception.__init__(self, message)
+
+    class _Api:
+        def __init__(self, token: str = "") -> None:
+            pass
+
+        def update_repo_settings(self, *, repo_id: str, gated: str) -> None:
+            locked.append((repo_id, gated))
+
+        def grant_access(self, *, repo_id: str, user: str) -> None:
+            # Verbatim from HuggingFace, 2026-09-12.
+            raise _Refused("Bad request:\nThat user already has access to the repo")
+
+    monkeypatch.setattr(access, "HfApi", _Api)
+    access.lock_and_grant(repo_id="a/b", grant_to=GRANT_TO, hf_token=MINER_TOKEN)
+    assert locked == [("a/b", "manual")]

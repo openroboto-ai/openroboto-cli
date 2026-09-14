@@ -47,6 +47,8 @@ is what sends them on to pay for a checkpoint the backend will reject.
     E2E_WALLET_NAME       local wallet name (developer machines)
     E2E_COLDKEY_MNEMONIC  coldkey mnemonic (CI; takes precedence)
     E2E_HOTKEY_MNEMONIC   hotkey mnemonic (CI; required with the above)
+    E2E_COMPETITION_ID    which season to submit to (default: the first served)
+    E2E_ENVIRONMENT       the `environment:` preset to write (default: dev)
     E2E_KEEP_HF_REPO      set to 1 to keep the uploaded repo for inspection
 
 The competition is **not** configured here: it is fetched from
@@ -167,12 +169,18 @@ def resolve_wallet(wallet_root: Path) -> tuple[str, str]:
 
 
 def pick_competition(backend: str) -> Any:
-    """The season this run submits to: the first one the backend serves.
+    """The season this run submits to: the first one the backend serves, or the
+    one `E2E_COMPETITION_ID` names.
 
     Asked rather than hard-coded, for the same reason `openroboto init` asks --
     the fee, the base model and the layout rules are the season's data, and a
     copy here would be a second source that goes stale silently. Unreachable is
     a hard stop, never a default.
+
+    The override exists because the backend serves every open season, including
+    tracks this flow does not apply to, and "the first one" is whatever the
+    ordering happens to be that day. A run that means to exercise one season's
+    rules has to be able to say which.
     """
     from openroboto.backend_api import fetch_competitions
 
@@ -182,7 +190,16 @@ def pick_competition(backend: str) -> Any:
             f"{backend} lists no competition taking submissions right now, so "
             f"there is no season to submit to and nothing to test."
         )
-    return rows[0]
+    wanted = os.environ.get("E2E_COMPETITION_ID", "")
+    if not wanted:
+        return rows[0]
+    for row in rows:
+        if str(row.id) == wanted:
+            return row
+    raise E2EError(
+        f"E2E_COMPETITION_ID={wanted} is not among the seasons {backend} is "
+        f"serving ({', '.join(f'{r.id} ({r.track}/{r.seq})' for r in rows)})."
+    )
 
 
 def write_config(
@@ -218,7 +235,7 @@ def write_config(
     section = render_section(competition, env("E2E_BACKEND_URL"))
     config = workspace / "miner.yaml"
     config.write_text(
-        "environment: dev\n"
+        f"environment: {env('E2E_ENVIRONMENT', 'dev')}\n"
         "subnet:\n"
         f"  network: {env('E2E_NETWORK', 'test')}\n"
         f"  netuid: {env('E2E_NETUID', '313')}\n"
