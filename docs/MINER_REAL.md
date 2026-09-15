@@ -39,8 +39,8 @@ matching the published model-facing inputs and outputs:
 
 - State: `[q1, q2, q3, q4, q5, q6, g]`, measured absolute joint positions in radians.
 - Action: `[Δq1, Δq2, Δq3, Δq4, Δq5, Δq6, g]`; joint deltas use the same inference-start reference throughout a chunk, without accumulation.
-- Gripper: one continuous absolute target, canonical `0=open`, `1=closed`, after denormalization.
-- Prediction: `50 × 7`; the workstation executes the first 25 steps by default, synchronously.
+- Gripper: unitless command labels `0=open`, `1=close`; continuous denormalized outputs use event thresholds (close ≥0.65, open ≤0.35), not direct opening positions.
+- Prediction: `10 × 7`, nominal 30 Hz training action sampling. The executor selects at most the first 3 joint targets, plans a velocity/acceleration-limited spline and sends absolute joint commands at 100 Hz before reading the next observation.
 - Vision: one fixed third-person D415 RGB stream at 640 × 480 / 30 FPS; π0.5 uses 224 × 224 resize-with-padding, without extra cropping.
 - Stats: matching OpenPI-compatible `norm_stats.json`, with 7 values in every state/action statistics array. π0.5 uses q01/q99 quantile normalization.
 

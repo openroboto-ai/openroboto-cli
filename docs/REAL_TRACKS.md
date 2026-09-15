@@ -29,16 +29,17 @@ that the corresponding mainnet competition is open.
 
 ## Model interface and hardware adapter
 
-The two physical tracks share the published joint-space model-facing contract:
-7-D state `[q1..q6, g]` and 7-D action `[Δq1..Δq6, g]`, with joints in radians
-and one continuous absolute gripper target. The 50-step prediction uses a single
-inference-start joint reference; the workstation executes the first 25 steps
-by default. The official
+The π0.5 workstation interface uses 7-D state `[q1..q6, g]` and 7-D action
+`[Δq1..Δq6, g]`, with joints in radians and unitless gripper command labels
+`0=open`, `1=close`. Predictions contain 10 steps; all joint deltas use the same
+inference-start reference. The executor selects at most the first 3 joint targets,
+retimes them with a velocity/acceleration-limited spline, and sends absolute joint
+commands at 100 Hz. Training actions have a nominal 30 Hz sampling rate. The
 evaluation program handles hardware-readout conversion, gripper-driver mapping,
 and xArm SDK calls. Miners do not need to implement those hardware adapters.
 
-This shared interface does not mean that π0.5 and LingBot use the same checkpoint
-layout or loader. Export a complete checkpoint for the selected model family.
+π0.5 and LingBot retain their own checkpoint and runtime requirements.
+Export a complete checkpoint for the selected model family.
 Do not infer the real-robot interface from a LIBERO simulation example.
 
 See [the confirmed interface](WORKSTATION_DATA.md) for

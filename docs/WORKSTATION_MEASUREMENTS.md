@@ -37,16 +37,25 @@ radian-based model interface.
 
 ## Camera to robot base transform
 
-The reported transform maps a point from camera coordinates into robot base
-coordinates: `P_base = R_base_camera @ P_camera + t_base_camera`.
+The transform maps a point from the D415 color-camera frame into the robot base
+frame. Both point coordinates and the translation use meters:
+`p_base = T_base_color[:3, :3] @ p_color + T_base_color[:3, 3]`.
 The following homogeneous matrix uses **meters** for its translation column:
 
-```text
-T_base_camera =
-[[-0.731918951,  0.380496137, -0.565258647,  0.802734100],
+```python
+import numpy as np
+
+T_base_color = np.array([
+ [-0.731918951,  0.380496137, -0.565258647,  0.802734100],
  [ 0.055828010,  0.860262481,  0.506785652, -0.685059506],
  [ 0.679100789,  0.339368758, -0.650884755,  0.884938192],
- [ 0.000000000,  0.000000000,  0.000000000,  1.000000000]]
+ [ 0.000000000,  0.000000000,  0.000000000,  1.000000000],
+], dtype=np.float64)
+
+# Example: the color-camera origin, expressed in the robot base frame.
+p_color = np.zeros(3)
+p_base = T_base_color[:3, :3] @ p_color + T_base_color[:3, 3]
+# [0.802734100, -0.685059506, 0.884938192] meters
 ```
 
 The JSON retains the report's numeric precision and the quaternion in `xyzw`

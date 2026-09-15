@@ -1,28 +1,26 @@
 # Workstation model interface and reference data
 
-> Confirmed interface requirements published 2026-09-07, based on the
-> specification supplied by the workstation team.
-> This publishes a specification, not an end-to-end verification report or a
-> competition-opening notice.
+> Interface reference updated 2026-09-15 from the workstation team's execution
+> and training specifications. This is an interface description, not a robot
+> performance report.
 
-This is the model-facing joint-space contract for the physical xArm6 workstation,
-used by the parallel π0.5 and LingBot tracks. Model-family loading and export
-requirements remain separate. The source explicitly describes π0.5 preprocessing;
-shared I/O does not establish that a LingBot loader has been implemented or tested.
-Use the selected competition's official runtime reference.
+This page describes the π0.5 joint-space model interface on the physical xArm6
+workstation. Model-family loading and export requirements remain separate;
+use the runtime for the selected competition.
 
 ## State and action contract
 
 | Field | Ordered physical representation | Meaning |
 |---|---|---|
-| State, 7 values | `[q1, q2, q3, q4, q5, q6, g]` | Measured absolute joint positions and current absolute gripper position |
-| Action, 7 values per step | `[Δq1, Δq2, Δq3, Δq4, Δq5, Δq6, g]` | Joint-position deltas and an absolute gripper target |
+| State, 7 values | `[q1, q2, q3, q4, q5, q6, g]` | Measured absolute joint positions and binary gripper command state |
+| Action, 7 values per step | `[Δq1, Δq2, Δq3, Δq4, Δq5, Δq6, g]` | Joint-position deltas and a gripper closing score |
 | Joint order and units | Native xArm6 Joint 1 through Joint 6, base to wrist | Radians |
-| Canonical gripper | Continuous `g ∈ [0, 1]` | `0` fully open; `1` fully closed; intermediate positions allowed |
+| Canonical gripper labels | `0 = open`, `1 = close` | Unitless command labels, not measured finger spacing |
 
-Both state and action have one gripper dimension. The canonical gripper range
-describes physical values after action denormalization, not the model's raw
-normalized output. No binary threshold or LIBERO `-1=open/+1=close` rule applies.
+Both state and action have one gripper dimension. Gripper labels are defined
+before normalization or after denormalization. Training labels are binary;
+model outputs can be continuous and are interpreted by the event rules below,
+not sent to the hardware as intermediate opening positions.
 
 This contract does not provide end-effector position or rotation, joint velocity,
 joint torque, or force/torque sensor readings. EEF base/tool-frame rotation,
@@ -39,7 +37,8 @@ physical_actions = denormalize(model_actions, checkpoint norm_stats)
 
 for each executed step k:
     q_target[k] = q_ref + physical_actions[k, :6]
-    g_target[k] = physical_actions[k, 6]
+closing_scores = physical_actions[:, 6]
+# The gripper event handler examines closing_scores separately.
 ```
 
 This is a semantic example, not an executable robot-control script.
@@ -52,16 +51,47 @@ registers and hardware-position conversion. Miners do not implement those adapte
 
 ## Prediction and synchronous execution
 
-The protocol requires a 50-step prediction horizon: π0.5 produces a `50 × 7`
-action chunk. Miners must not change the prediction horizon or action convention.
-The workstation executes the first 25 actions by default, discards the remaining
-25, then acquires a new state and image for the next inference.
+| Setting | Value |
+|---|---|
+| Training action sampling | Nominal 30 Hz, approximately 33.3 ms per step |
+| Prediction horizon | 10 steps; model-facing action chunk `10 × 7` |
+| Joint target prefix | At most the first 3 joint targets per inference |
+| Joint command execution | Spline planning with velocity and acceleration limits; absolute joint commands sent at 100 Hz |
+| Next observation | Read a fresh image and state after segment execution and feedback completion |
 
-Execution is synchronous: read observation → infer → execute the prefix → hold
-the last target → read the next observation. Inference and action execution do
-not overlap. There is no asynchronous inference, temporal ensemble or Real-Time
-Chunking. The current protocol specifies no inference timeout; the local
-workstation waits for inference to complete.
+Execution is synchronous; inference and execution do not overlap. The planner
+retimes the selected targets. Three selected targets do not imply a fixed
+100 ms execution duration. Training sampling, camera FPS, command-send frequency
+and model inference frequency describe different parts of the system.
+
+## Gripper input and action rules
+
+During training, frame `t` uses the gripper command from frame `t-1` of the same
+trajectory. The first frame uses that trajectory's first action label. This
+one-frame shift does not test whether the physical gripper has finished moving.
+
+During deployment, the arm pauses for a gripper event. The input command state
+updates after terminal feedback is confirmed, then inference resumes. Intermediate
+opening positions are not supplied as state. Normal startup confirms the gripper
+is open and supplies `g=0`. A confirmed close/contact-candidate state supplies
+`g=1` even when the fingers remain separated. This state alone does not prove a
+successful grasp. After an empty-grasp recovery reopens the gripper and confirms
+opening, the input returns to `g=0`.
+
+| Event parameter | Value |
+|---|---|
+| Close threshold | Denormalized closing score ≥ 0.65 |
+| Open threshold | Denormalized closing score ≤ 0.35 |
+| Consecutive support | 2 consecutive prediction rows supporting the same event |
+| Minimum event interval | At least 0.5 seconds since the last confirmed event |
+| Lookahead | First 7 rows of the 10-step prediction |
+| More distant future event | Support from 3 distinct observations before locking its execution position |
+| Feedback timeout | Default maximum 8 seconds |
+
+A score strictly between 0.35 and 0.65 does not by itself trigger a new event.
+An event also needs the consecutive-support and timing conditions above.
+Timeout, fault or contradictory feedback stops the gripper and ends the trial;
+the task does not continue.
 
 ## Camera and image preprocessing
 
@@ -94,8 +124,8 @@ checkpoint's actual fine-tuning `norm_stats.json`: the 1st and 99th percentiles
 map approximately to -1 and +1. No additional model-side action scaling is defined.
 Normalized outputs outside [-1, 1] are not clipped merely for exceeding that range.
 
-State statistics describe absolute joint positions and canonical gripper position.
-Action statistics describe joint deltas and the absolute canonical gripper target,
+State statistics describe absolute joint positions and binary gripper command state.
+Action statistics describe joint deltas and binary gripper action labels,
 not absolute joint targets. For training targets, convert absolute joint targets
 to deltas against the inference/chunk reference before normalization.
 
@@ -103,9 +133,9 @@ The observation state is normalized before π0.5 inference. Model outputs are
 denormalized before forming absolute joint targets and running safety checks:
 
 ```text
-state: hardware readings → absolute canonical [q1..q6, g] → normalization
+state: measured joints + confirmed gripper command state → [q1..q6, g] → normalization
 action: normalized output → denormalization → [Δq1..Δq6, g]
-        → q_ref + Δq → safety check → robot
+        → joint targets / gripper event handling → safety check → robot
 ```
 
 Keep the native OpenPI schema:
@@ -132,11 +162,9 @@ The arm is a fixed-base UFACTORY xArm6, with an Inspire-Robots EG2-4C2 single-DO
 gripper. The miner interface does not depend on a particular xArm firmware or SDK
 version; the workstation owns that integration.
 
-The supplied protocol specifies enabled limits of **250 mm/s TCP speed** and
-**90°/s joint speed** throughout evaluation. These are specified limits, not new
-measurements performed for this documentation update. Targets must also respect
-legal xArm6 joint limits and the workstation's Cartesian safety boundary, which
-applies to every part of the arm.
+Targets must respect legal xArm6 joint limits and the workstation's Cartesian
+safety boundary, which applies to every part of the arm. The executor applies
+velocity and acceleration limits during trajectory planning.
 
 The workstation rejects unsafe commands and reports a safety error; a safety
 violation ends the episode as a failure. It does not clip dangerous targets into
@@ -145,6 +173,15 @@ a safe range.
 The flange-to-gripper TCP offset is used for geometry and safety checks, not for
 direct interpretation of joint-space actions. Each episode must use a common
 initial pose, represented as six absolute joint positions in radians.
+
+The common desktop initial pose for training and physical testing is:
+
+```text
+J1..J6 (degrees): [-7.418, -5.264, -35.183, 22.942, 40.005, -29.014]
+J1..J6 (radians): [-0.129468524, -0.091874132, -0.614059191, 0.400413437, 0.698218967, -0.506389829]
+```
+
+Use radians in model inputs. The degree values are an operator-facing reference.
 
 ### Measured installation reference
 
@@ -166,7 +203,7 @@ language prompt passed to the model, and an example video illustrating the task
 and successful completion. The task catalog is not a training dataset or
 measured qualification result.
 
-Miners supply the 7-D contract, 50-step predictions, one third-person RGB
+Miners supply the 7-D contract, 10-step predictions, one third-person RGB
 observation input, the fixed task prompt, a complete checkpoint and matching
 normalization statistics. The workstation integrates acquisition, preprocessing,
 normalization/denormalization, joint-target conversion, prefix execution, safety,
@@ -176,9 +213,7 @@ runtime compatibility or admission.
 
 ## Reference-data publication
 
-The camera-view reference above accompanies the confirmed interface.
-Complete executable example input/output, representative episodes, runtime test
-artifacts and per-task video/baseline evidence are not supplied in this update.
+The camera-view reference and installation measurements accompany this interface.
 
 When data is released, include its source, collection conditions, field schema,
 preprocessing, splits, allowed use, limitations, fixed revision and checksums.
