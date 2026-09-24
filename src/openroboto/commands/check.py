@@ -44,11 +44,14 @@ from typing import Any
 
 from openroboto_protocol import model_format
 from openroboto_protocol.model_format import (
+    AXIS_LAYOUT,
     LIBERO_LAYOUT,
     CheckpointFile,
     FormatIssueCode,
     FormatReport,
+    OpenpiLayout,
     check_checkpoint_layout,
+    openpi_layout_for,
 )
 
 from openroboto import adapters
@@ -123,13 +126,23 @@ def resolve_layout(settings: Settings) -> Any | None:
         settings.competition_adapter,
         settings.competition_base_model_family,
         settings.competition_params,
+        settings.competition_benchmark or None,
     )
 
 
 def layout_of(
-    adapter: str, base_model_family: str, params: Mapping[str, Any]
-) -> Any | None:
-    """The LingBot layout for one competition, or `None` for π0.5 (openpi).
+    adapter: str,
+    base_model_family: str,
+    params: Mapping[str, Any],
+    benchmark: str | None = None,
+) -> Any:
+    """The rule book for one competition: an `OpenpiLayout` for π0.5 (openpi),
+    picked by the season's task set, or its `LingbotLayout`.
+
+    `benchmark` decides where an openpi checkpoint keeps its norm stats: AXIS
+    seasons read them from the AXIS asset, LIBERO seasons from the LIBERO one.
+    Unknown (a `miner.yaml` written before the key existed) keeps the LIBERO
+    layout; the gate in `submit` always has the live row, so it always knows.
 
     Takes the three fields rather than a `Settings` because the same question is
     asked of two different sources, minutes apart: the snapshot for `check`
@@ -138,7 +151,7 @@ def layout_of(
     answer and a rejection is filed against the first.
     """
     if adapters.format_profile(adapter, base_model_family) == adapters.OPENPI:
-        return None
+        return openpi_layout_for(benchmark)
     return lingbot_layout(params)
 
 
@@ -280,8 +293,8 @@ def check_files(
     *inventory* is judged is the caller's business -- a local directory before
     the upload, the repository listing before the fee.
     """
-    if layout is None:
-        return check_checkpoint_layout(files)
+    if layout is None or isinstance(layout, OpenpiLayout):
+        return check_checkpoint_layout(files, layout=layout or LIBERO_LAYOUT)
     report: FormatReport = protocol_rule("check_lingbot_layout")(
         files, layout, weight_map=weight_map
     )
@@ -293,7 +306,9 @@ def check_directory(directory: Path, *, layout: Any = None) -> FormatReport:
     return check_files(
         collect_files(directory),
         layout=layout,
-        weight_map=None if layout is None else read_weight_map(directory, layout),
+        weight_map=None
+        if layout is None or isinstance(layout, OpenpiLayout)
+        else read_weight_map(directory, layout),
     )
 
 
@@ -422,7 +437,11 @@ def rules_label(layout: Any) -> str:
     π0.5 rules, which looks like a broken upload and is really a misrouted
     check. The gate inside `submit` prints the same words for the same reason.
     """
-    return "π0.5 (openpi)" if layout is None else "LingBot-VLA 2.0"
+    if layout is AXIS_LAYOUT:
+        return "π0.5 (openpi, AXIS)"
+    if layout is None or isinstance(layout, OpenpiLayout):
+        return "π0.5 (openpi)"
+    return "LingBot-VLA 2.0"
 
 
 def report_result(directory: Path, report: FormatReport, *, layout: Any = None) -> int:

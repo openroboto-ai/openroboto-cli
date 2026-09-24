@@ -381,7 +381,9 @@ def layout_is_payable(
         say("ℹ️  real track: admission does not judge layout, so neither does this")
         return True
 
-    layout = layout_of(live.adapter, live.base_model_family or "", live.params)
+    layout = layout_of(
+        live.adapter, live.base_model_family or "", live.params, live.benchmark
+    )
     repo_id = str(state.get("hf_repo_id", ""))
     revision = announced_commit(state)
     where = f"{repo_id}@{revision[:8]}"

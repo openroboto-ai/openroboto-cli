@@ -162,6 +162,12 @@ class Settings:
     #: has not decided). Resolved by `adapters.base_model_family()`, which refuses
     #: rather than guesses.
     competition_base_model_family: str = ""
+    #: `competition.benchmark` -- the task set this season is scored on
+    #: (`axis_v1.0`, `libero_pro_custom_1`, …). It says where an openpi checkpoint
+    #: keeps its norm stats. `""` = the file does not say (written before the key
+    #: existed); `openroboto check` then judges by the LIBERO layout and the gate in
+    #: `submit`, which reads the live season, by the right one.
+    competition_benchmark: str = ""
     #: That competition's own parameters, verbatim from the snapshot `init`
     #: wrote. Passed through, never interpreted here: a value the CLI
     #: understands is a value that needs a CLI release to change.
@@ -357,6 +363,7 @@ class Settings:
             competition.get("base_model_family", cfg.competition_base_model_family)
             or ""
         )
+        cfg.competition_benchmark = str(competition.get("benchmark") or "")
         cfg.competition_source = str(competition.get("source") or "")
         cfg.competition_params = _section(competition, "params")
 

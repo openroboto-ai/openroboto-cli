@@ -2451,3 +2451,54 @@ def test_an_account_that_is_already_on_the_list_is_success(
     monkeypatch.setattr(access, "HfApi", _Api)
     access.lock_and_grant(repo_id="a/b", grant_to=GRANT_TO, hf_token=MINER_TOKEN)
     assert locked == [("a/b", "manual")]
+
+
+#: An AXIS season's starting checkpoint as HuggingFace lists it: the openpi
+#: `params/` store and the norm stats under the AXIS asset -- where the AXIS
+#: evaluator reads them.
+AXIS_TREE: list[dict[str, Any]] = [
+    {"type": "file", "path": "params/_METADATA", "size": 23_507},
+    {
+        "type": "file",
+        "path": "params/ocdbt.process_0/d/46a10f7c",
+        "size": 2_985_944_852,
+        "lfs": {"oid": "4" * 64},
+    },
+    {
+        "type": "file",
+        "path": "assets/axis-v0.1-task501-runtime-v1/norm_stats.json",
+        "size": 2_317,
+    },
+]
+
+
+def _axis_verdict() -> Any:
+    return SimpleNamespace(
+        live=_live_row(
+            id=6,
+            seq=3,
+            label="AXIS v1.0 · π0.5",
+            adapter="sim_openpi",
+            base_model_family="pi0.5",
+            benchmark="axis_v1.0",
+        ),
+        kind="burn",
+        amount_tao=0.25,
+        cid=6,
+    )
+
+
+def test_an_axis_checkpoint_is_paid_for(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """🔴 The live season's task set picks the layout. Judged by the LIBERO
+    layout this correct checkpoint drew `non_canonical_norm_stats`, and the gate
+    refused to pay -- no AXIS miner could submit."""
+    monkeypatch.chdir(tmp_path)
+    save_state(SEASON_ID, _uploaded_state())
+    _checked, paid = _submitting(
+        monkeypatch, _season_settings(), tree=AXIS_TREE, verdict=_axis_verdict()
+    )
+    args = argparse.Namespace(config="miner.yaml", output_dir="", force=False)
+    assert submit_command.run(args) == 0
+    assert paid == [0.25]
