@@ -1066,12 +1066,37 @@ def test_check_builds_the_lingbot_layout_out_of_the_pinned_protocol(
     # still scores nothing, which is the whole reason this command prints warnings
 
 
+def _offline(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`check` asks the backend for the task set when miner.yaml does not say."""
+
+    def _unreachable(*_a: Any, **_k: Any) -> Any:
+        raise BackendError("connection refused", retryable=True)
+
+    monkeypatch.setattr(check_command, "fetch_competitions", _unreachable)
+
+
+def _live_seasons(monkeypatch: pytest.MonkeyPatch, *rows: dict[str, Any]) -> None:
+    base = {"track": "sim", "seq": 3, "label": "AXIS v1.0 · π0.5", "status": "active"}
+    data = [
+        Competition.model_validate(
+            {"id": i + 6, "adapter": "sim_openpi", **base, **row}
+        )
+        for i, row in enumerate(rows)
+    ]
+    monkeypatch.setattr(
+        check_command,
+        "fetch_competitions",
+        lambda *_a, **_k: SimpleNamespace(data=data),
+    )
+
+
 def test_check_keeps_judging_an_old_config_by_the_pi05_rules(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A miner.yaml written before competitions existed, and a directory with no
     config at all. Upgrading the client must not change one verdict for someone
-    who changed nothing."""
+    who changed nothing -- offline, the LIBERO layout still judges."""
+    _offline(monkeypatch)
     assert check_command.resolve_layout(Settings()) is LIBERO_LAYOUT
     assert check_command.resolve_layout(Settings.from_mapping({})) is LIBERO_LAYOUT
     absent = check_command.competition_settings(str(tmp_path / "absent.yaml"))
@@ -2632,3 +2657,34 @@ def test_an_axis_season_judges_axis_norm_stats_as_canonical(
         check_command.layout_of("sim_openpi", "pi0.5", {}, "axis_v1.1") is AXIS_LAYOUT
     )
     assert check_command.layout_of("sim_openpi", "pi0.5", {}, None) is LIBERO_LAYOUT
+
+
+def test_check_without_a_recorded_task_set_asks_the_live_season(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """🔴 Running `check` outside the workspace (a miner did, from the CLI repo)
+    left the task set unknown, and the LIBERO default flagged a correct AXIS
+    checkpoint. The live season knows which task set it is."""
+    _live_seasons(monkeypatch, {"base_model_family": "pi0.5", "benchmark": "axis_v1.0"})
+    _make_file(tmp_path / "params/_METADATA", 1024)
+    _make_file(tmp_path / "params/d/0abc", BIG_ENOUGH)
+    _make_file(tmp_path / "assets/axis-v0.1-task501-runtime-v1/norm_stats.json", 1024)
+    args = argparse.Namespace(path=str(tmp_path), config=str(tmp_path / "absent.yaml"))
+
+    assert check_command.run(args) == 0
+    out = capsys.readouterr().out
+    assert "rules: π0.5 (openpi, AXIS)" in out
+    assert "non_canonical_norm_stats" not in out
+
+
+def test_check_does_not_guess_between_two_live_task_sets(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _live_seasons(
+        monkeypatch,
+        {"base_model_family": "pi0.5", "benchmark": "axis_v1.0"},
+        {"base_model_family": "pi0.5", "benchmark": "libero_pro_custom_1", "seq": 4},
+    )
+    settings = check_command.competition_settings(str(tmp_path / "absent.yaml"))
+    assert check_command.live_openpi_layout(settings) is None
+    assert "LIBERO layout" in capsys.readouterr().out

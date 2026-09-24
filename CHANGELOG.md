@@ -4,6 +4,19 @@ Every entry answers one question before it lists anything: **does a miner have t
 change something, and what breaks if they do not?** A diff summary without "who
 has to act" is not usable by the people who installed this.
 
+## 1.5.1
+
+### Nothing to do; `openroboto check` stops warning about correct AXIS checkpoints
+
+When `miner.yaml` does not record the season's task set — a workspace from before
+1.5.0, or `check` run from another directory with no config — `check` used the
+LIBERO layout and flagged an AXIS checkpoint's correctly placed norm stats as
+`non_canonical_norm_stats`. It now asks the backend for the live season (one
+anonymous request) and judges by that season's task set; the `rules:` line says
+`π0.5 (openpi, AXIS)`. If the backend cannot be reached, or more than one π0.5
+season could be meant, it keeps the LIBERO layout and says so. `submit` was
+already judging by the live season and is unchanged.
+
 ## 1.5.0
 
 ### If you mine the AXIS simulation season: upgrade before you submit
