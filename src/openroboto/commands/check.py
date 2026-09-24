@@ -40,7 +40,7 @@ import json
 from collections.abc import Iterable, Mapping
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 from openroboto_protocol import model_format
 from openroboto_protocol.model_format import (
@@ -55,6 +55,7 @@ from openroboto_protocol.model_format import (
 )
 
 from openroboto import adapters
+from openroboto.backend_api import BackendError, fetch_competitions
 from openroboto.competition import workspace_competition_id
 from openroboto.competition_state import resolve_output_dir
 from openroboto.config import ConfigError, Settings
@@ -88,8 +89,62 @@ def run(args: argparse.Namespace) -> int:
         return 1
 
     layout = resolve_layout(settings)
+    if isinstance(layout, OpenpiLayout) and not settings.competition_benchmark:
+        layout = live_openpi_layout(settings) or layout
     report = check_directory(directory, layout=layout)
     return report_result(directory, report, layout=layout)
+
+
+_LIBERO_FALLBACK: Final = (
+    "   judging by the LIBERO layout; `openroboto submit` re-checks against the "
+    "live season"
+)
+
+
+def live_openpi_layout(settings: Settings) -> OpenpiLayout | None:
+    """Where a π0.5 checkpoint keeps its norm stats, when `miner.yaml` does not
+    say which task set the season runs -- asked of the backend, once.
+
+    A `miner.yaml` from before 1.5.0, or no config at all (running `check` from
+    some other directory), leaves the task set unknown. Defaulting to the LIBERO
+    layout then tells an AXIS miner their correctly placed stats are in the wrong
+    place, and the one "fix" that silences it breaks the AXIS evaluator. The live
+    season knows; asking costs one anonymous GET.
+
+    The season is the one the snapshot names, else the only π0.5 simulation
+    season taking submissions. Anything else -- backend unreachable, no such
+    season, two candidates -- returns `None` and the caller keeps the LIBERO
+    layout, saying so: `submit` re-judges against the live row before any fee,
+    so a wrong guess here costs a warning, never a burn.
+    """
+    try:
+        seasons = fetch_competitions(settings.backend_url).data
+    except (BackendError, OSError) as exc:
+        say(f"ℹ️  could not reach {settings.backend_url} for the task set ({exc})")
+        say(_LIBERO_FALLBACK)
+        return None
+    wanted = settings.competition.get("id")
+    candidates = [
+        season
+        for season in seasons
+        if season.benchmark
+        and (
+            season.id == wanted
+            if wanted
+            else season.track == "sim" and season.base_model_family == "pi0.5"
+        )
+    ]
+    benchmarks = {season.benchmark for season in candidates}
+    if len(benchmarks) != 1:
+        say("ℹ️  could not tell which season's task set this checkpoint is for")
+        say(_LIBERO_FALLBACK)
+        return None
+    season = candidates[0]
+    say(
+        f"ℹ️  miner.yaml does not record the task set; using the live season "
+        f"{season.label} ({season.benchmark})"
+    )
+    return openpi_layout_for(season.benchmark)
 
 
 def competition_settings(path: str) -> Settings:
