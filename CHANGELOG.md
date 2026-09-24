@@ -4,6 +4,34 @@ Every entry answers one question before it lists anything: **does a miner have t
 change something, and what breaks if they do not?** A diff summary without "who
 has to act" is not usable by the people who installed this.
 
+## 1.5.0
+
+### If you mine the AXIS simulation season: upgrade before you submit
+
+`pip install -U openroboto`
+
+AXIS checkpoints keep their normalization stats at
+`assets/axis-v0.1-task501-runtime-v1/norm_stats.json` — that is where the AXIS
+evaluator reads them, and where the season's starting checkpoint ships them.
+1.4.0 judged every π0.5 checkpoint by the LIBERO layout, so a correct AXIS
+checkpoint drew `non_canonical_norm_stats`, and `openroboto submit` refused to pay
+for it. **Do not move your stats to the LIBERO path to silence that warning** —
+the AXIS evaluator would then find none.
+
+1.5.0 picks the layout from the season's task set (`benchmark` on the season
+record). The gate in `submit` reads it from the live season, so it is right even
+for a workspace created with an older CLI. `openroboto check` reads it from
+`miner.yaml`; a file written before 1.5.0 does not record it, so `check` may still
+print that warning there — the gate in `submit` is the one that decides, and it
+reads the live season. Adding `benchmark: axis_v1.0` under `competition:` in
+`miner.yaml` makes `check` agree. The `rules:` line says
+which one judged you: `π0.5 (openpi, AXIS)` or `π0.5 (openpi)`.
+
+### Nothing else changes
+
+LIBERO and LingBot seasons are judged exactly as before. Requires
+`openroboto-protocol==0.12.0` (installed with it).
+
 ## 1.4.0
 
 ### You do not have to act, but your repository changes

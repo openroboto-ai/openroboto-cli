@@ -86,6 +86,10 @@ SECTION_KEYS = (
     #: checked". `real/1` is `None` today. Defaulting it to `openpi` would judge a
     #: submission somebody already paid for by rules nobody chose for that season.
     "base_model_family",
+    #: Which task set the season is scored on. Decides where an openpi
+    #: checkpoint keeps its norm stats (AXIS vs LIBERO), so `openroboto check`
+    #: can judge offline by the same layout the evaluator loads.
+    "benchmark",
 )
 
 

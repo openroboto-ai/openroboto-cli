@@ -18,6 +18,8 @@ from typing import Any
 import pytest
 import yaml
 from openroboto_protocol.model_format import (
+    AXIS_LAYOUT,
+    LIBERO_LAYOUT,
     CheckpointKind,
     FormatIssue,
     FormatIssueCode,
@@ -1070,8 +1072,8 @@ def test_check_keeps_judging_an_old_config_by_the_pi05_rules(
     """A miner.yaml written before competitions existed, and a directory with no
     config at all. Upgrading the client must not change one verdict for someone
     who changed nothing."""
-    assert check_command.resolve_layout(Settings()) is None
-    assert check_command.resolve_layout(Settings.from_mapping({})) is None
+    assert check_command.resolve_layout(Settings()) is LIBERO_LAYOUT
+    assert check_command.resolve_layout(Settings.from_mapping({})) is LIBERO_LAYOUT
     absent = check_command.competition_settings(str(tmp_path / "absent.yaml"))
     assert absent.competition_adapter == ""
 
@@ -2597,3 +2599,36 @@ def test_status_says_so_rather_than_computing_a_place_from_part_of_the_list(
     _roster(monkeypatch, [_entry(mine)], total=1200)
     status_command.say_roster(_roster_settings(), mine)
     assert "most recent" in capsys.readouterr().out
+
+
+def test_an_axis_season_judges_axis_norm_stats_as_canonical(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """An AXIS season's starting checkpoint keeps its norm stats under the AXIS
+    asset, which is where the evaluator reads them. Judged by the LIBERO rules it
+    drew `non_canonical_norm_stats`, and `submit` refuses to pay on a warning."""
+    settings = Settings.from_mapping(
+        {
+            "competition": {
+                "adapter": "sim_openpi",
+                "base_model_family": "pi0.5",
+                "benchmark": "axis_v1.0",
+            }
+        }
+    )
+    assert settings.competition_benchmark == "axis_v1.0"
+    layout = check_command.resolve_layout(settings)
+    assert layout is AXIS_LAYOUT
+
+    _make_file(tmp_path / "params/_METADATA", 1024)
+    _make_file(tmp_path / "params/d/0abc", BIG_ENOUGH)
+    _make_file(tmp_path / "assets/axis-v0.1-task501-runtime-v1/norm_stats.json", 1024)
+    report = check_command.check_directory(tmp_path, layout=layout)
+    assert report.ok and report.warnings == ()
+    assert check_command.rules_label(layout) == "π0.5 (openpi, AXIS)"
+
+    # The live row is what the gate before the fee reads.
+    assert (
+        check_command.layout_of("sim_openpi", "pi0.5", {}, "axis_v1.1") is AXIS_LAYOUT
+    )
+    assert check_command.layout_of("sim_openpi", "pi0.5", {}, None) is LIBERO_LAYOUT
