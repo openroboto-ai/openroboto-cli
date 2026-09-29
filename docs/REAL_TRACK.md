@@ -35,7 +35,7 @@ inside a real track's pool or retroactively redistribute accrued season rewards.
     before the access list, so a private repository refuses the official account as
     well, and the entry is rejected with the fee already spent.
 
-## 2. Task set and qualification bar
+## 2. Task set, baseline gate and qualification
 
 For the workstation camera view and model image preprocessing, see the
 [camera-view reference](WORKSTATION_DATA.md#camera-view-reference).
@@ -47,21 +47,26 @@ Each submitted model runs 10 trials per task, for 70 trials in its selected
 competition. The two tracks retain separate results and qualification baselines.
 Two-object Rearrangement counts as one task, with both stages in each trial.
 
-### Historical single-block baseline reference
+### Baseline task (the qualification gate)
 
-The earlier task below is retained as a historical reference. It is separate
-from the seven-task suite and does not add an eighth task.
+Before its scored trials, every entry runs the **green-block baseline task**:
+"Pick up the green block." It is the gate for the formal evaluation, not an eighth
+scored task, and it never counts toward the formal score.
 
 **Pick up one green block.** Place a single green block on the tabletop. The
 physical xArm 6 must grasp the block with its gripper and lift it clear of the
 tabletop.
 
 - **Object:** one green block, 35 mm high and 33 mm wide.
-- **Success:** the recorded trial shows the block held by the gripper with visible
+- **Success:** the recorded attempt shows the block held by the gripper with visible
   separation from the tabletop.
 - Touching or pushing the block, or closing the gripper without lifting it, does
   not count as success.
 - No basket, plate, placement step, or additional object is required.
+- An entry gets up to the season's published number of baseline attempts. If at
+  least one attempt succeeds, the entry goes on to the formal trials; if none
+  succeeds, the formal tasks are not run and the entry scores 0.
+- Every baseline attempt is recorded on video and published with the results.
 
 Reference photographs of the block (not to scale):
 
@@ -70,23 +75,24 @@ Reference photographs of the block (not to scale):
 
 Height: **35 mm**. Width: **33 mm**. The remaining dimension is not specified.
 
-This describes the earlier baseline task, not a baseline score or evidence of a completed
-evaluation. The published, locked specification remains authoritative for each
-season; this documentation update does not change an already locked task set.
+The published, locked specification remains authoritative for each season.
 
-### Qualification bar
+### Qualification and the champion
 
-- The **task list, the success criteria and the qualification bar are published and
-  locked at the submission deadline**. Nothing about how a season is scored changes
-  after that moment.
-- The bar is derived from the official baseline model: the median score of five
-  baseline runs on the season's task set, plus at least one successful trial in each
-  task category.
+- The **task list, the success criteria, the number of baseline attempts and the
+  champion line are published on the season record and locked at the submission
+  deadline**. Nothing about how a season is scored changes after that moment.
+- An entry **qualifies** when it is valid and has passed the baseline task. Every
+  qualified entry shares the 5% pool equally, whatever its formal score.
+- The **formal score** is the number of successful formal trials out of 70. Trials
+  lost to a workcell fault are re-run and do not count.
+- The **champion** is the first-ranked qualified entry, provided its formal score
+  reaches the season's champion line. Equal scores go to the earlier on-chain
+  submission. If the first-ranked entry falls short of the line, the season has no
+  champion: the champion's share is burned rather than passed down.
 - Plagiarism is a hard disqualification. An entry found to be a copy or trivial
-  re-upload of another team's model takes nothing, whatever its score. If that leaves
-  the top of the board without a qualified entry, the champion's share is burned rather
-  than passed down; if no legitimate entry qualifies at all, the whole season's prize is
-  burned.
+  re-upload of another team's model takes nothing, whatever its score. If no
+  legitimate entry qualifies at all, the whole season's prize is burned.
 
 ## 3. Prize pool and settlement
 
@@ -108,7 +114,7 @@ is **15% simulation / 42.5% real π0.5 / 42.5% real LingBot-VLA 2.0**.
 - Settlement happens **once per season for each real track**, on that track's
   accrued pool. The following percentages are within the pool, not track allocations:
   - **95%** to the single champion, vested linearly over **120 days**;
-  - **5%** shared equally by every entry that clears the qualification bar, vested over
+  - **5%** shared equally by every qualified entry, including the champion, vested over
     **30 days**.
 - Vesting schedules are independent: a later season never interrupts an earlier one.
 - Anything the rules stop from reaching a rewarded entry is **burned**, and the burn is
@@ -164,7 +170,7 @@ proof.
 | Copy or trivial re-upload of another team's model | Disqualified, whatever the score |
 | Repository or rewarded revision left gated, made private or deleted during the claim period | Payouts stop; the unpaid remainder is burned |
 | Challenge upheld during the claim period | Unpaid remainder burned; the ruling is published |
-| No entry clears the qualification bar | The whole season's prize is burned, publicly recorded |
+| No entry passes the baseline task | The whole season's prize is burned, publicly recorded |
 
 ## 7. Finality
 
