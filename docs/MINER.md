@@ -111,6 +111,23 @@ openroboto submit
 openroboto status
 ```
 
+### Your repository is gated while it is evaluated
+
+Simulation seasons now name an evaluation account, the same way real-robot seasons
+do. `openroboto submit` (1.4.0 or later) makes your model repository **gated** and
+puts that account on its access list **before** it pays the entry fee, using the
+token in your `miner.yaml`. Other people still see that the repository exists,
+its file names and sizes, and your `README.md`; downloading the weights returns
+401.
+
+- **Do not make the repository private.** Hugging Face checks visibility before the
+  access list, so a private repository refuses the evaluator too, and the fee is
+  not refunded. Leave it public; `submit` gates it.
+- If `submit` reports it could not gate or grant, fix the access problem and run it
+  again. It stops before the fee, and re-running resumes the upload.
+- The champion's checkpoint is still published by OpenRoboto as the season's
+  public snapshot, so the next season has a starting point to build on.
+
 ### Testing against something other than mainnet
 
 `environment` picks the subnet and the backend together — they are one decision,
