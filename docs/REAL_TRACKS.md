@@ -49,8 +49,8 @@ Publishing the contract is not proof of a tested deployment.
 ## Tasks, qualification and rewards
 
 Both physical tracks share the [seven-task evaluation catalog](REAL_TASKS.md),
-with 10 trials per task and 70 trials per submitted model in its selected
-competition. The catalog includes five single-object placement tasks,
+with up to 10 trials per task and 70 trials per submitted model in its selected
+competition; a task whose first 3 trials all fail stops there. The catalog includes five single-object placement tasks,
 two-object rearrangement and plug insertion.
 
 Use the selected competition's published task specification and baseline evidence.

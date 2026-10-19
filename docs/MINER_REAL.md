@@ -25,8 +25,9 @@ mainnet. Do not copy a competition ID or fee from another environment.
 
 ## 2. Prepare a compatible checkpoint
 
-Read the [shared evaluation task catalog](REAL_TASKS.md): seven tasks, 10 trials
-per task and 70 trials per model in the selected real-robot competition.
+Read the [shared evaluation task catalog](REAL_TASKS.md): seven tasks, up to 10
+trials per task and 70 trials per model in the selected real-robot competition.
+A task whose first 3 trials all fail stops there (see the catalog's early-stop rule).
 
 Use the selected competition's official base reference and the published
 [workstation model interface](WORKSTATION_DATA.md). Follow that model family's export procedure;
