@@ -43,8 +43,10 @@ For the workstation camera view and model image preprocessing, see the
 ### Shared evaluation task set
 
 π0.5 and LingBot-VLA 2.0 use the same [seven-task catalog](REAL_TASKS.md).
-Each submitted model runs 10 trials per task, for 70 trials in its selected
-competition. The two tracks retain separate results and qualification baselines.
+Each submitted model runs up to 10 trials per task, for up to 70 trials in its
+selected competition. Each task starts with 3 trials: if none of them succeeds, that task stops
+there and its remaining trials count as failures; if any of them succeeds, the
+task runs all 10. The two tracks retain separate results and qualification baselines.
 Two-object Rearrangement counts as one task, with both stages in each trial.
 
 ### Baseline task (the qualification gate)
