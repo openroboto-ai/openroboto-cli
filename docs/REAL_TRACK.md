@@ -1,6 +1,7 @@
 # Real-Robot Track — prize pool, claim period and challenges
 
-> **Status**: current · **Updated**: 2026-09-13 · **Audience**: miners entering the
+> **Status**: paused — no real-robot season is open while the xArm 6 workcell is
+> upgraded · **Updated**: 2026-10-27 · **Audience**: miners entering the
 > xArm 6 seasons. Where a number here disagrees with the season row on
 > `GET /api/v1/competitions`, the season row wins.
 
@@ -13,11 +14,17 @@ what the fee costs and when it is wasted is in [PAYMENT.md](./PAYMENT.md).
 Parallel π0.5 and LingBot physical-track documentation is available in
 [REAL_TRACKS.md](REAL_TRACKS.md), with a [miner guide](MINER_REAL.md) and the
 [confirmed workstation interface](WORKSTATION_DATA.md).
-The current allocation is 15% to simulation, 42.5% to real π0.5 and 42.5% to
-real LingBot-VLA 2.0. These track-level shares do not change the settlement split
-inside a real track's pool or retroactively redistribute accrued season rewards.
+**The track is paused.** No real-robot season is opening while the xArm 6 workcell
+is upgraded; the two most recent seasons have finished and their results stay
+published. The real-robot track currently holds **0%** of track emissions. Its
+former share moved to egocentric data collection, which now holds 85% alongside
+simulation's 15% — the two add up to 100%, so nothing is burned at the track
+level. Rewards already accrued in finished seasons are unaffected and keep their
+published unlock schedules. These track-level shares do not change the
+settlement split inside a finished season's pool.
 
-- The track runs as **tournament seasons**, back-to-back, roughly one a month. Each
+- The track is **paused** while the workcell is upgraded; no season is open. When it
+  resumes it runs as **tournament seasons**, back-to-back, roughly one a month. Each
   season is a fixed submission window, then evaluation on a physical UFACTORY xArm 6
   workcell, then **one champion**. The window and evaluation dates are on the season
   record.
@@ -99,10 +106,13 @@ The published, locked specification remains authoritative for each season.
 ## 3. Prize pool and settlement
 
 The current [allocation across tracks](REAL_TRACKS.md#current-emission-allocation)
-is **15% simulation / 42.5% real π0.5 / 42.5% real LingBot-VLA 2.0**.
+is **15% simulation / 85% egocentric data collection / 0% real robot**. The
+real-robot track is paused during the workcell hardware upgrade; its former
+share moved to data collection so the total stays at 100% and nothing is burned.
 
-- Each real track's 42.5% share funds its own seasonal reward accounting.
-  Keep competition and season records distinct when checking accruals and payouts.
+- A finished real-robot season keeps the share it accrued while it was live.
+  Keep competition and season records distinct when checking accruals and payouts;
+  the move above does not rewrite either.
 - A season's share accrues to its pool **from when submissions open until evaluation
   ends** — `submit_opens_at` to `eval_ends_at` on the season record.
 - Entry-fee payments are separate from prize-pool rewards. Do not infer the
