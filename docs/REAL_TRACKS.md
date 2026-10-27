@@ -1,10 +1,15 @@
 # Parallel real-robot tracks
 
-> Updated 2026-09-07. The confirmed workstation interface is now published in
-> [WORKSTATION_DATA.md](WORKSTATION_DATA.md). This is not a competition-opening notice.
-> Only competitions published as open by the selected environment can be entered.
+> **Paused 2026-10-27.** No real-robot season is open while the xArm 6 workcell is
+> upgraded. The rules below describe the track when it resumes; finished seasons
+> remain published. This is not a competition-opening notice. Only competitions
+> published as open by the selected environment can be entered.
+> The confirmed workstation interface is published in
+> [WORKSTATION_DATA.md](WORKSTATION_DATA.md).
 
-OpenRoboto runs two parallel physical-robot tracks alongside simulation:
+OpenRoboto has run two parallel physical-robot tracks alongside simulation. Both
+are paused while the workcell is upgraded; their rules are kept here for when the
+track resumes:
 
 | Physical track | Model family | Relationship |
 |---|---|---|
@@ -60,19 +65,23 @@ failures must remain distinguishable in the evaluation record.
 
 ## Current emission allocation
 
-Emissions allocated across the three tracks are distributed as follows:
+**The real-robot track is paused** while the xArm 6 workcell is upgraded. No
+real-robot season is open and the track holds no emission share during the pause.
+Its former share moved to egocentric data collection, leaving sim and data adding
+up to 100% — nothing is burned at the track level. Finished seasons keep their
+published standings and unlock schedules.
 
-| Track | Share of track emissions |
-|---|---|
-| Simulation | 15% |
-| Real Robot — π0.5 | 42.5% |
-| Real Robot — LingBot-VLA 2.0 | 42.5% |
-| Total | 100% |
+| Track | Share of track emissions | Status |
+|---|---|---|
+| Simulation | 15% | in effect |
+| Egocentric data collection | 85% | in effect |
+| Real Robot — π0.5 / LingBot-VLA 2.0 | 0% | paused · workcell hardware upgrade |
+| Total | 100% | |
 
-This allocation is in effect. These percentages divide emissions between tracks;
-they are separate from ranking weights within simulation and settlement shares
-within a real-robot prize pool. Each real track accounts for its own seasonal
-rewards; an entry in one track does not share the other track's pool.
+These percentages divide emissions between tracks; they are separate from
+ranking weights within simulation and settlement shares within a real-robot
+prize pool. A finished real-robot season keeps the share it accrued while it was
+live; an entry in one track does not share another track's pool.
 
 The simulation Top 3 weights of 70 / 20 / 10 are relative weights within the
 simulation track's 15% allocation. Real-robot settlement remains 95% to the
