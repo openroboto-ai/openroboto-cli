@@ -520,3 +520,145 @@ def test_the_roster_reads_payment_status_not_burn_status(
     assert listed.data[0].payment_status == "paid"
     assert "/api/v1/competitions/3/roster?" in seen[0].full_url
     assert "hotkey=5Hb5muCtV2SqiVkZ" in seen[0].full_url
+
+
+# ─── contributor identity ────────────────────────────────────
+#
+# The messages are fetched from the backend, and the two signatures on `bind`
+# are the proof that a hotkey belongs to the author. Nothing here may invent a
+# message locally or drop a signature on the way out.
+
+CONTRIBUTOR_ID = "07ec98a481181f8494f831703121d1e9041ba5e7bee012c2920cd735e3a65584"
+PUBLIC_KEY = "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8"
+HOTKEY = "5CcyqxXnJucaCnQQvvUg5EPzj1uoNAxACZvzArHw5aVDvgNH"
+SS58 = "5FCM8VvFKfKzQnmkT7X9kDY6xMcgeGYRK8tmSbfwpXyM1CvS"
+
+
+def _envelope(data: Any) -> dict[str, Any]:
+    return {"data": data, "meta": {"request_id": REQUEST_ID}}
+
+
+def _contributor_row(**overrides: Any) -> dict[str, Any]:
+    row = {
+        "contributor_id": CONTRIBUTOR_ID,
+        "public_key": PUBLIC_KEY,
+        "reward_address": SS58,
+        "status": "active",
+        "merged_into": None,
+        "created_at": "2026-10-29T00:00:00Z",
+        "updated_at": "2026-10-29T00:00:00Z",
+    }
+    return {**row, **overrides}
+
+
+def test_the_message_is_fetched_with_all_its_fields(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """🔴 The backend rebuilds the text; a client-side copy signs different
+    bytes and every request comes back "signature invalid"."""
+    seen = _capture(monkeypatch, _envelope({"message": "openroboto:contributor:v1\n"}))
+    text = backend_api.fetch_contributor_message(
+        "https://api.example",
+        "register",
+        public_key=PUBLIC_KEY,
+        reward_address=SS58,
+    )
+    assert text == "openroboto:contributor:v1\n"
+    url = seen[0].full_url
+    assert "/api/v1/contributors/message?" in url
+    assert "kind=register" in url
+    assert f"public_key={PUBLIC_KEY}" in url
+    assert f"reward_address={SS58}" in url
+
+
+def test_register_posts_the_proof_and_no_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen = _capture(monkeypatch, _envelope(_contributor_row()))
+    contributor = backend_api.register_contributor(
+        "https://api.example",
+        public_key=PUBLIC_KEY,
+        reward_address=SS58,
+        signature="ab" * 64,
+    )
+    request = seen[0]
+    assert request.full_url == "https://api.example/api/v1/contributors"
+    assert request.get_method() == "POST"
+    assert request.get_header("Content-type") == "application/json"
+    body = json.loads(request.data)
+    assert body == {
+        "public_key": PUBLIC_KEY,
+        "reward_address": SS58,
+        "signature": "ab" * 64,
+    }
+    # The server derives the id; sending one would be choosing a primary key.
+    assert "contributor_id" not in body
+    assert contributor.contributor_id == CONTRIBUTOR_ID
+
+
+def test_bind_posts_both_signatures(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen = _capture(
+        monkeypatch,
+        _envelope({"hotkey": HOTKEY, "created_at": "2026-10-29T00:00:00Z"}),
+    )
+    binding = backend_api.bind_contributor_hotkey(
+        "https://api.example",
+        CONTRIBUTOR_ID,
+        hotkey=HOTKEY,
+        signature="11" * 64,
+        hotkey_signature="22" * 64,
+    )
+    body = json.loads(seen[0].data)
+    assert body == {
+        "hotkey": HOTKEY,
+        "signature": "11" * 64,
+        "hotkey_signature": "22" * 64,
+    }
+    assert binding.hotkey == HOTKEY
+    assert (
+        seen[0].full_url
+        == f"https://api.example/api/v1/contributors/{CONTRIBUTOR_ID}/hotkeys"
+    )
+
+
+def test_a_contributor_401_does_not_tell_you_to_copy_an_api_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A 401 here means the signature did not verify, not "you need a key".
+
+    The generic `KEY_HINT` would send a miner to `control.json` -- a file they
+    do not own and that has nothing to do with this request. The fix has to be
+    "re-sign the text the backend gave you".
+    """
+    _fail_with(
+        monkeypatch,
+        _http_error(401, _error_envelope("INVALID_CONTRIBUTOR_PROOF", False)),
+    )
+    with pytest.raises(backend_api.BackendError) as excinfo:
+        backend_api.register_contributor(
+            "https://api.example",
+            public_key=PUBLIC_KEY,
+            reward_address=SS58,
+            signature="ab" * 64,
+        )
+    text = str(excinfo.value)
+    assert "re-sign" in text
+    assert "API key" not in text
+
+
+def test_hotkey_signature_failure_points_at_the_hotkey(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _fail_with(
+        monkeypatch,
+        _http_error(401, _error_envelope("HOTKEY_SIGNATURE_INVALID", False)),
+    )
+    with pytest.raises(backend_api.BackendError) as excinfo:
+        backend_api.bind_contributor_hotkey(
+            "https://api.example",
+            CONTRIBUTOR_ID,
+            hotkey=HOTKEY,
+            signature="11" * 64,
+            hotkey_signature="22" * 64,
+        )
+    assert "sr25519 hotkey signature" in str(excinfo.value)

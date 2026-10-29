@@ -102,7 +102,12 @@ from openroboto_protocol.model_format import FormatIssueCode, FormatReport
 from openroboto_protocol.model_hash import model_hash_from_hf_tree
 from openroboto_protocol.schemas import Competition
 
-from openroboto.backend_api import BackendError, fetch_roster
+from openroboto.backend_api import (
+    BackendError,
+    ContributorDetail,
+    fetch_contributor,
+    fetch_roster,
+)
 from openroboto.commands.announce import perform_announce
 from openroboto.commands.burn import perform_burn, perform_transfer
 from openroboto.commands.check import (
@@ -129,6 +134,7 @@ from openroboto.competition_state import (
 )
 from openroboto.config import Settings
 from openroboto.console import fail, say
+from openroboto.contributor import ContributorKeyError, load_key
 from openroboto.huggingface import TreeError, fetch_tree
 from openroboto.huggingface.access import AccessError, grant_to_of, lock_and_grant
 
@@ -137,6 +143,16 @@ from openroboto.huggingface.access import AccessError, grant_to_of, lock_and_gra
 #: one season, so a second page would mean a miner who has paid a thousand entry
 #: fees for one competition.
 ROSTER_LIMIT = 1000
+
+#: The task track, when the installed protocol package knows it.
+#:
+#: ⚠️ **`getattr`, not `Track.TASK`.** The pinned release on PyPI predates the
+#: task track, and every simulation / real-track payment evaluates this line.
+#: A bare attribute access would turn "this release has no task track" into an
+#: `AttributeError` on the money path of two tracks that have nothing to do
+#: with contributors. `None` means "no task track at all", so the gate is off --
+#: exactly the old behaviour.
+_TASK_TRACK = getattr(Track, "TASK", None)
 
 
 def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
@@ -217,6 +233,8 @@ def run(args: argparse.Namespace) -> int:
         # reading them.
         try:
             verdict = resolve_competition(settings, snapshot, datetime.now(UTC))
+            if not contributor_is_bound(settings, state, verdict.live):
+                return 1
             if not layout_is_payable(settings, state, verdict.live):
                 return 1
             if not slot_is_free(settings, state, verdict):
@@ -291,6 +309,148 @@ def _no_season(config_path: str) -> None:
         f"   A fee paid with no season attached is filed under whichever season "
         f"the backend defaults to, and it is not refunded."
     )
+
+
+def contributor_is_bound(
+    settings: Settings, state: dict[str, Any], live: Competition
+) -> bool:
+    """Will the backend accept this submission's author, or refuse it after the
+    fee? False = do not pay.
+
+    🔴 **Only the task track needs this**, and there it is not optional: the
+    backend resolves the author from the submitting hotkey's active contributor
+    binding at admission time. An unbound hotkey is refused with
+    `contributor_unbound` -- *after* the entry fee, with no refund. The
+    simulation and real tracks are unchanged: they do not consult a
+    contributor identity at all, so this gate returns True before any request.
+
+    The check happens here, before the fee, for the same reason the layout gate
+    does. Everything it can find is fixable by typing one command; everything
+    it misses is paid for.
+
+    A migrated identity is judged the way admission judges it: the binding may
+    sit on an older id, but the **end of the migration chain** has to be
+    active. `migrate` does not move existing bindings, so the key file records
+    the ids it inherited (`migrated_from`) and all of them are checked. Without
+    that, rotating a key would produce a gate that refuses a submission the
+    backend accepts.
+    """
+    if _TASK_TRACK is None or live.track != _TASK_TRACK:
+        return True
+
+    hotkey = str(state.get("hotkey_ss58") or settings.hotkey_ss58 or "")
+    if not hotkey:
+        fail(
+            f"This workspace enters {live.label}, whose task track ties a "
+            f"submission to a contributor identity, but the workspace does not "
+            f"say which hotkey will submit it -- so the binding cannot be "
+            f"checked. **Nothing was paid and nothing was sent on chain.**\n"
+            f"   → set subnet.hotkey_ss58 in miner.yaml (or the wallet settings "
+            f"that make `openroboto submit` use a hotkey) and run it again"
+        )
+        return False
+
+    try:
+        key = load_key()
+    except ContributorKeyError as exc:
+        fail(
+            f"This hotkey ({hotkey}) has no contributor identity on this "
+            f"machine, so {live.label}'s task track would refuse the submission "
+            f"with `contributor_unbound` **after taking the entry fee, without "
+            f"refunding it**. Nothing was paid.\n"
+            f"   {exc}"
+        )
+        return False
+
+    # 🔴 **Check the identities this key inherited too, not only its own.**
+    # `migrate` leaves existing bindings on the old identity, and admission
+    # resolves them forward along `merged_into`. Looking only at the current id
+    # would refuse a submission the backend accepts -- the miner would be told
+    # to bind a hotkey the backend already reports as belonging to the old
+    # identity, which is a loop they cannot get out of.
+    for identity_id in (key.contributor_id, *key.migrated_from):
+        try:
+            detail = fetch_contributor(settings.backend_url, identity_id)
+            owner = _end_of_migration_chain(settings, detail)
+        except BackendError as exc:
+            if exc.code == "CONTRIBUTOR_NOT_FOUND":
+                if identity_id != key.contributor_id:
+                    # An ancestor this backend no longer lists: try the rest
+                    # rather than refusing on a bookkeeping gap.
+                    continue
+                fail(
+                    f"The contributor identity {key.contributor_id} (from "
+                    f"{key.path}) is not registered on {settings.backend_url}, "
+                    f"so {live.label}'s task track would refuse the submission "
+                    f"with `contributor_unbound` **after taking the entry "
+                    f"fee**. Nothing was paid.\n"
+                    f"   → `openroboto identity register --reward-address <your "
+                    f"ss58>` registers it\n"
+                    f"   → then `openroboto identity bind` binds hotkey {hotkey}"
+                )
+            else:
+                fail(
+                    f"Could not ask {settings.backend_url} whether hotkey "
+                    f"{hotkey} is bound to a contributor identity, so **nothing "
+                    f"was paid and nothing was sent on chain**. A backend that "
+                    f"cannot answer this is not one to pay on the assumption "
+                    f"that the answer is yes -- the task track refuses unbound "
+                    f"hotkeys without refunding the fee.\n"
+                    f"   {exc}\n"
+                    f"   → run `openroboto submit` again once the backend answers"
+                )
+            return False
+
+        if owner.status != "active":
+            fail(
+                f"The contributor identity behind hotkey {hotkey} has been "
+                f"migrated and the migration chain does not end at an active "
+                f"identity, so {live.label}'s task track would refuse the "
+                f"submission with `contributor_unbound`. **Nothing was paid.**\n"
+                f"   identity: {identity_id} (key file {key.path})\n"
+                f"   → use the key that received the migration, then "
+                f"`openroboto identity show` to confirm it is active"
+            )
+            return False
+
+        if any(binding.hotkey == hotkey for binding in detail.bindings):
+            return True
+
+    inherited = (
+        f" (also checked the identities this key inherited: "
+        f"{', '.join(key.migrated_from)})"
+        if key.migrated_from
+        else ""
+    )
+    fail(
+        f"Hotkey {hotkey} is not bound to contributor {key.contributor_id}"
+        f"{inherited}, so {live.label}'s task track would refuse the submission "
+        f"with `contributor_unbound` **after taking the entry fee, without "
+        f"refunding it**. Nothing was paid.\n"
+        f"   → `openroboto identity bind` binds the hotkey from {settings.hotkey} "
+        f"in your wallet (the contributor key and the hotkey's own key both "
+        f"sign)"
+    )
+    return False
+
+
+def _end_of_migration_chain(
+    settings: Settings, detail: ContributorDetail
+) -> ContributorDetail:
+    """Follow `merged_into` to the identity that controls the earnings now.
+
+    Admission resolves lineage the same way. Bounded by the number of hops so a
+    cycle in the data cannot hang the CLI; a cycle is a backend bug, and
+    returning the last row makes the caller refuse rather than guess.
+    """
+    seen: set[str] = set()
+    current = detail
+    while current.status != "active" and current.merged_into:
+        if current.contributor_id in seen:
+            break
+        seen.add(current.contributor_id)
+        current = fetch_contributor(settings.backend_url, current.merged_into)
+    return current
 
 
 def evaluator_can_read(

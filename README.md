@@ -80,6 +80,7 @@ Real-machine setup, systemd, custom strategies: [docs/MINER_DEPLOY.md](docs/MINE
 | `openroboto build` | Build the training image from the build context shipped inside the package (no clone, no network). Refuses for a competition this client has no image for, rather than filling that competition's image name with the π0.5 one |
 | `openroboto train [-s script.py]` | Train once; your strategy script is mounted into the container |
 | `openroboto check [PATH]` | Verify checkpoint layout with the rules the evaluator uses — **no GPU, no network, no second repository** |
+| `openroboto identity keygen \| show \| register \| bind \| unbind \| migrate` | The persistent contributor identity an authored task is paid to. `keygen` writes an Ed25519 key to `~/.openroboto/contributor.key` (mode 0600); `register` signs a `register` message; `bind` binds the hotkey in `miner.yaml` with **two** signatures (contributor key + hotkey sr25519). `submit` refuses to pay for a task-track entry from an unbound hotkey. See [CONTRIBUTOR.md](docs/CONTRIBUTOR.md) |
 | `openroboto submit [--config] [--output-dir] [--force]` | Upload → re-check the season against the backend → check the repository layout → pay the entry fee → announce on chain. Resumable from `state/competition_<id>.json`: an upload already done is not repeated and a fee already paid is not paid again |
 | `openroboto status [--hotkey] [--competition]` | Submission history and scanner rejection reasons (no API key needed) |
 | `openroboto validator run` | External validator: read published weights, set them on chain |

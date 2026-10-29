@@ -18,6 +18,7 @@ COMMANDS = (
     "build",
     "train",
     "check",
+    "identity",
     "submit",
     "status",
     "validator",
@@ -37,7 +38,9 @@ def test_every_documented_command_is_registered() -> None:
     assert len(COMMAND_MODULES) == len(COMMANDS)
 
 
-@pytest.mark.parametrize("command", [c for c in COMMANDS if c != "validator"])
+@pytest.mark.parametrize(
+    "command", [c for c in COMMANDS if c not in ("validator", "identity")]
+)
 def test_each_command_binds_a_handler(command: str) -> None:
     args = build_parser().parse_args([command])
     assert callable(args.handler)
@@ -48,6 +51,31 @@ def test_validator_requires_a_subcommand() -> None:
         build_parser().parse_args(["validator"])
     args = build_parser().parse_args(["validator", "run"])
     assert callable(args.handler)
+
+
+@pytest.mark.parametrize(
+    "subcommand", ["keygen", "show", "register", "bind", "unbind", "migrate"]
+)
+def test_identity_subcommands_bind_handlers(subcommand: str) -> None:
+    """`identity` has no default action: registering or migrating has to be
+    typed deliberately, and key generation is not something to run by accident.
+    """
+    required = {
+        "register": ["--reward-address", "5" + "1" * 47],
+        "migrate": [
+            "--new-key-file",
+            "new.key",
+            "--reward-address",
+            "5" + "1" * 47,
+        ],
+    }
+    argv = ["identity", subcommand, *required.get(subcommand, [])]
+    assert callable(build_parser().parse_args(argv).handler)
+
+
+def test_identity_requires_a_subcommand() -> None:
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["identity"])
 
 
 def test_version_reports_cli_and_protocol() -> None:
