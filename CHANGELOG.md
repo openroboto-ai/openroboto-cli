@@ -34,7 +34,8 @@ at all. A `401 UNAUTHORIZED` means the MINER key is missing; a
 
 `task check` warns (`axis.reference_not_declared`) when an AXIS package has no
 reference solution: it is static-only and the validator's runtime admission
-rejects it as `reject_unsolvable`. A declared reference must carry non-empty
+rejects it as `reject_unsolvable`. `submit` refuses that shape **before the
+fee**, so a miner does not pay for a guaranteed runtime rejection. A declared reference must carry non-empty
 per-instance `actions`; a final-state-only file is an error. Adding a reference
 changes the digest, so it is a new package identity, not an edit of a frozen
 one. `scripts/build_task_package.py --reference` includes one and refuses an

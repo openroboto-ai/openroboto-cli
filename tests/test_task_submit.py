@@ -8,6 +8,7 @@ any money moves.
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -84,6 +85,29 @@ def test_the_gate_digests_the_nested_package_directory(
     assert submit_command.task_package_is_payable(_settings(), state, _live()) is True
     assert state["package_digest"] == package_digest(package)
     capsys.readouterr()
+
+
+def test_a_package_without_reference_actions_is_refused_before_payment(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Static format is not runtime admission: OPE-145's runtime returns
+    `reject_unsolvable` when there is no trajectory to replay. The fee must not
+    be spent on that."""
+    package = axis_package(tmp_path / "pkg")
+    task_path = package / "task.json"
+    task = json.loads(task_path.read_text(encoding="utf-8"))
+    task.pop("reference_solution")
+    task_path.write_text(json.dumps(task, sort_keys=True), encoding="utf-8")
+    monkeypatch.setattr(submit_command, "fetch_package", lambda *a, **k: package)
+
+    assert (
+        submit_command.task_package_is_payable(_settings(), _state(), _live()) is False
+    )
+    message = capsys.readouterr().err
+    assert "reject_unsolvable" in message
+    assert "Nothing was paid" in message
 
 
 def test_a_package_for_another_source_is_refused_before_payment(

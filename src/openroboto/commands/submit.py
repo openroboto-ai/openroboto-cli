@@ -671,6 +671,25 @@ def task_package_is_payable(
         )
         return False
 
+    # Static format is not runtime admission. OPE-145 measured a package with
+    # no reference actions passing every static check and being rejected by
+    # the runtime as `reject_unsolvable`; paying for it would buy a rejection.
+    runtime_fatal = [
+        issue for issue in issues if issue.code == "axis.reference_not_declared"
+    ]
+    if runtime_fatal:
+        fail(
+            f"The task package at {where} has no reference solution actions, so "
+            f"the validator's runtime admission rejects it as "
+            f"`reject_unsolvable` (OPE-145 measured this on an official-payload "
+            f"package). The fee would buy a rejection. **Nothing was paid, "
+            f"nothing was sent on chain.**\n"
+            f"   → supply `reference.json` with non-empty `actions` for every "
+            f"instance, rebuild the package (the digest changes), run "
+            f"`openroboto task check` and submit again"
+        )
+        return False
+
     if package.source != expected_source:
         fail(
             f"{live.label} runs task source `{expected_source}`, but the package "

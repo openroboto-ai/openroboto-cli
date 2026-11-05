@@ -155,6 +155,12 @@ It then pays the entry fee and announces the commitment as usual. Runtime
 admission happens after the commitment is scanned; a package that passes this
 check can still be rejected as unsolvable, non-deterministic or a freebie.
 
+One runtime-fatal shape is refused **before** the fee: an AXIS package with no
+reference solution actions. OPE-145 measured that such a package passes every
+static check and is rejected by the runtime as `reject_unsolvable`; paying for
+it would buy a rejection. Supply `reference.json` with non-empty per-instance
+`actions`, rebuild (the digest changes), and submit again.
+
 A task workspace must set `huggingface.repo_id`. There is no honest default:
 `pi05-<hotkey>` is a model name, and the repository holds a task package.
 
