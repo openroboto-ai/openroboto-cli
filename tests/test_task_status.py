@@ -220,7 +220,10 @@ def test_status_queries_with_the_miner_key_and_prints_the_package(
 
     def _fetch(base_url: str, **kwargs: Any) -> Any:
         captured.update(kwargs)
-        return SimpleNamespace(data=[backend_api.PrivateTask(**_task())])
+        return SimpleNamespace(
+            data=[backend_api.PrivateTask(**_task())],
+            meta=SimpleNamespace(request_id="req-123"),
+        )
 
     monkeypatch.setattr(task_command, "fetch_my_tasks", _fetch)
 
@@ -228,6 +231,7 @@ def test_status_queries_with_the_miner_key_and_prints_the_package(
     output = json.loads(capsys.readouterr().out)
     assert output["miner_key_present"] is True
     assert output["hotkey"] == HOTKEY
+    assert output["request_id"] == "req-123"
     assert output["tasks"][0]["package_digest"] == "b" * 64
     assert captured["miner_key"] == MINER_KEY
     assert len(captured["signature"]) == 128

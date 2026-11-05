@@ -200,6 +200,7 @@ def status_run(args: argparse.Namespace) -> int:
                     "backend": settings.backend_url,
                     "hotkey": hotkey,
                     "miner_key_present": bool(key),
+                    "request_id": envelope.meta.request_id,
                     "tasks": [row.model_dump(mode="json") for row in envelope.data],
                 },
                 ensure_ascii=False,
@@ -209,8 +210,9 @@ def status_run(args: argparse.Namespace) -> int:
         )
         return 0
 
-    say(f"backend: {settings.backend_url}")
-    say(f"hotkey:  {hotkey}")
+    say(f"backend:    {settings.backend_url}")
+    say(f"hotkey:     {hotkey}")
+    say(f"request_id: {envelope.meta.request_id}")
     if not envelope.data:
         say("no task packages for this hotkey")
         return 0

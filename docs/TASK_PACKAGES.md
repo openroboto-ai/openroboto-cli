@@ -28,7 +28,9 @@ openroboto task status --json                   # your own tasks (MINER key + si
 
 `task status` reads the backend's `/healthz` and `/readyz` (`--probe`, no key
 sent), or `GET /api/v1/tasks/mine` for the tasks the configured hotkey
-submitted. The latter needs **two independent proofs**, and they fail
+submitted. Its JSON output includes the `meta.request_id` of the task query, so
+the line can be quoted in an evidence record and matched against backend
+logs. The latter needs **two independent proofs**, and they fail
 differently:
 
 - the **MINER-level key** in `X-API-Key`, from `backend.public_key` (or the
