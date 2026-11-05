@@ -77,7 +77,10 @@ compute a digest until 0.13.0 is published and the pin moves. `digest_source`
 reports `openroboto-protocol` or
 `unavailable(protocol release 0.13.0 needed)`. A local development environment
 uses the candidate wheel via `scripts/verify_task_cli_install.py`; that is
-**not** a claim that 0.13.0 is pip-installable from PyPI.
+**not** a claim that 0.13.0 is pip-installable from PyPI. The verifier is
+fail-closed: a missing shared module/function, a non-zero probe,
+`digest_source` other than `openroboto-protocol`, or a digest mismatch exits
+non-zero.
 
 `openroboto doctor` reports `protocol capabilities` (`Track.TASK`,
 `AXIS_LAYOUT`, `package_digest`) and fails a task workspace when any is

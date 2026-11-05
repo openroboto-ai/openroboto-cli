@@ -244,8 +244,11 @@ It checks `Track.TASK`, `AXIS_LAYOUT`, the package digest, the live `/healthz`
 
 `--shared-module` / `--shared-function` (default
 `openroboto_protocol.package_digest.package_digest`) compare the CLI digest
-with the shared implementation. A candidate wheel without that module is
-reported as `available: false`; the CLI has no local mirror to fall back to.
+with the shared implementation. The verifier is **fail-closed**: a missing
+module or function, a non-zero probe, malformed output, a non-64-hex value,
+`digest_source` other than `openroboto-protocol`, or a digest mismatch all exit
+non-zero. There is no fail-open diagnostic mode; a probe pointed at a missing
+function must be red.
 
 The candidate wheel is **not** a published release. Do not describe it as
 `pip install`-able from PyPI until the protocol maintainer publishes it and

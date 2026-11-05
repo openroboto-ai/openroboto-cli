@@ -69,6 +69,60 @@ def run(
     return result.stdout.strip()
 
 
+def shared_digest(
+    python: pathlib.Path,
+    package: str,
+    module: str,
+    function: str,
+) -> str:
+    """Run the shared implementation in the fresh venv; **fail closed**.
+
+    The acceptance question is "does the candidate wheel expose the shared
+    digest and does it agree with the CLI". A missing module, a missing
+    function, a non-zero exit, malformed output or a non-64-hex value is a
+    failure, never an `available: false` field that lets the script exit 0.
+    There is deliberately no fail-open diagnostic mode: a probe that was told
+    to look for a missing function must be red.
+    """
+    result = subprocess.run(
+        [
+            str(python),
+            "-c",
+            "import json, importlib; "
+            f"m = importlib.import_module({module!r}); "
+            f"fn = getattr(m, {function!r}); "
+            f"print(json.dumps({{'digest': fn({package!r})}}))",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        detail = (
+            result.stderr.strip().splitlines()[-1]
+            if result.stderr.strip()
+            else "no stderr"
+        )
+        raise SystemExit(f"shared digest probe failed: {module}.{function}: {detail}")
+    try:
+        payload = json.loads(result.stdout)
+    except ValueError as exc:
+        raise SystemExit(
+            f"shared digest probe returned non-JSON: {result.stdout!r}"
+        ) from exc
+    digest = payload.get("digest") if isinstance(payload, dict) else None
+    if (
+        not isinstance(digest, str)
+        or len(digest) != 64
+        or any(char not in "0123456789abcdef" for char in digest)
+    ):
+        raise SystemExit(
+            f"shared digest probe returned {digest!r}, not a 64-character "
+            f"lowercase sha256"
+        )
+    return digest
+
+
 def wheel_version(wheel: pathlib.Path) -> str:
     """Read the version out of a wheel's METADATA without installing it."""
     with zipfile.ZipFile(wheel) as archive:
@@ -215,44 +269,30 @@ def main() -> int:
                     f"package digest {check['package_digest']} != expected "
                     f"{args.expect_digest}"
                 )
-            # Once OPE-211 ships the shared implementation, this proves the CLI
-            # and the protocol wheel compute the same number. Before that, a
-            # candidate without the module is reported, not failed: the local
-            # mirror is still the only implementation in that wheel.
-            shared = subprocess.run(
-                [
-                    str(python),
-                    "-c",
-                    "import json, importlib; "
-                    f"m = importlib.import_module({args.shared_module!r}); "
-                    f"fn = getattr(m, {args.shared_function!r}); "
-                    f"print(json.dumps({{'digest': fn({args.package!r})}}))",
-                ],
-                capture_output=True,
-                text=True,
-                check=False,
+            if check.get("ok") is not True:
+                raise SystemExit(f"task check reported ok={check.get('ok')!r}")
+            if check.get("digest_source") != "openroboto-protocol":
+                raise SystemExit(
+                    f"CLI digest_source is {check.get('digest_source')!r}, not "
+                    f"'openroboto-protocol'; the shared implementation did not run"
+                )
+            shared_value = shared_digest(
+                python,
+                args.package,
+                args.shared_module,
+                args.shared_function,
             )
-            if shared.returncode == 0:
-                shared_digest = json.loads(shared.stdout)["digest"]
-                summary["shared_digest"] = {
-                    "module": args.shared_module,
-                    "function": args.shared_function,
-                    "digest": shared_digest,
-                    "matches_cli": shared_digest == check["package_digest"],
-                }
-                if shared_digest != check["package_digest"]:
-                    raise SystemExit(
-                        f"CLI digest {check['package_digest']} != shared digest "
-                        f"{shared_digest} from {args.shared_module}"
-                    )
-            else:
-                summary["shared_digest"] = {
-                    "module": args.shared_module,
-                    "available": False,
-                    "error": shared.stderr.strip().splitlines()[-1]
-                    if shared.stderr.strip()
-                    else "import failed",
-                }
+            summary["shared_digest"] = {
+                "module": args.shared_module,
+                "function": args.shared_function,
+                "digest": shared_value,
+                "matches_cli": shared_value == check["package_digest"],
+            }
+            if shared_value != check["package_digest"]:
+                raise SystemExit(
+                    f"CLI digest {check['package_digest']} != shared digest "
+                    f"{shared_value} from {args.shared_module}.{args.shared_function}"
+                )
 
         if args.config:
             probe_raw = run(
