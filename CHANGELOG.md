@@ -32,6 +32,14 @@ isolated instance does not require editing `miner.yaml`. The probe sends no key
 at all. A `401 UNAUTHORIZED` means the MINER key is missing; a
 `401 INVALID_SIGNATURE` means the wallet's hotkey is not the queried one.
 
+`task check` warns (`axis.reference_not_declared`) when an AXIS package has no
+reference solution: it is static-only and the validator's runtime admission
+rejects it as `reject_unsolvable`. A declared reference must carry non-empty
+per-instance `actions`; a final-state-only file is an error. Adding a reference
+changes the digest, so it is a new package identity, not an edit of a frozen
+one. `scripts/build_task_package.py --reference` includes one and refuses an
+unusable file.
+
 `task check` prints the SHA-256 of **every file** and the package digest. That
 digest is the same rule the validator's admission uses and the backend stores in
 `tasks.package_digest`; `--expect-digest` lets a miner compare it with a value

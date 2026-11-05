@@ -520,7 +520,23 @@ def _validate_axis(package: TaskPackage) -> list[Issue]:
             instances.append(payload)
 
     reference = task.get("reference_solution")
-    if reference:
+    if not reference:
+        # The format allows an omitted reference, but the validator's runtime
+        # admission then has no trajectory to replay and rejects as
+        # `reject_unsolvable` (OPE-145's CPU run measured exactly that on a
+        # package that passed every static check). Warning, not error: the
+        # static format is valid, and the miner has to know the package is not
+        # a complete submission.
+        issues.append(
+            Issue(
+                "axis.reference_not_declared",
+                "no reference solution; the validator's runtime admission will "
+                "reject this as unsolvable unless a reference with per-instance "
+                "`actions` is supplied",
+                severity="warning",
+            )
+        )
+    else:
         try:
             path = package.path(str(reference))
         except TaskPackageError as exc:
@@ -533,6 +549,8 @@ def _validate_axis(package: TaskPackage) -> list[Issue]:
                         f"reference_solution names a missing file: {reference}",
                     )
                 )
+            else:
+                issues.extend(_validate_axis_reference(package, path, variants))
 
     if instances and benchmark_task:
         first = instances[0]
@@ -562,6 +580,68 @@ def _validate_axis(package: TaskPackage) -> list[Issue]:
                 )
             )
 
+    return issues
+
+
+def _validate_axis_reference(
+    package: TaskPackage,
+    path: pathlib.Path,
+    variants: list[Mapping[str, Any]],
+) -> list[Issue]:
+    """The reference must carry replayable actions for every instance.
+
+    A declared `reference.json` with only `final_state` is the shape OPE-145's
+    runtime admission rejected as `reject_unsolvable`: the checker layer can
+    read it, but the simulator has no trajectory to replay. This is a static
+    check of the shape; whether the actions actually succeed is runtime.
+    """
+    try:
+        value = read_json(path)
+    except TaskPackageError as exc:
+        return [Issue("axis.reference_invalid", str(exc))]
+    if not isinstance(value, Mapping):
+        return [Issue("axis.reference_invalid", f"{path} must be a JSON object")]
+    issues: list[Issue] = []
+    if value.get("schema_version") != SCHEMA_VERSION:
+        issues.append(
+            Issue(
+                "axis.reference_schema",
+                f"{path}: unsupported schema_version {value.get('schema_version')!r}",
+            )
+        )
+    if str(value.get("task_id")) != package.task_id:
+        issues.append(
+            Issue(
+                "axis.reference_task_id",
+                f"{path}: task_id {value.get('task_id')!r} != {package.task_id!r}",
+            )
+        )
+    instances = value.get("instances")
+    if not isinstance(instances, Mapping):
+        issues.append(
+            Issue("axis.reference_instances", f"{path}: no `instances` object")
+        )
+        return issues
+
+    problems: list[str] = []
+    for variant in variants:
+        number = variant.get("instance")
+        if not isinstance(number, int) or isinstance(number, bool):
+            continue
+        entry = instances.get(str(number))
+        if not isinstance(entry, Mapping):
+            problems.append(f"instance {number}: no entry")
+            continue
+        actions = entry.get("actions")
+        if not isinstance(actions, list) or not actions:
+            problems.append(f"instance {number}: `actions` missing or empty")
+    if problems:
+        issues.append(
+            Issue(
+                "axis.reference_actions_missing",
+                "reference.json cannot be replayed: " + "; ".join(problems),
+            )
+        )
     return issues
 
 

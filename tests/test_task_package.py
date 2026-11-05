@@ -218,7 +218,12 @@ def axis_package(
         {
             "schema_version": 1,
             "task_id": 9001,
-            "instances": {},
+            "instances": {
+                "0": {
+                    "actions": [[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]],
+                    "final_state": {"objects": {}, "robots": {}},
+                }
+            },
         },
     )
     return root
@@ -260,6 +265,37 @@ def test_axis_reference_must_exist(tmp_path: Path) -> None:
     (root / "reference.json").unlink()
     issues = tp.validate_package(tp.load_package(root))
     assert any(issue.code == "axis.reference_missing" for issue in issues)
+
+
+def test_axis_reference_without_actions_is_an_error(tmp_path: Path) -> None:
+    """A final-state-only reference passed static checks and was rejected by
+    OPE-145's runtime as `reject_unsolvable`; the CLI must name the missing
+    trajectory, not just check that the file exists."""
+    root = axis_package(tmp_path / "pkg")
+    _write_json(
+        root / "reference.json",
+        {
+            "schema_version": 1,
+            "task_id": 9001,
+            "instances": {"0": {"final_state": {"objects": {}, "robots": {}}}},
+        },
+    )
+    issues = tp.validate_package(tp.load_package(root))
+    assert any(
+        issue.code == "axis.reference_actions_missing" and issue.is_error
+        for issue in issues
+    )
+
+
+def test_axis_without_a_reference_is_a_warning(tmp_path: Path) -> None:
+    root = axis_package(tmp_path / "pkg")
+    task = json.loads((root / "task.json").read_text(encoding="utf-8"))
+    task.pop("reference_solution")
+    (root / "task.json").write_text(json.dumps(task, sort_keys=True), encoding="utf-8")
+    issues = tp.validate_package(tp.load_package(root))
+    warnings = [issue for issue in issues if issue.severity == "warning"]
+    assert [issue.code for issue in warnings] == ["axis.reference_not_declared"]
+    assert not any(issue.is_error for issue in issues)
 
 
 # ── RoboDojo ─────────────────────────────────────────────────────────────────

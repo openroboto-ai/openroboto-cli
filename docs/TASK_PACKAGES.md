@@ -115,6 +115,23 @@ Three consequences worth knowing:
   reported value in `tasks.package_digest` (a second report with a different
   digest is a `PACKAGE_DIGEST_MISMATCH`).
 
+### Reference solutions are required for runtime admission
+
+A package may omit `reference_solution` and still pass the **static** format
+check. It is not a complete submission: the validator's runtime admission has
+no trajectory to replay and rejects it as `reject_unsolvable` (OPE-145 measured
+this on an official-payload package that passed every static check).
+
+`task check` emits `axis.reference_not_declared` as a warning in that case. If
+a reference is declared, it must carry a non-empty `actions` list for every
+instance; a `final_state`-only file is an error
+(`axis.reference_actions_missing`).
+
+Adding a reference changes the package digest. Build a **new** package
+identity/digest for it; never edit an old frozen digest to make it match. The
+builder accepts a real reference with `--reference <reference.json>` and
+refuses one whose instances lack actions.
+
 ## 3. Submitting
 
 ```bash

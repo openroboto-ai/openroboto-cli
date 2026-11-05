@@ -95,12 +95,46 @@ def verify_archive(archive: pathlib.Path, receipt: pathlib.Path | None) -> None:
             )
 
 
+def _validate_reference(path: pathlib.Path, task_id: int, instance_count: int) -> None:
+    """A reference is only useful if every instance has replayable actions.
+
+    A `final_state`-only file passes the format and is rejected by the runtime
+    as `reject_unsolvable` (measured by OPE-145). Refuse to build a package
+    that calls itself complete without them.
+    """
+    data = _read_json(path)
+    if not isinstance(data, dict):
+        raise SystemExit(f"{path}: reference must be a JSON object")
+    if data.get("schema_version") != 1:
+        raise SystemExit(
+            f"{path}: unsupported schema_version {data.get('schema_version')!r}"
+        )
+    if str(data.get("task_id")) != str(task_id):
+        raise SystemExit(f"{path}: task_id {data.get('task_id')!r} != {task_id}")
+    instances = data.get("instances")
+    if not isinstance(instances, dict):
+        raise SystemExit(f"{path}: no `instances` object")
+    missing = [
+        index
+        for index in range(instance_count)
+        if not isinstance(instances.get(str(index)), dict)
+        or not isinstance(instances[str(index)].get("actions"), list)
+        or not instances[str(index)]["actions"]
+    ]
+    if missing:
+        raise SystemExit(
+            f"{path}: reference has no non-empty `actions` for instances {missing}; "
+            f"the runtime would reject the package as unsolvable"
+        )
+
+
 def build_task(
     release_dir: pathlib.Path,
     task_id: int,
     out: pathlib.Path,
     *,
     receipt: pathlib.Path | None,
+    reference: pathlib.Path | None = None,
 ) -> dict[str, Any]:
     benchmark = _read_json(release_dir / "benchmark.json")
     randomization = _read_json(release_dir / "randomization.json")
@@ -138,6 +172,11 @@ def build_task(
             "first payload's initial state does not match the benchmark hash"
         )
 
+    # Validate the reference **before** creating anything: a bad reference must
+    # not leave a half-written package directory behind.
+    if reference is not None:
+        _validate_reference(reference, task_id, len(variants))
+
     if out.exists():
         raise SystemExit(f"{out} already exists; refusing to overwrite a package")
     out.mkdir(parents=True)
@@ -165,23 +204,23 @@ def build_task(
     shutil.copyfile(release_dir / "benchmark.json", out / "benchmark.json")
 
     runtime = benchmark.get("runtime") or {}
-    _write_json(
-        out / "task.json",
-        {
-            "schema_version": 1,
-            "source": "axis",
-            "task_id": task_id,
-            "title": task_entry["instruction"],
-            "instruction": task_entry["instruction"],
-            "checker": first_payload["checker_config"],
-            "runtime": {
-                key: runtime[key]
-                for key in ("control_period_s", "observation_joint_order", "camera")
-                if key in runtime
-            },
+    task_doc: dict[str, Any] = {
+        "schema_version": 1,
+        "source": "axis",
+        "task_id": task_id,
+        "title": task_entry["instruction"],
+        "instruction": task_entry["instruction"],
+        "checker": first_payload["checker_config"],
+        "runtime": {
+            key: runtime[key]
+            for key in ("control_period_s", "observation_joint_order", "camera")
+            if key in runtime
         },
-        indent=1,
-    )
+    }
+    if reference is not None:
+        shutil.copyfile(reference, out / "reference.json")
+        task_doc["reference_solution"] = "reference.json"
+    _write_json(out / "task.json", task_doc, indent=1)
 
     provenance = out / "provenance"
     for name in ("bindings.json", "validation.json"):
@@ -193,13 +232,21 @@ def build_task(
         provenance.mkdir(exist_ok=True)
         shutil.copyfile(receipt, provenance / "release.json")
 
+    status = (
+        "complete reference trajectory included"
+        if reference is not None
+        else "STATIC-ONLY: no reference actions; runtime admission will reject "
+        "this as unsolvable (`reject_unsolvable`). Do not treat it as a formal "
+        "complete package."
+    )
     (provenance / "README.md").write_text(
         "# Provenance\n\n"
         "Derived from the official AXIS release archive. Payloads, checker\n"
         "configuration, initial states and hashes are copied verbatim; the\n"
         "only added key is `instance` (the variant ordinal) in\n"
         "`randomization.json`, which the package loader requires. See\n"
-        "`release.json` for the archive's pinned hashes.\n",
+        "`release.json` for the archive's pinned hashes.\n\n"
+        f"Reference: {status}\n",
         encoding="utf-8",
     )
 
@@ -207,6 +254,12 @@ def build_task(
         "task_id": task_id,
         "package": str(out),
         "instances": len(variants),
+        "reference_included": reference is not None,
+        "runtime_admission": (
+            "reference trajectory present; runtime still to be verified"
+            if reference is not None
+            else "reject_unsolvable (no reference actions); static-only package"
+        ),
         "package_digest": package_digest(out),
     }
 
@@ -222,6 +275,13 @@ def main() -> int:
         help="optional axis_v2.0-release.json; verifies the archive bytes/sha256 "
         "and is copied into the package's provenance/",
     )
+    parser.add_argument(
+        "--reference",
+        default="",
+        help="optional reference.json with per-instance `actions`; without it the "
+        "package is STATIC-ONLY and runtime admission will reject as unsolvable. "
+        "Adding it changes the package digest (new package identity).",
+    )
     args = parser.parse_args()
 
     archive = pathlib.Path(args.release).expanduser().resolve()
@@ -236,7 +296,16 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="axis-release-") as temp:
         release_dir = pathlib.Path(temp)
         extract_zst(archive, release_dir)
-        summary = build_task(release_dir, args.task_id, out, receipt=receipt)
+        reference = (
+            pathlib.Path(args.reference).expanduser().resolve()
+            if args.reference
+            else None
+        )
+        if reference is not None and not reference.is_file():
+            raise SystemExit(f"reference not found: {reference}")
+        summary = build_task(
+            release_dir, args.task_id, out, receipt=receipt, reference=reference
+        )
     print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
     return 0
 
