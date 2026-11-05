@@ -546,6 +546,7 @@ def test_show_says_none_when_nothing_is_bound(
 def test_the_rate_limit_key_comes_from_config_or_control_json(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from openroboto import backend_api
     from openroboto.config import ControlFetch, ControlFetchError
 
     settings = _settings()
@@ -555,7 +556,7 @@ def test_the_rate_limit_key_comes_from_config_or_control_json(
     settings.backend_public_key = ""
     settings.control_json_url = "https://api.example/control.json"
     monkeypatch.setattr(
-        identity_command,
+        backend_api,
         "fetch_control",
         lambda url: ControlFetch({"public_key": "from-control"}, ""),
     )
@@ -564,7 +565,7 @@ def test_the_rate_limit_key_comes_from_config_or_control_json(
     def boom(url: str) -> None:
         raise ControlFetchError("down")
 
-    monkeypatch.setattr(identity_command, "fetch_control", boom)
+    monkeypatch.setattr(backend_api, "fetch_control", boom)
     assert identity_command._miner_key(settings) == ""
 
     settings.control_json_url = ""

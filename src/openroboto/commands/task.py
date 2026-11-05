@@ -29,6 +29,16 @@ import pathlib
 import tempfile
 from typing import Any
 
+from openroboto.backend_api import (
+    BackendError,
+    fetch_liveness,
+    fetch_my_tasks,
+    fetch_readiness,
+    fetch_task_access_message,
+    miner_key,
+)
+from openroboto.chain import hotkey_signature as sign_hotkey
+from openroboto.chain import open_wallet
 from openroboto.config import ConfigError, Settings
 from openroboto.console import fail, say
 from openroboto.task_package import (
@@ -103,12 +113,213 @@ def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) 
         help="machine-readable output (one JSON object on stdout)",
     )
     check.set_defaults(handler=run)
+
+    status = subparsers_.add_parser(
+        "status",
+        help="read the task packages this hotkey submitted (MINER key + signature)",
+    )
+    status.add_argument("--config", default="miner.yaml")
+    status.add_argument(
+        "--hotkey",
+        default="",
+        help="SS58 whose packages to read; defaults to subnet.hotkey_ss58 or the "
+        "wallet's own hotkey",
+    )
+    status.add_argument("--status", default="", help="filter by task status")
+    status.add_argument("--source", default="", choices=("", *TASK_SOURCES))
+    status.add_argument("--skill", default="")
+    status.add_argument("--limit", type=int, default=20)
+    status.add_argument(
+        "--probe",
+        action="store_true",
+        help="only check GET /healthz and GET /readyz against backend.url; "
+        "sends no key and no task query",
+    )
+    status.add_argument("--json", action="store_true")
+    status.set_defaults(handler=status_run)
     parser.set_defaults(handler=lambda args: _usage(parser))
 
 
 def _usage(parser: argparse.ArgumentParser) -> int:
     parser.print_help()
     return 1
+
+
+def status_run(args: argparse.Namespace) -> int:
+    """Read-only: `/healthz` + `/readyz`, or this hotkey's own task packages."""
+    settings = _task_settings(args.config)
+    if args.probe:
+        return _probe(settings, as_json=args.json)
+    if not settings.backend_url:
+        fail(
+            f"{args.config} does not name a backend (`backend.url`), so there "
+            f"is nowhere to ask.\n"
+            f"   → set backend.url (for the isolated run: http://127.0.0.1:8091)"
+        )
+        return 1
+
+    wallet = open_wallet(settings)
+    wallet_hotkey = str(wallet.hotkey.ss58_address)
+    hotkey = args.hotkey or settings.hotkey_ss58 or wallet_hotkey
+    if hotkey != wallet_hotkey:
+        # The signature is the identity proof; an address whose key is not in
+        # this wallet cannot produce it, and the backend answers 401 without
+        # saying which of the two addresses was wrong.
+        fail(
+            f"The wallet in {args.config} holds hotkey {wallet_hotkey}, but "
+            f"{hotkey} was named for this query. Only that hotkey's own private "
+            f"key can sign the access message.\n"
+            f"   → put {hotkey} in the wallet this config names "
+            f"(`subnet.hotkey`), or query from the workspace whose wallet holds "
+            f"it"
+        )
+        return 1
+
+    key = miner_key(settings)
+    try:
+        message = fetch_task_access_message(settings.backend_url, hotkey)
+        signature = sign_hotkey(wallet, message.encode("utf-8"))
+        envelope = fetch_my_tasks(
+            settings.backend_url,
+            hotkey=hotkey,
+            signature=signature,
+            miner_key=key,
+            limit=args.limit,
+            status=args.status,
+            source=args.source,
+            skill=args.skill,
+        )
+    except BackendError as exc:
+        _task_error(exc)
+        return 1
+
+    if args.json:
+        say(
+            json.dumps(
+                {
+                    "backend": settings.backend_url,
+                    "hotkey": hotkey,
+                    "miner_key_present": bool(key),
+                    "tasks": [row.model_dump(mode="json") for row in envelope.data],
+                },
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 0
+
+    say(f"backend: {settings.backend_url}")
+    say(f"hotkey:  {hotkey}")
+    if not envelope.data:
+        say("no task packages for this hotkey")
+        return 0
+    for row in envelope.data:
+        say(f"{row.task_id}  {row.status}  {row.source or '?'}/{row.skill or '-'}")
+        say(f"   package: {row.package_repo}@{row.package_commit}")
+        say(f"   digest:  {row.package_digest or '(not reported yet)'}")
+        if row.content_sha256:
+            say(f"   content: {row.content_sha256}")
+        if row.reject_reason:
+            say(f"   reject:  {row.reject_reason}")
+        if row.visibility or row.content_state:
+            say(
+                f"   archive: {row.content_state or '?'}"
+                f"{' / ' + row.visibility if row.visibility else ''}"
+            )
+    return 0
+
+
+def _probe(settings: Settings, *, as_json: bool) -> int:
+    """`/healthz` and `/readyz` only. No key, no signature, no writes."""
+    if not settings.backend_url:
+        fail(
+            "No backend.url in the config, so there is nothing to probe.\n"
+            "   → for the isolated run set backend.url: http://127.0.0.1:8091"
+        )
+        return 1
+    try:
+        live = fetch_liveness(settings.backend_url)
+        ready = fetch_readiness(settings.backend_url)
+    except BackendError as exc:
+        fail(str(exc))
+        return 1
+
+    if as_json:
+        say(
+            json.dumps(
+                {
+                    "backend": settings.backend_url,
+                    "liveness": live.model_dump(mode="json"),
+                    "readiness": ready.model_dump(mode="json"),
+                },
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 0 if ready.ready else 1
+
+    say(f"backend:  {settings.backend_url}")
+    say(
+        f"healthz:  {live.status} "
+        f"(competition={live.competition}, netuid={live.netuid})"
+    )
+    say(f"readyz:   {'ready' if ready.ready else 'NOT ready'}")
+    say(
+        f"database: {'ok' if ready.database.ok else 'FAILED'}"
+        f"{' -- ' + ready.database.detail if ready.database.detail else ''}"
+    )
+    say(
+        f"migration:{'ok' if ready.migration.ok else 'FAILED'}"
+        f"{' -- ' + ready.migration.detail if ready.migration.detail else ''}"
+    )
+    if ready.expected_head or ready.alembic_version:
+        say(
+            f"   alembic: {ready.alembic_version or '(not read)'} "
+            f"(expected {ready.expected_head or '(not compared)'})"
+        )
+    return 0 if ready.ready else 1
+
+
+def _task_error(exc: BackendError) -> None:
+    """Translate the two 401s a task query can produce into an action.
+
+    They are different failures and have different fixes: the MINER-level key
+    is a rate-limit token in `miner.yaml`, while the signature is the identity
+    proof made by the wallet's hotkey. Collapsing them into "unauthorized"
+    sends the miner to the wrong file.
+    """
+    if exc.code == "UNAUTHORIZED":
+        fail(
+            f"{exc}\n"
+            f"   The task endpoints need the **MINER-level** key: set "
+            f"`backend.public_key` in miner.yaml from the MINER key the backend "
+            f"publishes (or `urls.control_json`).\n"
+            f"   Do **not** put the ADMIN_KEY in a miner workspace: it configures "
+            f"seasons and money, and this CLI has no field for it."
+        )
+    elif exc.code == "INVALID_SIGNATURE":
+        fail(
+            f"{exc}\n"
+            f"   The signature must be over the exact text "
+            f"`GET /api/v1/tasks/access-message` returns, made by the wallet "
+            f"hotkey that `subnet.hotkey` names. Check that `subnet.hotkey` and "
+            f"`subnet.hotkey_ss58` point at the same key."
+        )
+    else:
+        fail(str(exc))
+
+
+def _task_settings(config_path: str) -> Settings:
+    path = pathlib.Path(config_path)
+    if not path.is_file():
+        raise ConfigError(
+            f"{config_path} does not exist, so there is no backend to talk to.\n"
+            f"   → pass --config <path>, or create a miner.yaml with "
+            f"`backend.url` (the isolated run is http://127.0.0.1:8091)"
+        )
+    return Settings.load(str(path))
 
 
 def run(args: argparse.Namespace) -> int:

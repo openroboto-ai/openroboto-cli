@@ -21,7 +21,40 @@ openroboto task check ./my-task                 # local directory, offline
 openroboto task check ./my-task --json          # machine-readable evidence
 openroboto task check --repo user/pkg --commit <40-hex>
 openroboto task check --repo user/pkg --commit <40-hex> --expect-digest <64-hex>
+
+openroboto task status --probe                  # GET /healthz + /readyz only
+openroboto task status --json                   # your own tasks (MINER key + signature)
 ```
+
+`task status` reads the backend's `/healthz` and `/readyz` (`--probe`, no key
+sent), or `GET /api/v1/tasks/mine` for the tasks the configured hotkey
+submitted. The latter needs **two independent proofs**, and they fail
+differently:
+
+- the **MINER-level key** in `X-API-Key`, from `backend.public_key` (or the
+  `public_key` published in `control.json`);
+- the **hotkey signature** over the exact text from
+  `GET /api/v1/tasks/access-message`.
+
+🔴 **Never put the ADMIN_KEY in a miner workspace.** It configures seasons,
+fees and settlements; the CLI has no field for it and never reads one. A
+`UNAUTHORIZED` answer means the MINER key is missing; `INVALID_SIGNATURE`
+means the wallet's hotkey is not the one being queried.
+
+A minimal config for an isolated backend (the key comes from the operator's
+`0600` env file, never from this repository):
+
+```yaml
+backend:
+  url: http://127.0.0.1:8091
+  public_key: <MINER-level key>
+subnet:
+  hotkey_ss58: <the hotkey in the wallet this config names>
+```
+
+When the backend is ready, run the probe first; it touches no key, no chain and
+no task row. A `readyz: NOT ready` line names whether the database or the
+migration head is the failing half.
 
 `task check` prints:
 

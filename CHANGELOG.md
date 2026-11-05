@@ -16,8 +16,15 @@ one, and `submit` would have refused it for having no weights. Both are fixed:
 ```bash
 openroboto task check ./my-task            # local, offline
 openroboto task check --repo user/pkg --commit <40-hex>
+openroboto task status --probe             # GET /healthz + /readyz only
+openroboto task status                     # your own tasks, MINER key + signature
 openroboto submit
 ```
+
+`task status` uses the **MINER-level** `backend.public_key` and a hotkey
+signature for `/api/v1/tasks/mine`; it never reads the ADMIN_KEY. The probe
+sends no key at all. A `401 UNAUTHORIZED` means the MINER key is missing; a
+`401 INVALID_SIGNATURE` means the wallet's hotkey is not the queried one.
 
 `task check` prints the SHA-256 of **every file** and the package digest. That
 digest is the same rule the validator's admission uses and the backend stores in
