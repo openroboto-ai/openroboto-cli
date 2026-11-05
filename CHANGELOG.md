@@ -52,7 +52,10 @@ change — and that `main` line does not contain the 0.12.0 AXIS-layout change
 this CLI also imports. A release that merges both is needed. Until then,
 `init --include-task` and a task season's `submit` refuse with an explanation;
 local `openroboto task check` works with the pinned release because it never
-parses a competition row.
+parses a competition row. `openroboto doctor` now reports
+`protocol capabilities` (`Track.TASK` / `AXIS_LAYOUT`) and fails a task
+workspace when `Track.TASK` is missing, so a temporary cherry-pick tree cannot
+be mistaken for the release a formal run must pin.
 
 ## 1.5.1
 

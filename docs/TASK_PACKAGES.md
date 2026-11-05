@@ -171,7 +171,12 @@ required. Until it is published:
 
 - `openroboto task check` works, because it never parses a competition row;
 - `openroboto init --include-task` and a task season's `submit` refuse with an
-  explanation instead of a schema error.
+  explanation instead of a schema error;
+- `openroboto doctor` reports a `protocol capabilities` line
+  (`Track.TASK=yes/no, AXIS_LAYOUT=yes/no`) and fails a **task workspace** when
+  `Track.TASK` is missing. A temporary cherry-pick tree is component
+  verification only; the final run must pin the released protocol and the
+  merged CLI.
 
 ## Related documents
 
