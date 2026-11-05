@@ -24,6 +24,8 @@ openroboto task check --repo user/pkg --commit <40-hex> --expect-digest <64-hex>
 
 openroboto task status --probe                  # GET /healthz + /readyz only
 openroboto task status --json                   # your own tasks (MINER key + signature)
+openroboto task status --probe \
+  --backend-url http://127.0.0.1:8091           # override backend.url for one call
 ```
 
 `task status` reads the backend's `/healthz` and `/readyz` (`--probe`, no key

@@ -281,6 +281,47 @@ def test_probe_json_reports_ready(
     assert output["liveness"]["netuid"] == 313
 
 
+def test_backend_url_overrides_the_config_without_rewriting_it(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys
+) -> None:
+    seen: list[str] = []
+
+    def _live(url: str) -> backend_api.Liveness:
+        seen.append(url)
+        return backend_api.Liveness(status="ok", competition=7, netuid=313)
+
+    def _ready(url: str) -> backend_api.Readiness:
+        seen.append(url)
+        return backend_api.Readiness(
+            ready=True,
+            database=backend_api.ReadinessCheck(ok=True),
+            migration=backend_api.ReadinessCheck(ok=True),
+        )
+
+    monkeypatch.setattr(task_command, "fetch_liveness", _live)
+    monkeypatch.setattr(task_command, "fetch_readiness", _ready)
+
+    config = _config(tmp_path)
+    assert (
+        main(
+            [
+                "task",
+                "status",
+                "--probe",
+                "--config",
+                str(config),
+                "--backend-url",
+                "http://127.0.0.1:9999",
+                "--json",
+            ]
+        )
+        == 0
+    )
+    assert seen == ["http://127.0.0.1:9999", "http://127.0.0.1:9999"]
+    assert "http://127.0.0.1:8091" in config.read_text(encoding="utf-8")
+    capsys.readouterr()
+
+
 def test_probe_exits_non_zero_when_not_ready(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys
 ) -> None:

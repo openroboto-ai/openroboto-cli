@@ -121,6 +121,12 @@ def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) 
     )
     status.add_argument("--config", default="miner.yaml")
     status.add_argument(
+        "--backend-url",
+        default="",
+        help="override backend.url from --config; useful for the isolated "
+        "instance (http://127.0.0.1:8091) without rewriting the file",
+    )
+    status.add_argument(
         "--hotkey",
         default="",
         help="SS58 whose packages to read; defaults to subnet.hotkey_ss58 or the "
@@ -156,6 +162,8 @@ def _usage(parser: argparse.ArgumentParser) -> int:
 def status_run(args: argparse.Namespace) -> int:
     """Read-only: `/healthz` + `/readyz`, or this hotkey's own task packages."""
     settings = _task_settings(args.config)
+    if args.backend_url:
+        settings.backend_url = args.backend_url
     run_id = str(getattr(args, "run_id", "") or "")
     if args.probe:
         return _probe(settings, as_json=args.json, run_id=run_id)
