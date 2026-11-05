@@ -468,8 +468,18 @@ def inspect(directory: str | pathlib.Path) -> dict[str, Any]:
         ]
         return summary
 
-    files = package_files(root)
-    summary["package_digest"] = package_digest(root)
+    try:
+        files = package_files(root)
+        summary["package_digest"] = package_digest(root)
+    except TaskPackageError as exc:
+        summary["issues"].append(
+            {
+                "code": "package.digest_unavailable",
+                "message": str(exc),
+                "severity": "error",
+            }
+        )
+        return summary
     summary["file_count"] = len(files)
     summary["files"] = [
         {

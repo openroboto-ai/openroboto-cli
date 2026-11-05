@@ -21,6 +21,11 @@ from openroboto import task_package as tp
 #: four files written by ``_digest_fixture`` below.
 GOLDEN_DIGEST = "c9ed7c7266f5dd8dae6126c9df2012791ec3065a3ea302222277eb9c8e2b6ece"
 
+requires_shared = pytest.mark.skipif(
+    not tp.digest_available(),
+    reason="needs the OPE-211 candidate protocol wheel 0.13.0 (not on PyPI)",
+)
+
 
 def _digest_fixture(root: Path) -> Path:
     package = root / "pkg"
@@ -33,6 +38,7 @@ def _digest_fixture(root: Path) -> Path:
     return package
 
 
+@requires_shared
 def test_digest_matches_the_validator_golden(tmp_path: Path) -> None:
     package = _digest_fixture(tmp_path)
     assert tp.package_digest(package) == GOLDEN_DIGEST
@@ -52,12 +58,15 @@ def test_the_shared_protocol_implementation_is_preferred(
     assert tp.digest_source() == "openroboto-protocol"
 
 
-def test_the_transitional_mirror_is_named_when_shared_is_absent() -> None:
-    if tp._shared_package_digest is not None:
+def test_unavailable_shared_digest_is_named() -> None:
+    if tp.digest_available():
         pytest.skip("the installed protocol already provides the shared digest")
-    assert tp.digest_source() == "cli-mirror(transitional)"
+    assert tp.digest_source() == "unavailable(protocol release 0.13.0 needed)"
+    with pytest.raises(tp.TaskPackageError, match=r"0\.13\.0"):
+        tp.package_digest("anything")
 
 
+@requires_shared
 def test_files_are_sorted_as_paths_not_as_strings(tmp_path: Path) -> None:
     """`a/c.txt` comes before `a-b.txt` under ``Path`` ordering.
 
@@ -74,6 +83,7 @@ def test_files_are_sorted_as_paths_not_as_strings(tmp_path: Path) -> None:
     ]
 
 
+@requires_shared
 def test_every_file_counts_including_dotfiles(tmp_path: Path) -> None:
     package = _digest_fixture(tmp_path)
     before = tp.package_digest(package)
@@ -84,6 +94,7 @@ def test_every_file_counts_including_dotfiles(tmp_path: Path) -> None:
     )
 
 
+@requires_shared
 def test_digest_is_independent_of_the_directory_name(tmp_path: Path) -> None:
     first = _digest_fixture(tmp_path / "one")
     second = _digest_fixture(tmp_path / "two")

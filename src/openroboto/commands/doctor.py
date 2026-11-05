@@ -134,23 +134,31 @@ def check_protocol_capabilities(settings: Settings) -> CheckResult:
 
     has_task = getattr(Track, "TASK", None) is not None
     has_axis_layout = hasattr(model_format, "AXIS_LAYOUT")
+    try:
+        from openroboto_protocol import package_digest as _shared_digest
+    except ImportError:
+        _shared_digest = None
+    has_shared_digest = _shared_digest is not None
     snapshot = load_snapshot(settings)
     needs_task = snapshot is not None and snapshot.track == "task"
 
     detail = (
         f"Track.TASK={'yes' if has_task else 'no'}, "
-        f"AXIS_LAYOUT={'yes' if has_axis_layout else 'no'}"
+        f"AXIS_LAYOUT={'yes' if has_axis_layout else 'no'}, "
+        f"package_digest={'yes' if has_shared_digest else 'no'}"
     )
-    if needs_task and not has_task:
+    if needs_task and not (has_task and has_shared_digest):
         return CheckResult(
             "protocol capabilities",
             False,
             detail,
             "this workspace mines a task-authoring season, but the installed "
-            "protocol cannot parse `track=task`. Install the release that "
-            "merges `Track.TASK` (main 61c1642) with `AXIS_LAYOUT` "
-            "(v0.12.0 tag 443fdbb). A temporary cherry-pick tree is component "
-            "verification only and must not be used for the final run.",
+            "protocol is missing `Track.TASK` and/or the shared "
+            "`openroboto_protocol.package_digest` (OPE-211 candidate 0.13.0). "
+            "The production pin is still 0.12.0 and 0.13.0 is not on PyPI: "
+            "use the candidate wheel in a development environment "
+            "(`scripts/verify_task_cli_install.py`), or wait for the release. "
+            "Do not substitute a cherry-pick tree or a local mirror.",
             required=True,
         )
     return CheckResult(

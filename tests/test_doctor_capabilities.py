@@ -37,9 +37,9 @@ def test_a_task_workspace_fails_when_track_task_is_missing() -> None:
     assert result.ok is False
     assert result.required is True
     assert "Track.TASK=no" in result.detail
-    assert "61c1642" in result.fix
-    assert "443fdbb" in result.fix
-    assert "component verification only" in result.fix
+    assert "package_digest=no" in result.detail
+    assert "0.13.0" in result.fix
+    assert "cherry-pick" in result.fix
 
 
 def test_a_model_workspace_is_not_failed_for_a_track_it_does_not_mine() -> None:
@@ -55,11 +55,22 @@ def test_a_model_workspace_is_not_failed_for_a_track_it_does_not_mine() -> None:
 def test_a_task_workspace_passes_once_the_protocol_has_both(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    import sys
+    import types
+
+    import openroboto_protocol
+
     class _TrackWithTask:
         TASK = "task"
 
+    fake = types.ModuleType("openroboto_protocol.package_digest")
+    fake.package_digest = lambda directory: "digest"  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "openroboto_protocol.package_digest", fake)
+    monkeypatch.setattr(openroboto_protocol, "package_digest", fake, raising=False)
     monkeypatch.setattr(commitment, "Track", _TrackWithTask)
+
     result = check_protocol_capabilities(_settings("task"))
     assert result.ok is True
     assert result.required is True
     assert "Track.TASK=yes" in result.detail
+    assert "package_digest=yes" in result.detail

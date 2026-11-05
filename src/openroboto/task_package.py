@@ -8,20 +8,15 @@ reference solution.
 
 ## The digest is a cross-repository contract
 
-🔴 **The shared protocol implementation is authoritative when installed.**
+🔴 **The shared protocol implementation is the only implementation.**
 OPE-211 added ``openroboto_protocol.package_digest`` (candidate 0.13.0), with
 the same rule as the validator's ``task_source/package.py`` at ``e5fee86a``.
 This module imports it and delegates; ``digest_source()`` reports
-``openroboto-protocol`` when that happened.
-
-The local implementation below exists **only** for the published 0.12.0 pin
-(which predates the shared module) and is reported as
-``cli-mirror(transitional)``. It is not a second authority: when the two
-disagree the validator/protocol is right, and the checkout that bumps the pin
-to 0.13.0 removes it. The golden value in ``tests/test_task_package.py`` was
-produced by the validator implementation on the same fixture; the candidate
-wheel comparison in ``scripts/verify_task_cli_install.py`` checks the shared
-function against the CLI's output.
+``openroboto-protocol``. **There is no local fallback.** The published 0.12.0
+pin predates the module, so task digest commands refuse with the release/
+candidate instruction until 0.13.0 is published and the pin moves. The golden
+value in ``tests/test_task_package.py`` and the candidate-wheel comparison in
+``scripts/verify_task_cli_install.py`` both check the shared function.
 
 Three layers compute the same number and must agree byte for byte:
 
@@ -71,9 +66,9 @@ from typing import Any, Final
 
 #: The shared implementation, when the installed protocol release has it.
 #: OPE-211 adds it as ``openroboto_protocol.package_digest`` in 0.13.0. The
-#: published 0.12.0 pin predates it, so the CLI keeps a **transitional** local
-#: fallback until the pin moves. The shared module is authoritative whenever it
-#: is importable; ``digest_source()`` says which one ran.
+#: published 0.12.0 pin predates it, so the task commands refuse clearly until
+#: the pin moves. **No local fallback exists** -- a second implementation of a
+#: rule three consumers must agree on is the drift this package prevents.
 _shared_package_files: (
     Callable[[str | pathlib.Path], tuple[tuple[str, str], ...]] | None
 ) = None
@@ -181,65 +176,59 @@ def canonical_json_sha256(value: Any) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+_NO_SHARED = (
+    "The installed openroboto-protocol does not provide "
+    "`openroboto_protocol.package_digest`, which the task track needs. The "
+    "production pin is still the published 0.12.0; the shared implementation "
+    "ships in the OPE-211 candidate 0.13.0, which is **not published on PyPI**.\n"
+    "   → run the CLI against the candidate wheel in a development environment "
+    "(`scripts/verify_task_cli_install.py`), or wait for the 0.13.0 release.\n"
+    "   Nothing was paid, uploaded or sent on chain."
+)
+
+
+def digest_available() -> bool:
+    """Whether the installed protocol provides the shared digest."""
+    return (
+        _shared_package_files is not None
+        and _shared_digest_of_files is not None
+        and _shared_package_digest is not None
+    )
+
+
 def digest_source() -> str:
     """Which implementation the next digest call will use."""
     return (
         "openroboto-protocol"
-        if _shared_package_digest is not None
-        else "cli-mirror(transitional)"
+        if digest_available()
+        else "unavailable(protocol release 0.13.0 needed)"
     )
-
-
-def _local_package_files(
-    directory: str | pathlib.Path,
-) -> tuple[tuple[str, str], ...]:
-    """The OPE-211/validator rule, kept only for the unreleased-0.13.0 window.
-
-    When the installed protocol has ``package_digest`` this is never called;
-    the checkout that removes it is the one that bumps the pin to 0.13.0.
-    """
-    root = pathlib.Path(directory).expanduser().resolve()
-    entries: list[tuple[str, str]] = []
-    for path in sorted(root.rglob("*")):
-        if not path.is_file():
-            continue
-        relative = path.relative_to(root).as_posix()
-        entries.append((relative, hashlib.sha256(path.read_bytes()).hexdigest()))
-    return tuple(entries)
-
-
-def _local_digest_of_files(files: tuple[tuple[str, str], ...]) -> str:
-    encoded = "\n".join(f"{relative}\0{digest}" for relative, digest in files)
-    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
-
-
-def _local_package_digest(directory: str | pathlib.Path) -> str:
-    return _local_digest_of_files(_local_package_files(directory))
 
 
 def package_files(directory: str | pathlib.Path) -> tuple[tuple[str, str], ...]:
     """``(relative POSIX path, sha256)`` for every regular file, path-sorted."""
-    if _shared_package_files is not None:
-        return _shared_package_files(directory)
-    return _local_package_files(directory)
+    if _shared_package_files is None:
+        raise TaskPackageError(_NO_SHARED)
+    return _shared_package_files(directory)
 
 
 def digest_of_files(files: tuple[tuple[str, str], ...]) -> str:
-    if _shared_digest_of_files is not None:
-        return _shared_digest_of_files(files)
-    return _local_digest_of_files(files)
+    if _shared_digest_of_files is None:
+        raise TaskPackageError(_NO_SHARED)
+    return _shared_digest_of_files(files)
 
 
 def package_digest(directory: str | pathlib.Path) -> str:
-    """The task package's content identity (see the module docstring).
+    """The task package's content identity, from the shared protocol module.
 
-    Delegates to ``openroboto_protocol.package_digest`` when the installed
-    release provides it; the local implementation exists only for the
-    published 0.12.0 pin and is reported by ``digest_source()``.
+    There is **no local fallback**: a second implementation of a rule the
+    validator, backend and CLI must agree on is the drift the protocol package
+    exists to prevent. On the published 0.12.0 pin this raises with the
+    release/candidate instruction until 0.13.0 is published and the pin moves.
     """
-    if _shared_package_digest is not None:
-        return _shared_package_digest(directory)
-    return _local_package_digest(directory)
+    if _shared_package_digest is None:
+        raise TaskPackageError(_NO_SHARED)
+    return _shared_package_digest(directory)
 
 
 # ── loading ──────────────────────────────────────────────────────────────────
@@ -782,6 +771,7 @@ __all__ = [
     "TaskPackageError",
     "canonical_json_sha256",
     "checker_types_in",
+    "digest_available",
     "digest_of_files",
     "digest_source",
     "discover_packages",

@@ -17,6 +17,11 @@ from openroboto import task_package as tp
 from openroboto.cli import main
 from tests.test_task_package import axis_package, robodojo_package
 
+pytestmark = pytest.mark.skipif(
+    not tp.digest_available(),
+    reason="needs the OPE-211 candidate protocol wheel 0.13.0 (not on PyPI)",
+)
+
 
 def _json_output(capsys: pytest.CaptureFixture[str]) -> dict[str, Any]:
     captured = capsys.readouterr()

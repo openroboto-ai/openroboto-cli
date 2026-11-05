@@ -55,17 +55,25 @@ model.
 repository's `main` has it, but the 0.12.0 wheel published on PyPI predates the
 change — and that `main` line does not contain the 0.12.0 AXIS-layout change
 this CLI also imports. A release that merges both is needed. Until then,
-`init --include-task` and a task season's `submit` refuse with an explanation;
-local `openroboto task check` works with the pinned release because it never
-parses a competition row.
+`init --include-task`, `task check` and a task season's `submit` refuse with an
+explanation: the pinned release cannot parse `track=task` and has no shared
+`openroboto_protocol.package_digest`. `task status --probe` / signed
+`task status` still work (they do not compute a digest).
 
-The package digest delegates to `openroboto_protocol.package_digest` when the
-installed release has it (candidate 0.13.0). The CLI keeps a **transitional**
-local implementation only while the pin is the published 0.12.0; `task check`
-reports which one ran as `digest_source`. `openroboto doctor` now reports
-`protocol capabilities` (`Track.TASK` / `AXIS_LAYOUT`) and fails a task
-workspace when `Track.TASK` is missing, so a temporary cherry-pick tree cannot
-be mistaken for the release a formal run must pin.
+The package digest is **only** `openroboto_protocol.package_digest` (OPE-211
+candidate 0.13.0). There is no local mirror. The production pin is still the
+published 0.12.0, which predates the module, so `task check` refuses with the
+release/candidate instruction and `task status`/`check` do not pretend to
+compute a digest until 0.13.0 is published and the pin moves. `digest_source`
+reports `openroboto-protocol` or
+`unavailable(protocol release 0.13.0 needed)`. A local development environment
+uses the candidate wheel via `scripts/verify_task_cli_install.py`; that is
+**not** a claim that 0.13.0 is pip-installable from PyPI.
+
+`openroboto doctor` reports `protocol capabilities` (`Track.TASK`,
+`AXIS_LAYOUT`, `package_digest`) and fails a task workspace when any is
+missing, so a temporary cherry-pick tree cannot be mistaken for the release a
+formal run must pin.
 
 ## 1.5.1
 

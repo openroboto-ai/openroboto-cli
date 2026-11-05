@@ -18,8 +18,10 @@ from typing import Any
 import pytest
 
 from openroboto import backend_api
+from openroboto import task_package as tp
 from openroboto.cli import main
 from openroboto.commands import task as task_command
+from tests.test_task_package import axis_package
 
 HOTKEY = "5" + "M" * 47
 MINER_KEY = "miner-level-key"
@@ -70,6 +72,19 @@ def _task(**overrides: Any) -> dict[str, Any]:
     }
     row.update(overrides)
     return row
+
+
+def test_task_check_refuses_without_the_shared_digest(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """On the published 0.12.0 pin there is no local mirror to fall back to."""
+    if tp.digest_available():
+        pytest.skip("the installed protocol already provides the shared digest")
+    package = axis_package(tmp_path / "pkg")
+    assert main(["task", "check", str(package), "--json"]) == 1
+    summary = json.loads(capsys.readouterr().out)
+    assert summary["digest_source"] == "unavailable(protocol release 0.13.0 needed)"
+    assert summary["issues"][0]["code"] == "package.digest_unavailable"
 
 
 # ── client ──────────────────────────────────────────────────────────────────

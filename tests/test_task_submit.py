@@ -21,10 +21,19 @@ from openroboto import backend_api
 from openroboto.commands import submit as submit_command
 from openroboto.competition import PrecheckFailed, Snapshot, judge
 from openroboto.config import Settings
-from openroboto.task_package import PackageFetchError, package_digest
+from openroboto.task_package import (
+    PackageFetchError,
+    digest_available,
+    package_digest,
+)
 from tests.test_task_package import axis_package
 
 COMMIT = "a" * 40
+
+pytestmark = pytest.mark.skipif(
+    not digest_available(),
+    reason="needs the OPE-211 candidate protocol wheel 0.13.0 (not on PyPI)",
+)
 
 
 def _settings() -> Settings:

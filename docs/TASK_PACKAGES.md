@@ -86,12 +86,13 @@ admission results, not something a static check can answer.
 
 ## 2. The digest rule
 
-> The authoritative implementation is the validator's
-> `task_source/package.py` (`e5fee86a`). The CLI's module is a miner-side
-> mirror pinned by a golden vector produced by that implementation; the
-> long-term home for a rule all three sides must agree on is
-> `openroboto-protocol`, which needs a release before the CLI can import it.
-> When the two disagree, the validator is right.
+> The implementation is `openroboto_protocol.package_digest`
+> (OPE-211, candidate 0.13.0), byte-for-byte the rule from the validator's
+> `task_source/package.py` (`e5fee86a`). The CLI has **no local mirror**. The
+> production pin is the published 0.12.0, which predates the module, so task
+> digest commands refuse with the release/candidate instruction until 0.13.0
+> is published and the pin moves. The candidate wheel is a local development
+> dependency, not a PyPI release.
 
 The miner, the admission worker and the backend must compute the same value
 byte for byte:
@@ -172,19 +173,28 @@ requires Isaac Sim 5.1 and an A100.
 
 ## 5. Requirement on the protocol release
 
-The `track=task` value is on the protocol repository's `main`, but the 0.12.0
-wheel published on PyPI predates it — and that `main` line does not include the
-0.12.0 AXIS-layout change this CLI also imports. A release merging both is
-required. Until it is published:
+The `track=task` value and the shared package digest are in the OPE-211
+candidate 0.13.0 (`Track.TASK`, `AXIS_LAYOUT` and
+`openroboto_protocol.package_digest`). The 0.12.0 wheel published on PyPI
+predates them, and the protocol `main` line with `Track.TASK` does not include
+the 0.12.0 AXIS-layout change. **0.13.0 is not published on PyPI.** Until it is:
 
-- `openroboto task check` works, because it never parses a competition row;
-- `openroboto init --include-task` and a task season's `submit` refuse with an
-  explanation instead of a schema error;
+- `openroboto task check` and a task season's `submit` refuse with the
+  release/candidate instruction (`digest_source` is
+  `unavailable(protocol release 0.13.0 needed)`); there is no local mirror;
+- `openroboto task status --probe` and a signed `task status` still work: they
+  do not compute a package digest;
+- `openroboto init --include-task` and a task season's `submit` also refuse
+  because the installed protocol cannot parse `track=task`;
 - `openroboto doctor` reports a `protocol capabilities` line
-  (`Track.TASK=yes/no, AXIS_LAYOUT=yes/no`) and fails a **task workspace** when
-  `Track.TASK` is missing. A temporary cherry-pick tree is component
-  verification only; the final run must pin the released protocol and the
-  merged CLI.
+  (`Track.TASK=yes/no, AXIS_LAYOUT=yes/no, package_digest=yes/no`) and fails a
+  **task workspace** when any is missing. A temporary cherry-pick tree is
+  component verification only; the final run must pin the released protocol
+  and the merged CLI.
+
+Use `scripts/verify_task_cli_install.py` with the candidate wheel for a local
+development environment. That is not a claim that the version is
+`pip install`-able from PyPI.
 
 ## 6. Normal-install verification
 
@@ -211,13 +221,14 @@ It checks `Track.TASK`, `AXIS_LAYOUT`, the package digest, the live `/healthz`
 
 `--shared-module` / `--shared-function` (default
 `openroboto_protocol.package_digest.package_digest`) compare the CLI digest
-with the shared implementation in the candidate wheel when it exists. Until the
-protocol release ships that module, the report says `available: false`; the
-CLI's local mirror must not be presented as the final authority.
+with the shared implementation. A candidate wheel without that module is
+reported as `available: false`; the CLI has no local mirror to fall back to.
 
 The candidate wheel is **not** a published release. Do not describe it as
 `pip install`-able from PyPI until the protocol maintainer publishes it and
-this CLI's pin is bumped to that version.
+this CLI's pin is bumped to that version. Until then, a task workspace on the
+published 0.12.0 pin is refused by `task check` and by `doctor`'s
+`protocol capabilities` line.
 
 ## Related documents
 
