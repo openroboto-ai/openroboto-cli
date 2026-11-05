@@ -76,6 +76,13 @@ admission results, not something a static check can answer.
 
 ## 2. The digest rule
 
+> The authoritative implementation is the validator's
+> `task_source/package.py` (`e5fee86a`). The CLI's module is a miner-side
+> mirror pinned by a golden vector produced by that implementation; the
+> long-term home for a rule all three sides must agree on is
+> `openroboto-protocol`, which needs a release before the CLI can import it.
+> When the two disagree, the validator is right.
+
 The miner, the admission worker and the backend must compute the same value
 byte for byte:
 

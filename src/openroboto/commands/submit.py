@@ -94,6 +94,7 @@ what it does instead of implying a fresh submission.
 from __future__ import annotations
 
 import argparse
+import pathlib
 import tempfile
 from datetime import UTC, datetime
 from typing import Any, Final
@@ -247,6 +248,10 @@ def run(args: argparse.Namespace) -> int:
             if not contributor_is_bound(settings, state, verdict.live):
                 return 1
             if not layout_is_payable(settings, state, verdict.live):
+                return 1
+            if str(
+                verdict.live.track
+            ) == TASK_TRACK and not task_package_upload_is_unchanged(state, output_dir):
                 return 1
             if not slot_is_free(settings, state, verdict):
                 return 1
@@ -691,6 +696,53 @@ def task_package_is_payable(
     say(f"✅ task package ok | {where} ({package.source}/{package.task_id})")
     say(f"   package_digest: {digest}")
     return True
+
+
+def task_package_upload_is_unchanged(state: dict[str, Any], output_dir: str) -> bool:
+    """Is the repository's package byte-identical to the local one?
+
+    The gate above digests what the validator will read. That is authoritative,
+    but a miner who checked a local package and then had the uploader add a file
+    would pay for a different package -- the classic case is the model
+    uploader's `run_info.json`, which ``perform_upload`` now skips for this
+    track. This compares the two sides before the fee and refuses a silent
+    difference.
+
+    A missing local directory is not a refusal: the upload may have been reused
+    from an earlier run on another machine, and the repository is still the
+    authoritative package. Say so rather than invent a verdict.
+    """
+    remote = str(state.get("package_digest") or "")
+    if not remote:
+        return True
+    root = pathlib.Path(output_dir)
+    if not root.is_dir():
+        say(
+            "ℹ️  local package directory is not present; the repository digest "
+            "stays authoritative"
+        )
+        return True
+    try:
+        local = package_digest(select_package(root))
+    except TaskPackageError as exc:
+        say(f"ℹ️  could not compare the local package: {exc}")
+        return True
+    if local == remote:
+        state["package_local_digest"] = local
+        say(f"✅ upload unchanged | package_digest {local}")
+        return True
+    fail(
+        f"The repository package and the local package are not byte-identical, "
+        f"so the digest the validator will store differs from the one you "
+        f"checked. **Nothing was paid, nothing was sent on chain.**\n"
+        f"   repository: {remote}\n"
+        f"   local:      {local}\n"
+        f"   A leftover `run_info.json` or any added/removed file changes the "
+        f"digest; the task uploader itself does not add one.\n"
+        f"   → run `openroboto task check --repo <repo> --commit <commit>` to "
+        f"see the per-file difference, remove the extra file, and submit again"
+    )
+    return False
 
 
 def _task_source_of(params: dict[str, Any]) -> str:

@@ -122,6 +122,20 @@ def test_two_packages_need_a_selector(
     assert "more than one task package" in capsys.readouterr().err
 
 
+def test_run_info_in_a_task_package_is_a_warning(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The uploader must not add it, but a leftover still counts in the digest."""
+    package = axis_package(tmp_path / "pkg")
+    (package / "run_info.json").write_text("{}", encoding="utf-8")
+    assert main(["task", "check", str(package), "--json"]) == 0
+    summary = json.loads(capsys.readouterr().out)
+    warnings = [item for item in summary["issues"] if item["severity"] == "warning"]
+    assert [item["code"] for item in warnings] == ["package.run_info_present"]
+    # It is part of the digest on both sides, so it is not an error.
+    assert summary["package_digest"] == tp.package_digest(package)
+
+
 def test_package_option_picks_one_of_several(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

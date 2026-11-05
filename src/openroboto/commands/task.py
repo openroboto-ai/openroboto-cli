@@ -456,23 +456,39 @@ def inspect(directory: str | pathlib.Path) -> dict[str, Any]:
         for relative, digest in files
     ]
     summary["total_bytes"] = sum(item["size"] for item in summary["files"])
+    if any(item["path"] == "run_info.json" for item in summary["files"]):
+        # The uploader deliberately does not write this into a task package
+        # (it would change the digest). A leftover from a model upload still
+        # counts, because the validator digests every file.
+        summary["issues"].append(
+            {
+                "code": "package.run_info_present",
+                "message": (
+                    "run_info.json is part of the package and therefore part of "
+                    "the digest. The task uploader does not add it; a leftover "
+                    "from a model workspace changes the package identity. "
+                    "Remove it if it is not task content."
+                ),
+                "severity": "warning",
+            }
+        )
 
     try:
         package = load_package(root)
     except TaskPackageError as exc:
-        summary["issues"] = [
+        summary["issues"].append(
             {"code": "package.invalid", "message": str(exc), "severity": "error"}
-        ]
+        )
         return summary
 
     summary["source"] = package.source
     summary["task_id"] = package.task_id
     summary["instruction"] = package.instruction
     issues = validate_package(package)
-    summary["issues"] = [
+    summary["issues"].extend(
         {"code": issue.code, "message": issue.message, "severity": issue.severity}
         for issue in issues
-    ]
+    )
     summary["ok"] = not any(issue.is_error for issue in issues)
     return summary
 

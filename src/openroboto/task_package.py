@@ -8,6 +8,16 @@ reference solution.
 
 ## The digest is a cross-repository contract
 
+🔴 **This module is a miner-side mirror, not a second authority.** The one
+implementation is the validator's ``task_source/package.py`` at ``e5fee86a``
+(plus the evaluation layer's verification of the same function). The correct
+home for a rule three sides must agree on is ``openroboto-protocol``; moving it
+there needs a protocol release, and until that exists the CLI cannot import it
+without breaking every install pinned to the published wheel. The golden value
+in ``tests/test_task_package.py`` was produced by the validator implementation
+on the same fixture -- if either side changes, re-run that check. Do not treat
+this copy as the place to "fix" a disagreement: the validator is the reference.
+
 Three layers compute the same number and must agree byte for byte:
 
 * the admission worker reports ``package_digest``;

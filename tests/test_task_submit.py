@@ -134,6 +134,31 @@ def test_an_unreadable_repository_is_not_a_verdict(
     assert "not a verdict on your package" in message
 
 
+def test_the_upload_must_be_byte_identical_to_the_local_package(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    package = axis_package(tmp_path / "pkg")
+    state = {"package_digest": package_digest(package)}
+    assert submit_command.task_package_upload_is_unchanged(state, str(package)) is True
+    assert state["package_local_digest"] == state["package_digest"]
+    assert "upload unchanged" in capsys.readouterr().out
+
+    (package / "run_info.json").write_text("{}", encoding="utf-8")
+    assert submit_command.task_package_upload_is_unchanged(state, str(package)) is False
+    assert "not byte-identical" in capsys.readouterr().err
+
+
+def test_a_missing_local_package_does_not_invent_a_verdict(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    state = {"package_digest": "a" * 64}
+    assert (
+        submit_command.task_package_upload_is_unchanged(state, str(tmp_path / "gone"))
+        is True
+    )
+    assert "repository digest stays authoritative" in capsys.readouterr().out
+
+
 def test_a_task_season_must_be_collected_by_burn() -> None:
     """The backend files and verifies a burn. A transfer season would take the
     fee to a coldkey the backend never checks and never admit the task."""
