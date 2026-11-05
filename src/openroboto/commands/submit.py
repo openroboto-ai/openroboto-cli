@@ -94,8 +94,9 @@ what it does instead of implying a fresh submission.
 from __future__ import annotations
 
 import argparse
+import tempfile
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Final
 
 from openroboto_protocol.commitment import Track
 from openroboto_protocol.model_format import FormatIssueCode, FormatReport
@@ -137,6 +138,15 @@ from openroboto.console import fail, say
 from openroboto.contributor import ContributorKeyError, load_key
 from openroboto.huggingface import TreeError, fetch_tree
 from openroboto.huggingface.access import AccessError, grant_to_of, lock_and_grant
+from openroboto.task_package import (
+    PackageFetchError,
+    TaskPackageError,
+    fetch_package,
+    load_package,
+    package_digest,
+    select_package,
+    validate_package,
+)
 
 #: One request instead of a paging loop, the same figure `status` uses -- it is
 #: the backend's maximum page size, and it is asked for **one hotkey's** rows in
@@ -144,15 +154,16 @@ from openroboto.huggingface.access import AccessError, grant_to_of, lock_and_gra
 #: fees for one competition.
 ROSTER_LIMIT = 1000
 
-#: The task track, when the installed protocol package knows it.
+#: `competitions.track` for task-authoring seasons.
 #:
-#: ⚠️ **`getattr`, not `Track.TASK`.** The pinned release on PyPI predates the
-#: task track, and every simulation / real-track payment evaluates this line.
-#: A bare attribute access would turn "this release has no task track" into an
-#: `AttributeError` on the money path of two tracks that have nothing to do
-#: with contributors. `None` means "no task track at all", so the gate is off --
-#: exactly the old behaviour.
-_TASK_TRACK = getattr(Track, "TASK", None)
+#: ⚠️ **A string, not `Track.TASK`.** The pinned protocol release on PyPI
+#: predates the task track, and this comparison sits on the money path of the
+#: simulation and real tracks too. A bare attribute access would turn "this
+#: install has no task track" into an `AttributeError` for miners who have
+#: nothing to do with contributors. The protocol package is what decides whether
+#: such a season can even be parsed; by the time a row is here, `live.track` is
+#: its string value.
+TASK_TRACK: Final = "task"
 
 
 def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
@@ -335,7 +346,7 @@ def contributor_is_bound(
     that, rotating a key would produce a gate that refuses a submission the
     backend accepts.
     """
-    if _TASK_TRACK is None or live.track != _TASK_TRACK:
+    if str(live.track) != TASK_TRACK:
         return True
 
     hotkey = str(state.get("hotkey_ss58") or settings.hotkey_ss58 or "")
@@ -519,6 +530,13 @@ def layout_is_payable(
     reaches `cli.main`, which prints it and exits 1 -- unpaid, which is the
     point.
     """
+    if str(live.track) == TASK_TRACK:
+        # A task season buys a verdict on a **task package**, not on a
+        # checkpoint. The model layout rules do not apply and the fingerprint
+        # sentinel does not exist, so the equal of this gate is the package
+        # check below.
+        return task_package_is_payable(settings, state, live)
+
     if live.track == Track.REAL:
         # 🔴 **The real track has no rule book, so this gate has nothing to be
         #    the equal of.**
@@ -575,6 +593,117 @@ def layout_is_payable(
 
     say(f"✅ layout ok | {where} judged by the {rules_label(layout)} rules")
     return True
+
+
+def task_package_is_payable(
+    settings: Settings, state: dict[str, Any], live: Competition
+) -> bool:
+    """Would the validator's admission accept the package at this commit?
+
+    The fee buys a verdict on ``repo@commit``, so this gate downloads exactly
+    that revision and judges what the validator will read. The digest is the
+    same rule as ``task_source/package.py`` and is printed in full -- it is the
+    value the backend will store in ``tasks.package_digest``.
+
+    It does **not** claim the task is solvable, deterministic or not a freebie;
+    those are runtime admission. It answers the two things a static check can:
+    is this a well-formed package, and is it the same bytes the miner checked.
+    """
+    repo_id = str(state.get("hf_repo_id", ""))
+    commit = announced_commit(state)
+    where = f"{repo_id}@{commit[:8]}"
+
+    expected_source = _task_source_of(live.params)
+    if not expected_source:
+        fail(
+            f"{live.label} is a task-authoring season but it does not say which "
+            f"task source it runs (`params.task.source`), so the validator cannot "
+            f"choose a checker vocabulary and the backend would retry this "
+            f"submission forever. **Nothing was paid, nothing was sent on "
+            f"chain.**\n"
+            f"   This is the season's configuration, not your package.\n"
+            f"   → report it to the subnet operators; `openroboto init "
+            f"--refresh` cannot fix it"
+        )
+        return False
+
+    try:
+        with tempfile.TemporaryDirectory(prefix="openroboto-task-submit-") as cache:
+            snapshot_root = fetch_package(
+                repo_id, commit, token=settings.hf_token, cache_dir=cache
+            )
+            # The validator digs the package out of the snapshot and digests the
+            # package directory, so this side must select the same directory.
+            # Selected without a source filter on purpose: the check below names
+            # the mismatch, which is more useful than "no robodojo package here"
+            # when the repository holds a perfectly good axis package.
+            directory = select_package(snapshot_root)
+            package = load_package(directory)
+            issues = validate_package(package)
+            digest = package_digest(directory)
+    except (PackageFetchError, TaskPackageError) as exc:
+        fail(
+            f"Could not read the task package at {where}, so it was **not** "
+            f"judged -- and **nothing was paid, nothing was sent on chain**.\n"
+            f"   {exc}\n"
+            f"   This is not a verdict on your package: the validator reads the "
+            f"same repository, and a package it cannot read is retried by the "
+            f"backend rather than rejected. Fix the upload or the access and run "
+            f"`openroboto submit` again; the upload is reused."
+        )
+        return False
+
+    errors = [issue for issue in issues if issue.is_error]
+    if errors:
+        lines = "\n".join(f"   ❌ [{issue.code}] {issue.message}" for issue in errors)
+        fail(
+            f"The task package at {where} is not well formed, so the validator "
+            f"would reject it **after the fee was paid**. **Nothing was paid, "
+            f"nothing was sent on chain.**\n"
+            f"{lines}\n"
+            f"   → fix the package, re-upload, and run `openroboto task check "
+            f"{repo_id}@{commit}` before submitting again"
+        )
+        return False
+
+    if package.source != expected_source:
+        fail(
+            f"{live.label} runs task source `{expected_source}`, but the package "
+            f"at {where} declares `{package.source}`. The validator would use "
+            f"the season's checker vocabulary on a package written for another "
+            f"source. **Nothing was paid, nothing was sent on chain.**\n"
+            f"   → submit a `{expected_source}` package, or report the season's "
+            f"configuration if it is wrong"
+        )
+        return False
+
+    for issue in issues:
+        if not issue.is_error:
+            say(f"⚠️  [{issue.code}] {issue.message}")
+
+    # Written down before the fee so `status`/the evidence trail can quote the
+    # same number the backend will store. `save_state` runs later in the same
+    # command; a crash before it leaves the file as it was, which is the safe
+    # direction (nothing was paid).
+    state["package_digest"] = digest
+    state["package_source"] = package.source
+    state["package_task_id"] = package.task_id
+    say(f"✅ task package ok | {where} ({package.source}/{package.task_id})")
+    say(f"   package_digest: {digest}")
+    return True
+
+
+def _task_source_of(params: dict[str, Any]) -> str:
+    """``params.task.source``, read the way the backend's ``task_pool`` reads it.
+
+    Missing is ``""`` and the caller refuses: the backend turns a missing source
+    into a permanent ``retry``, so paying would strand the entry fee.
+    """
+    section = params.get("task")
+    if not isinstance(section, dict):
+        return ""
+    value = section.get("source")
+    return value.strip() if isinstance(value, str) and value.strip() else ""
 
 
 def _no_weights(where: str) -> None:

@@ -397,6 +397,24 @@ def judge(
             f"operators; `openroboto init --refresh` cannot fix it."
         )
 
+    # A task-authoring season is priced and judged as a **burn**, by the same
+    # path as the simulation track: `admit_task` files the submission with
+    # `payment_kind="burn"` and verifies that burn. A season configured as
+    # `transfer` would take the miner's TAO to a coldkey and leave the backend
+    # looking for a burn that will never exist -- the fee is gone and the task
+    # never enters the pool.
+    if str(live.track) == "task" and live_fee.kind != BURN:
+        raise PrecheckFailed(
+            f"{_name(live)} is a task-authoring season but its entry fee is "
+            f"configured as `{live_fee.kind}`. This track is collected by "
+            f"burning the fee, which the backend verifies; a transfer would be "
+            f"paid to nobody the subnet checks and the task would never enter "
+            f"the pool.\n"
+            f"  Nothing was paid. This is the season's own configuration -- "
+            f"report it to the subnet operators; `openroboto init --refresh` "
+            f"copies it rather than fixing it."
+        )
+
     # 🔴 Existence before equality. See the docstring.
     if live_fee.kind == TRANSFER and live_fee.coldkey is None:
         raise PrecheckFailed(
@@ -486,7 +504,13 @@ def resolve_competition(
     them to answer the prompt without reading it.
     """
     try:
-        live_rows = fetch_competitions(settings.backend_url).data
+        # 🔴 Task seasons are hidden unless asked for. A workspace whose
+        #    snapshot says `track=task` must ask, or the season it is about to
+        #    pay for is "not listed" and `submit` refuses every time.
+        if snapshot.track == "task":
+            live_rows = fetch_competitions(settings.backend_url, include_task=True).data
+        else:
+            live_rows = fetch_competitions(settings.backend_url).data
     except BackendError as exc:
         _refuse(
             f"Cannot reach the backend, so there is no way to confirm which "

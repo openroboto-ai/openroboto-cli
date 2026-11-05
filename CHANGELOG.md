@@ -4,6 +4,48 @@ Every entry answers one question before it lists anything: **does a miner have t
 change something, and what breaks if they do not?** A diff summary without "who
 has to act" is not usable by the people who installed this.
 
+## 1.6.0
+
+### Task-authoring seasons: a package, not a model
+
+A season with `track: task` takes a **task package** (a `task.json`, its
+instances and manifests) instead of a model checkpoint. `openroboto check` would
+have judged that package by the π0.5/LingBot file rules and rejected a correct
+one, and `submit` would have refused it for having no weights. Both are fixed:
+
+```bash
+openroboto task check ./my-task            # local, offline
+openroboto task check --repo user/pkg --commit <40-hex>
+openroboto submit
+```
+
+`task check` prints the SHA-256 of **every file** and the package digest. That
+digest is the same rule the validator's admission uses and the backend stores in
+`tasks.package_digest`; `--expect-digest` lets a miner compare it with a value
+the subnet reported. It validates the declared source's structure (AXIS
+manifests and payload hashes, RoboDojo official task fields), but it does not
+claim the task is solvable or deterministic — that is runtime admission.
+
+`submit` now routes a task season to that package gate instead of the model
+layout/fingerprint gates, and refuses a package whose declared source differs
+from the season's `params.task.source`. The upload no longer writes
+`run_info.json` into a task package: the digest counts every file, so that file
+would change the package identity between what the miner checked and what the
+validator reads.
+
+`openroboto init --include-task` can create a task workspace; `--refresh`
+always asks for task seasons so an existing one can be refreshed. A task
+workspace must name `huggingface.repo_id` — `pi05-<hotkey>` is a claim about a
+model.
+
+⚠️ **Requires a protocol release that knows `Track.TASK`.** The source protocol
+repository's `main` has it, but the 0.12.0 wheel published on PyPI predates the
+change — and that `main` line does not contain the 0.12.0 AXIS-layout change
+this CLI also imports. A release that merges both is needed. Until then,
+`init --include-task` and a task season's `submit` refuse with an explanation;
+local `openroboto task check` works with the pinned release because it never
+parses a competition row.
+
 ## 1.5.1
 
 ### Nothing to do; `openroboto check` stops warning about correct AXIS checkpoints

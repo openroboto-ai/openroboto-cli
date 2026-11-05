@@ -55,10 +55,19 @@ def push_model(
     competition_id: int = 0,
     metrics: dict[str, Any] | None = None,
     base_model: str = "",
+    *,
+    write_run_info: bool = True,
+    artifact: str = "model",
 ) -> UploadResult:
     """Push all of `model_dir` to `repo_id`, whatever its visibility.
 
     Returns the URL and the commit SHA.
+
+    ``write_run_info=False`` is for a **task package**. The validator's
+    ``package_digest`` walks every file in the repository with no whitelist, so
+    a `run_info.json` written into the package would change the digest between
+    what the miner validated locally and what the validator reads. The package
+    is uploaded byte for byte as the miner wrote it.
 
     🔴 **No timeout around `upload_folder`, and no worker thread.** A complete
     π0.5 checkpoint is several GB, which ordinary home bandwidth does not move in
@@ -76,7 +85,8 @@ def push_model(
             "--output-dir"
         )
 
-    _write_run_info(path, competition_id, metrics, base_model)
+    if write_run_info:
+        _write_run_info(path, competition_id, metrics, base_model)
 
     total_bytes = sum(f.stat().st_size for f in path.rglob("*") if f.is_file())
     file_count = sum(1 for f in path.rglob("*") if f.is_file())
@@ -116,7 +126,7 @@ def push_model(
             # over a LingBot checkpoint is a claim nobody made on purpose.
             commit_message=(
                 f"Competition {competition_id}"
-                f"{' ' + base_model if base_model else ''} model"
+                f"{' ' + base_model if base_model else ''} {artifact}"
                 f" — {datetime.now(UTC).isoformat()}"
             ),
         )

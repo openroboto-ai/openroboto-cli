@@ -60,6 +60,7 @@ import urllib.parse
 from datetime import datetime
 from typing import Any, TypeVar
 
+from openroboto_protocol.commitment import Track
 from openroboto_protocol.schemas import (
     Competition,
     Contract,
@@ -232,7 +233,7 @@ def fetch_rejections(
 
 
 def fetch_competitions(
-    base_url: str, *, include_archived: bool = False
+    base_url: str, *, include_archived: bool = False, include_task: bool = False
 ) -> ListEnvelope[Competition]:
     """The competitions taking submissions, in `(track, seq)` order.
 
@@ -246,13 +247,35 @@ def fetch_competitions(
     here would be dropped by FastAPI as an undeclared query string: the archived
     season simply never comes back, **and nothing reports an error**.
     """
+    if include_task and getattr(Track, "TASK", None) is None:
+        # The backend serves `track="task"` rows only when asked. Parsing one
+        # needs a protocol release that knows the track; without it pydantic
+        # rejects the whole list, which is exactly why the backend hides them.
+        # Fail with the reason instead of a schema error.
+        raise BackendError(
+            "This workspace mines a task-authoring season, but the installed "
+            "openroboto-protocol does not know `track=task` yet, so the "
+            "competition list cannot be parsed.\n"
+            "   → install the protocol release that adds `Track.TASK` (the "
+            "pinned 0.12.0 on PyPI predates it), or run this CLI against a "
+            "checkout of the protocol repository\n"
+            "   Nothing was uploaded, paid or sent on chain."
+        )
     raw = _get(
         base_url,
         COMPETITIONS_PATH,
         # Sent only when asked for. `False` would go out as the string "False",
         # which happens to parse correctly today and is one backend refactor
         # away from not doing so.
-        {"include_archived": "true" if include_archived else ""},
+        {
+            "include_archived": "true" if include_archived else "",
+            # Task seasons (`track="task"`) are hidden by default because every
+            # CLI release before protocol 0.12.0 parsed the list with a `Track`
+            # enum that did not admit them. This client pins 0.12.0, so it can
+            # ask; a model miner still does not, so the list they see is
+            # unchanged.
+            "include_task": "true" if include_task else "",
+        },
     )
     return _parse(ListEnvelope[Competition], raw, COMPETITIONS_PATH)
 

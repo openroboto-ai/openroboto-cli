@@ -1,0 +1,717 @@
+"""Task packages: the directory format a task season evaluates, and its digest.
+
+A task season (``competitions.track = "task"``) does not take a model. The
+on-chain commitment names a HuggingFace repository at one commit, exactly as a
+model submission does, but that repository holds a **task package**: a
+``task.json`` plus the instance payloads, manifests and (for AXIS) the scene and
+reference solution.
+
+## The digest is a cross-repository contract
+
+Three layers compute the same number and must agree byte for byte:
+
+* the admission worker reports ``package_digest``;
+* the backend stores it as ``tasks.package_digest``;
+* the evaluation layer pins it as ``EvaluationSpec.task.version_digest``.
+
+The one implementation is the validator's ``task_source/package.py``; the
+backend stores what the validator reported and never recomputes it. This module
+is the **miner-side** copy, because a miner has to be able to compute the same
+number before paying an entry fee. The rule is therefore not "similar", it is
+the same:
+
+1. walk **every regular file** in the package directory, recursively, with no
+   whitelist and no exclusions (``reference.json``, ``scene.xml``, a stray
+   ``.DS_Store`` all count);
+2. sort the paths **as paths**, not as strings;
+3. per file, ``sha256(read_bytes())``;
+4. digest the UTF-8 bytes of ``"\\n".join(f"{path}\\0{file_sha256}")``.
+
+The sorting detail is not pedantry: ``Path`` sorts by parts, so ``a-b/x`` and
+``a/b`` order differently under a string sort. A second implementation that
+sorts strings produces a different number on exactly the packages that have
+mixed nesting, and the miner pays for the difference.
+
+## What is validated here, and what is not
+
+``validate_package`` answers "is this a well-formed package of the declared
+source" -- required files, declared instance counts, payload references and the
+canonical hashes the manifests claim. It deliberately does **not** answer
+"is this a good task": solvable / not-a-freebie / determinism are the
+validator's runtime admission (``task_source/admission.py``), and claiming them
+from a static check would be the same kind of lie as a mocked commitment.
+
+Runtime is not verified here either. An AXIS package needs MuJoCo and a
+RoboDojo package needs Isaac Sim; this module touches neither.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import pathlib
+from collections.abc import Mapping
+from dataclasses import dataclass
+from typing import Any, Final
+
+TASK_FILE: Final = "task.json"
+SCHEMA_VERSION: Final = 1
+
+#: The task sources this client knows how to inspect. **Not an enum on
+#: purpose**: sources are added by a config row, not a migration (the backend's
+#: ``tasks.source`` is ``text`` for the same reason). An unknown source is
+#: refused with the list rather than guessed.
+TASK_SOURCES: Final = ("axis", "robodojo")
+
+#: The eight checker types the AXIS vocabulary admits. Copied from the
+#: validator's ``task_source/axis.py`` because it is a wire vocabulary: a wrong
+#: guess here would validate a package the validator then rejects.
+AXIS_CHECKER_TYPES: Final = (
+    "CompositeChecker",
+    "RelativeCylinderChecker",
+    "RelativePositionBoundsChecker",
+    "DirectedRotationChecker",
+    "GripperOpenChecker",
+    "DrawerBBoxChecker",
+    "FrameBBoxChecker",
+    "SamplePositionDeltaChecker",
+)
+
+ROBODOJO_PINNED_REF: Final = "9226f48ea694b3f53db12d4922e8b1199f8d0891"
+"""The RoboDojo commit the validator pins. A package that names another commit
+is not wrong by itself -- it is a package for a different runtime -- so this is
+reported as a warning, not an error, and only when the declared value differs."""
+
+
+class TaskPackageError(Exception):
+    """The directory is not a task package at all (no readable ``task.json``)."""
+
+
+class PackageFetchError(Exception):
+    """``repo@commit`` could not be downloaded, so nothing could be judged."""
+
+
+@dataclass(frozen=True)
+class Issue:
+    """One finding. ``severity == "error"`` means the validator would refuse."""
+
+    code: str
+    message: str
+    severity: str = "error"
+
+    @property
+    def is_error(self) -> bool:
+        return self.severity == "error"
+
+
+@dataclass(frozen=True)
+class TaskPackage:
+    directory: pathlib.Path
+    task: Mapping[str, Any]
+    source: str
+    task_id: str
+    instruction: str
+
+    def path(self, relative: str) -> pathlib.Path:
+        """Resolve a package-relative path, refusing anything that escapes."""
+        candidate = (self.directory / relative).resolve()
+        try:
+            candidate.relative_to(self.directory.resolve())
+        except ValueError as exc:
+            raise TaskPackageError(
+                f"package path escapes task directory: {relative!r}"
+            ) from exc
+        return candidate
+
+
+# ── hashing ──────────────────────────────────────────────────────────────────
+
+
+def canonical_json_sha256(value: Any) -> str:
+    """The canonical-JSON SHA-256 the AXIS manifests declare.
+
+    Same rule as the AXIS evaluation program: ``ensure_ascii=False``, compact
+    separators, sorted keys, UTF-8.
+    """
+    encoded = json.dumps(
+        value, ensure_ascii=False, separators=(",", ":"), sort_keys=True
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def package_files(directory: str | pathlib.Path) -> tuple[tuple[str, str], ...]:
+    """``(relative POSIX path, sha256)`` for every regular file, path-sorted.
+
+    The sort is over ``Path`` objects to match the validator exactly; see the
+    module docstring.
+    """
+    root = pathlib.Path(directory).expanduser().resolve()
+    entries: list[tuple[str, str]] = []
+    for path in sorted(root.rglob("*")):
+        if not path.is_file():
+            continue
+        relative = path.relative_to(root).as_posix()
+        entries.append((relative, hashlib.sha256(path.read_bytes()).hexdigest()))
+    return tuple(entries)
+
+
+def digest_of_files(files: tuple[tuple[str, str], ...]) -> str:
+    encoded = "\n".join(f"{relative}\0{digest}" for relative, digest in files)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def package_digest(directory: str | pathlib.Path) -> str:
+    """The task package's content identity (see the module docstring)."""
+    return digest_of_files(package_files(directory))
+
+
+# ── loading ──────────────────────────────────────────────────────────────────
+
+
+def read_json(path: pathlib.Path) -> Any:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError as exc:
+        raise TaskPackageError(f"missing file: {path}") from exc
+    except ValueError as exc:
+        raise TaskPackageError(f"invalid JSON: {path}: {exc}") from exc
+
+
+def load_package(directory: str | pathlib.Path) -> TaskPackage:
+    """Read and check the fields every source shares.
+
+    Raises ``TaskPackageError`` when the directory is not a package or
+    ``task.json`` is not usable. Source-specific structure is
+    ``validate_package``'s job, so one bad manifest does not hide the rest.
+    """
+    root = pathlib.Path(directory).expanduser().resolve()
+    path = root / TASK_FILE
+    if not path.is_file():
+        raise TaskPackageError(f"{root} is not a task package: missing {TASK_FILE}")
+    task = read_json(path)
+    if not isinstance(task, Mapping):
+        raise TaskPackageError(f"{path} must contain a JSON object")
+    if task.get("schema_version") != SCHEMA_VERSION:
+        raise TaskPackageError(
+            f"{path}: unsupported schema_version {task.get('schema_version')!r} "
+            f"(this client knows {SCHEMA_VERSION})"
+        )
+    source = task.get("source")
+    if source not in TASK_SOURCES:
+        raise TaskPackageError(
+            f"{path}: source must be one of {list(TASK_SOURCES)}, got {source!r}"
+        )
+    task_id = task.get("task_id")
+    if not isinstance(task_id, (str, int)) or not str(task_id).strip():
+        raise TaskPackageError(f"{path}: task_id must be a non-empty string or integer")
+    instruction = task.get("instruction")
+    if not isinstance(instruction, str) or not instruction.strip():
+        raise TaskPackageError(f"{path}: instruction must be a non-empty string")
+    return TaskPackage(root, task, str(source), str(task_id), instruction.strip())
+
+
+def fetch_package(
+    repo_id: str,
+    commit: str,
+    *,
+    token: str = "",
+    cache_dir: str | pathlib.Path | None = None,
+) -> pathlib.Path:
+    """Download ``repo@commit`` and return the snapshot directory.
+
+    ``commit`` must be the full 40-character revision; a branch or tag would let
+    the contents (and therefore the digest) move after the commitment is
+    written. ``snapshot_download`` is used without ``local_dir`` so the returned
+    directory contains **only repository files** -- ``local_dir`` writes
+    ``.cache/huggingface`` metadata inside it, and the digest counts every file.
+    """
+    if len(commit) != 40 or any(char not in "0123456789abcdef" for char in commit):
+        raise PackageFetchError(
+            f"{commit!r} is not a full 40-character lowercase commit; "
+            "the package identity is `repo@commit`, not a branch or tag"
+        )
+    try:
+        from huggingface_hub import snapshot_download
+        from huggingface_hub.utils import disable_progress_bars
+    except ImportError as exc:  # pragma: no cover -- huggingface_hub is a dependency
+        raise PackageFetchError(
+            "huggingface_hub is not installed, so a repository package cannot "
+            "be fetched"
+        ) from exc
+    # `--json` must be one object on stdout; the download bars are noise for a
+    # command whose output is meant to be pasted into an evidence record.
+    disable_progress_bars()
+    try:
+        return pathlib.Path(
+            snapshot_download(
+                repo_id=repo_id,
+                revision=commit,
+                repo_type="model",
+                token=token or None,
+                cache_dir=str(cache_dir) if cache_dir is not None else None,
+            )
+        )
+    except Exception as exc:  # huggingface_hub has no single error base class
+        raise PackageFetchError(
+            f"could not download {repo_id}@{commit[:8]}: {exc}"
+        ) from exc
+
+
+def discover_packages(root: str | pathlib.Path) -> list[pathlib.Path]:
+    """Directories holding a ``task.json``, one or two levels below ``root``."""
+    base = pathlib.Path(root).expanduser()
+    if (base / TASK_FILE).is_file():
+        return [base]
+    found: list[pathlib.Path] = []
+    for depth in (1, 2):
+        pattern = "/".join(["*"] * depth) + f"/{TASK_FILE}"
+        found.extend(path.parent for path in base.glob(pattern) if path.is_file())
+    return sorted(set(found))
+
+
+# ── validation ───────────────────────────────────────────────────────────────
+
+
+def checker_types_in(config: Any) -> set[str]:
+    """Every ``type`` in a checker tree, including Composite children."""
+    found: set[str] = set()
+
+    def visit(node: Any) -> None:
+        if isinstance(node, Mapping):
+            if isinstance(node.get("type"), str):
+                found.add(node["type"])
+            for value in node.values():
+                visit(value)
+        elif isinstance(node, list):
+            for value in node:
+                visit(value)
+
+    visit(config)
+    return found
+
+
+def select_package(
+    root: str | pathlib.Path, *, source: str = "", relative: str = ""
+) -> pathlib.Path:
+    """The package directory a repository download names.
+
+    The validator discovers packages at the repository root or one/two levels
+    below and digests the **package** directory, not the repository root. Both
+    sides must pick the same one for their digests to be comparable.
+
+    ``source`` filters by the season's task source. Ambiguity is refused, not
+    guessed: two packages of the same source in one repository cannot be told
+    apart by anything this side knows, and the validator has the same problem.
+    """
+    base = pathlib.Path(root).expanduser().resolve()
+    if not base.is_dir():
+        raise TaskPackageError(f"{base} is not a directory")
+    if relative:
+        target = (base / relative).expanduser().resolve()
+        try:
+            target.relative_to(base)
+        except ValueError as exc:
+            raise TaskPackageError(f"package path {relative!r} escapes {base}") from exc
+        if not (target / TASK_FILE).is_file():
+            raise TaskPackageError(
+                f"{target} is not a task package: missing {TASK_FILE}"
+            )
+        return target
+
+    matches: list[tuple[pathlib.Path, str, str]] = []
+    for directory in discover_packages(base):
+        try:
+            task = read_json(directory / TASK_FILE)
+        except TaskPackageError:
+            continue
+        if not isinstance(task, Mapping):
+            continue
+        declared = str(task.get("source") or "")
+        if source and declared != source:
+            continue
+        matches.append((directory, declared, str(task.get("task_id"))))
+
+    if not matches:
+        wanted = f" with source={source}" if source else ""
+        raise TaskPackageError(
+            f"no task package{wanted} found under {base}; the validator looks "
+            f"for {TASK_FILE} at the root or one/two levels below"
+        )
+    if len(matches) > 1:
+        listing = ", ".join(
+            f"{directory.relative_to(base)} ({declared}/{task_id})"
+            for directory, declared, task_id in matches
+        )
+        raise TaskPackageError(
+            f"more than one task package under {base}: {listing}; name one "
+            f"explicitly or filter by source"
+        )
+    return matches[0][0]
+
+
+def validate_package(package: TaskPackage) -> list[Issue]:
+    """Source-specific structure and manifest consistency.
+
+    Errors are the ones the validator's static checks make terminal; warnings
+    are facts a miner should see but that do not make the package invalid.
+    """
+    issues: list[Issue] = []
+    if package.source == "axis":
+        issues.extend(_validate_axis(package))
+    elif package.source == "robodojo":
+        issues.extend(_validate_robodojo(package))
+    return issues
+
+
+def _validate_axis(package: TaskPackage) -> list[Issue]:
+    issues: list[Issue] = []
+    task = package.task
+
+    checker = task.get("checker")
+    if not isinstance(checker, Mapping):
+        issues.append(
+            Issue("axis.checker_missing", "task.json has no `checker` object")
+        )
+        declared: set[str] = set()
+    else:
+        declared = checker_types_in(checker)
+        unknown = sorted(declared - set(AXIS_CHECKER_TYPES))
+        if not declared:
+            issues.append(
+                Issue("axis.checker_empty", "task.json `checker` declares no type")
+            )
+        if unknown:
+            issues.append(
+                Issue(
+                    "axis.checker_unknown",
+                    f"checker types not in the AXIS vocabulary: {unknown}",
+                )
+            )
+
+    benchmark = _read_manifest(package, "benchmark.json", issues)
+    randomization = _read_manifest(package, "randomization.json", issues)
+
+    benchmark_task: Mapping[str, Any] = {}
+    if benchmark is not None:
+        matches = [
+            item
+            for item in benchmark.get("tasks") or []
+            if isinstance(item, Mapping) and str(item.get("task_id")) == package.task_id
+        ]
+        if len(matches) != 1:
+            issues.append(
+                Issue(
+                    "axis.benchmark_task",
+                    f"benchmark.json must contain exactly one task with "
+                    f"task_id={package.task_id}; found {len(matches)}",
+                )
+            )
+        else:
+            benchmark_task = matches[0]
+
+    instances: list[Mapping[str, Any]] = []
+    variants: list[Mapping[str, Any]] = []
+    if randomization is not None:
+        matches = [
+            item
+            for item in randomization.get("tasks") or []
+            if isinstance(item, Mapping) and str(item.get("task_id")) == package.task_id
+        ]
+        if len(matches) != 1:
+            issues.append(
+                Issue(
+                    "axis.randomization_task",
+                    f"randomization.json must contain exactly one task with "
+                    f"task_id={package.task_id}; found {len(matches)}",
+                )
+            )
+        else:
+            raw_variants = matches[0].get("variants")
+            if not isinstance(raw_variants, list) or not raw_variants:
+                issues.append(
+                    Issue(
+                        "axis.randomization_variants",
+                        "randomization.json task has no `variants` list",
+                    )
+                )
+            else:
+                variants = [item for item in raw_variants if isinstance(item, Mapping)]
+
+    if not 1 <= len(variants) <= 20:
+        issues.append(
+            Issue(
+                "axis.instance_count",
+                f"instance count must be between 1 and 20, got {len(variants)}",
+            )
+        )
+
+    for variant in variants:
+        issue = _validate_axis_variant(package, task, variant, declared)
+        if issue is not None:
+            issues.append(issue)
+        payload = _payload_of(package, variant)
+        if payload is not None:
+            instances.append(payload)
+
+    reference = task.get("reference_solution")
+    if reference:
+        try:
+            path = package.path(str(reference))
+        except TaskPackageError as exc:
+            issues.append(Issue("axis.reference_escapes", str(exc)))
+        else:
+            if not path.is_file():
+                issues.append(
+                    Issue(
+                        "axis.reference_missing",
+                        f"reference_solution names a missing file: {reference}",
+                    )
+                )
+
+    if instances and benchmark_task:
+        first = instances[0]
+        if benchmark_task.get("checker_sha256") != canonical_json_sha256(
+            first.get("checker_config")
+        ):
+            issues.append(
+                Issue(
+                    "axis.manifest_checker_mismatch",
+                    "benchmark.checker_sha256 does not match the first payload",
+                )
+            )
+        if benchmark_task.get("initial_state_sha256") != canonical_json_sha256(
+            first.get("initial_state") or {}
+        ):
+            issues.append(
+                Issue(
+                    "axis.manifest_state_mismatch",
+                    "benchmark.initial_state_sha256 does not match the first payload",
+                )
+            )
+        if str(benchmark_task.get("instruction")) != package.instruction:
+            issues.append(
+                Issue(
+                    "axis.manifest_instruction_mismatch",
+                    "benchmark.instruction does not match task.json",
+                )
+            )
+
+    return issues
+
+
+def _validate_axis_variant(
+    package: TaskPackage,
+    task: Mapping[str, Any],
+    variant: Mapping[str, Any],
+    declared: set[str],
+) -> Issue | None:
+    instance = variant.get("instance")
+    payload_path = variant.get("payload_path")
+    if not isinstance(instance, int) or isinstance(instance, bool):
+        return Issue(
+            "axis.variant_instance",
+            f"variant has no integer instance: {variant!r}",
+        )
+    if not isinstance(payload_path, str) or not payload_path:
+        return Issue("axis.variant_payload", f"variant {instance} has no payload_path")
+    try:
+        path = package.path(payload_path)
+    except TaskPackageError as exc:
+        return Issue("axis.payload_escapes", f"instance {instance}: {exc}")
+    if not path.is_file():
+        return Issue(
+            "axis.payload_missing",
+            f"instance {instance}: payload_path {payload_path!r} does not exist",
+        )
+    try:
+        payload = read_json(path)
+    except TaskPackageError as exc:
+        return Issue("axis.payload_invalid", f"instance {instance}: {exc}")
+    if not isinstance(payload, Mapping):
+        return Issue(
+            "axis.payload_not_object", f"instance {instance}: payload is not an object"
+        )
+
+    problems: list[str] = []
+    actual_payload = canonical_json_sha256(payload)
+    if variant.get("payload_canonical_sha256") != actual_payload:
+        problems.append(
+            f"payload hash {actual_payload[:12]} != declared "
+            f"{str(variant.get('payload_canonical_sha256'))[:12]}"
+        )
+    actual_checker = canonical_json_sha256(payload.get("checker_config"))
+    if variant.get("checker_sha256") != actual_checker:
+        problems.append(
+            f"checker hash {actual_checker[:12]} != declared "
+            f"{str(variant.get('checker_sha256'))[:12]}"
+        )
+    if str(payload.get("id")) != package.task_id:
+        problems.append(f"payload id {payload.get('id')!r} != {package.task_id!r}")
+    if payload.get("checker_config") != task.get("checker"):
+        problems.append("payload checker_config differs from task.json")
+    state_hash = canonical_json_sha256(payload.get("initial_state") or {})
+    if variant.get("initial_state_sha256") is not None and state_hash != variant.get(
+        "initial_state_sha256"
+    ):
+        problems.append("initial_state hash differs")
+    scene = payload.get("scene")
+    if not payload.get("mjcf_xml") and not (
+        isinstance(scene, str) and scene and _inside_package(package, scene)
+    ):
+        problems.append("no mjcf_xml and no readable scene inside the package")
+    if payload.get("checker_config") is not None:
+        unknown = checker_types_in(payload.get("checker_config")) - declared
+        if unknown:
+            problems.append(
+                f"payload declares checker types task.json does not: {unknown}"
+            )
+    if problems:
+        return Issue(
+            "axis.payload_mismatch",
+            f"instance {instance}: " + "; ".join(problems),
+        )
+    return None
+
+
+def _validate_robodojo(package: TaskPackage) -> list[Issue]:
+    issues: list[Issue] = []
+    task = package.task
+    official = task.get("official_task")
+    if not isinstance(official, str) or not official.strip():
+        issues.append(
+            Issue(
+                "robodojo.official_task",
+                "task.json must name the official RoboDojo task in `official_task`",
+            )
+        )
+    elif official != package.task_id:
+        issues.append(
+            Issue(
+                "robodojo.official_task_mismatch",
+                f"official_task {official!r} != task_id {package.task_id!r}",
+            )
+        )
+
+    dimension = task.get("dimension")
+    if not isinstance(dimension, str) or not dimension.strip():
+        issues.append(
+            Issue(
+                "robodojo.dimension",
+                "task.json must declare a non-empty `dimension`",
+            )
+        )
+
+    ref = task.get("robodojo_ref")
+    if (
+        not isinstance(ref, str)
+        or len(ref) != 40
+        or any(char not in "0123456789abcdef" for char in ref)
+    ):
+        issues.append(
+            Issue(
+                "robodojo.pinned_ref",
+                "robodojo_ref must be a 40-character lowercase commit",
+            )
+        )
+    elif ref != ROBODOJO_PINNED_REF:
+        issues.append(
+            Issue(
+                "robodojo.pinned_ref_differs",
+                f"robodojo_ref {ref} differs from the validator's pinned "
+                f"{ROBODOJO_PINNED_REF}; the submitting runtime must run the "
+                f"same commit",
+                severity="warning",
+            )
+        )
+
+    count = task.get("instance_count")
+    if not isinstance(count, int) or isinstance(count, bool) or count <= 0:
+        issues.append(
+            Issue(
+                "robodojo.instance_count",
+                "instance_count must be a positive integer",
+            )
+        )
+
+    protocol = task.get("protocol")
+    if not isinstance(protocol, Mapping):
+        issues.append(
+            Issue("robodojo.protocol", "task.json must contain a `protocol` object")
+        )
+    else:
+        episodes = protocol.get("episodes")
+        if not isinstance(episodes, int) or isinstance(episodes, bool) or episodes <= 0:
+            issues.append(
+                Issue(
+                    "robodojo.episodes",
+                    "protocol.episodes must be a positive integer",
+                )
+            )
+    return issues
+
+
+def _read_manifest(
+    package: TaskPackage, name: str, issues: list[Issue]
+) -> Mapping[str, Any] | None:
+    stem = name.removesuffix(".json")
+    try:
+        path = package.path(name)
+    except TaskPackageError as exc:
+        issues.append(Issue(f"axis.{stem}_escapes", str(exc)))
+        return None
+    if not path.is_file():
+        issues.append(Issue(f"axis.{stem}_missing", f"missing {name}"))
+        return None
+    try:
+        value = read_json(path)
+    except TaskPackageError as exc:
+        issues.append(Issue(f"axis.{stem}_invalid", str(exc)))
+        return None
+    if not isinstance(value, Mapping):
+        issues.append(Issue(f"axis.{stem}_not_object", f"{name} must be an object"))
+        return None
+    return value
+
+
+def _payload_of(
+    package: TaskPackage, variant: Mapping[str, Any]
+) -> Mapping[str, Any] | None:
+    relative = variant.get("payload_path")
+    if not isinstance(relative, str) or not relative:
+        return None
+    try:
+        value = read_json(package.path(relative))
+    except TaskPackageError:
+        return None
+    return value if isinstance(value, Mapping) else None
+
+
+def _inside_package(package: TaskPackage, relative: str) -> bool:
+    try:
+        return package.path(relative).is_file()
+    except TaskPackageError:
+        return False
+
+
+__all__ = [
+    "AXIS_CHECKER_TYPES",
+    "ROBODOJO_PINNED_REF",
+    "SCHEMA_VERSION",
+    "TASK_FILE",
+    "TASK_SOURCES",
+    "Issue",
+    "PackageFetchError",
+    "TaskPackage",
+    "TaskPackageError",
+    "canonical_json_sha256",
+    "checker_types_in",
+    "digest_of_files",
+    "discover_packages",
+    "fetch_package",
+    "load_package",
+    "package_digest",
+    "package_files",
+    "read_json",
+    "select_package",
+    "validate_package",
+]

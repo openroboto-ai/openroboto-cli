@@ -121,6 +121,12 @@ ADAPTERS: Final = {
     # because the base model is a property of the season -- it is read off the
     # season row instead.
     "real_xarm6": Adapter(training=UNAVAILABLE),
+    # Task-authoring seasons (`competitions.track = "task"`). The artifact is a
+    # task package, not a model: there is nothing to train, so `build`/`train`
+    # refuse instead of inventing a container. The adapter exists so that a
+    # workspace can be created, read and submitted; `openroboto task check`
+    # judges the package.
+    "task_authoring": Adapter(training=UNAVAILABLE),
 }
 """Every adapter this client knows, and what each step does for it."""
 
