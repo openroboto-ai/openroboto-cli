@@ -195,8 +195,9 @@ interface; they do not change a season's model contract or runtime configuration
 ## Tasks and responsibilities
 
 The [real-robot task catalog](REAL_TASKS.md) lists the seven shared tasks and
-English instructions for π0.5 and LingBot-VLA 2.0. Each model runs 10 trials per
-task, for 70 trials in its selected competition.
+English instructions for π0.5 and LingBot-VLA 2.0. Each model runs up to 10 trials
+per task, for up to 70 trials in its selected competition; a task whose first 3
+trials all fail stops there and its remaining trials count as failures.
 
 Each public task release must contain its unique task name, the exact fixed
 language prompt passed to the model, and an example video illustrating the task
