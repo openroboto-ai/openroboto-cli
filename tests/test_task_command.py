@@ -15,7 +15,7 @@ import pytest
 
 from openroboto import task_package as tp
 from openroboto.cli import main
-from tests.test_task_package import axis_package
+from tests.test_task_package import axis_package, robodojo_package
 
 
 def _json_output(capsys: pytest.CaptureFixture[str]) -> dict[str, Any]:
@@ -120,6 +120,73 @@ def test_two_packages_need_a_selector(
     axis_package(tmp_path / "repo" / "two")
     assert main(["task", "check", str(tmp_path / "repo"), "--json"]) == 1
     assert "more than one task package" in capsys.readouterr().err
+
+
+def test_package_option_picks_one_of_several(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    axis_package(tmp_path / "repo" / "one")
+    two = axis_package(tmp_path / "repo" / "two")
+    assert (
+        main(
+            [
+                "task",
+                "check",
+                str(tmp_path / "repo"),
+                "--package",
+                "two",
+                "--json",
+            ]
+        )
+        == 0
+    )
+    summary = _json_output(capsys)
+    assert summary["package_digest"] == tp.package_digest(two)
+
+
+def test_package_option_may_not_escape_the_repository(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    axis_package(tmp_path / "repo" / "one")
+    outer = axis_package(tmp_path / "outside")
+    assert (
+        main(
+            [
+                "task",
+                "check",
+                str(tmp_path / "repo"),
+                "--package",
+                "../outside",
+                "--json",
+            ]
+        )
+        == 1
+    )
+    assert "escapes" in capsys.readouterr().err
+    assert outer.is_dir()
+
+
+def test_source_filter_picks_the_season_source(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    axis_package(tmp_path / "repo" / "axis-task")
+    robodojo = robodojo_package(tmp_path / "repo" / "robodojo-task")
+    assert (
+        main(
+            [
+                "task",
+                "check",
+                str(tmp_path / "repo"),
+                "--source",
+                "robodojo",
+                "--json",
+            ]
+        )
+        == 0
+    )
+    summary = _json_output(capsys)
+    assert summary["source"] == "robodojo"
+    assert summary["package_digest"] == tp.package_digest(robodojo)
 
 
 def test_a_missing_directory_is_not_a_traceback(

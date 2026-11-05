@@ -75,8 +75,8 @@ def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) 
     check.add_argument(
         "--package",
         default="",
-        help="package directory inside --repo (relative path), when the "
-        "repository holds more than one and the name alone does not pick it",
+        help="package directory inside `path`/`--repo` (relative), when the "
+        "root holds more than one and the name alone does not pick it",
     )
     check.add_argument(
         "--source",
@@ -115,12 +115,6 @@ def run(args: argparse.Namespace) -> int:
     if bool(args.repo) != bool(args.commit):
         fail("--repo and --commit must be given together")
         return 1
-    if args.package and not args.repo:
-        fail(
-            "--package selects a directory inside --repo; pass the directory "
-            "as the positional `path` for a local package"
-        )
-        return 1
 
     temporary: tempfile.TemporaryDirectory[str] | None = None
     try:
@@ -155,7 +149,7 @@ def run(args: argparse.Namespace) -> int:
             selected = select_package(
                 snapshot_root,
                 source=args.source,
-                relative="",
+                relative=args.package,
                 where=str(snapshot_root),
             )
             if selected is None:
