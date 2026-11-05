@@ -59,7 +59,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import pathlib
+import shutil
+import stat
+import tempfile
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Final
@@ -283,13 +287,15 @@ def fetch_package(
     token: str = "",
     cache_dir: str | pathlib.Path | None = None,
 ) -> pathlib.Path:
-    """Download ``repo@commit`` and return the snapshot directory.
+    """Download ``repo@commit`` and return materialized repository files.
 
     ``commit`` must be the full 40-character revision; a branch or tag would let
     the contents (and therefore the digest) move after the commitment is
     written. ``snapshot_download`` is used without ``local_dir`` so the returned
-    directory contains **only repository files** -- ``local_dir`` writes
+    snapshot contains **only repository files** -- ``local_dir`` writes
     ``.cache/huggingface`` metadata inside it, and the digest counts every file.
+    HF cache blob links are copied into ordinary files before package path
+    validation; local package escape checks remain unchanged.
     """
     if len(commit) != 40 or any(char not in "0123456789abcdef" for char in commit):
         raise PackageFetchError(
@@ -308,7 +314,7 @@ def fetch_package(
     # command whose output is meant to be pasted into an evidence record.
     disable_progress_bars()
     try:
-        return pathlib.Path(
+        snapshot = pathlib.Path(
             snapshot_download(
                 repo_id=repo_id,
                 revision=commit,
@@ -321,6 +327,105 @@ def fetch_package(
         raise PackageFetchError(
             f"could not download {repo_id}@{commit[:8]}: {exc}"
         ) from exc
+    return _materialize_snapshot(snapshot, repo_id, commit, cache_dir=cache_dir)
+
+
+def _materialize_snapshot(
+    snapshot: pathlib.Path,
+    repo_id: str,
+    commit: str,
+    *,
+    cache_dir: str | pathlib.Path | None,
+    materialized_dir: pathlib.Path | None = None,
+) -> pathlib.Path:
+    """Copy repository content, allowing only HF's own regular blob links."""
+    destination: pathlib.Path | None = None
+    try:
+        if snapshot.is_symlink():
+            raise PackageFetchError("HF snapshot root must not be a symlink")
+        root = snapshot.resolve(strict=True)
+        if not root.is_dir():
+            raise PackageFetchError("HF snapshot root is not a directory")
+        # Only the standard layout grants access outside the snapshot tree.
+        # Never treat an arbitrary parent directory as a cache authorization.
+        blob_root = None
+        from huggingface_hub.constants import HF_HUB_CACHE
+
+        trusted_cache = pathlib.Path(cache_dir or HF_HUB_CACHE).resolve()
+        if (
+            root.name == commit
+            and root.parent.name == "snapshots"
+            and root.parent.parent.name == f"models--{repo_id.replace('/', '--')}"
+            and root.parent.parent.parent == trusted_cache
+        ):
+            blobs = root.parent.parent / "blobs"
+            if blobs.is_dir() and not blobs.is_symlink():
+                blob_root = blobs.resolve(strict=True)
+        for current, directories, files in os.walk(root, followlinks=False):
+            for name in directories + files:
+                path = pathlib.Path(current) / name
+                mode = path.lstat().st_mode
+                if stat.S_ISLNK(mode):
+                    if blob_root is None or not _is_hf_blob_link(
+                        path, blob_root, trusted_cache
+                    ):
+                        raise PackageFetchError(
+                            f"unsafe HF snapshot symlink: {path.relative_to(root)}; "
+                            "only regular files in this repository's blobs are allowed"
+                        )
+                elif not (stat.S_ISREG(mode) or stat.S_ISDIR(mode)):
+                    raise PackageFetchError(
+                        "HF snapshot contains a non-regular file: "
+                        f"{path.relative_to(root)}"
+                    )
+        parent = materialized_dir
+        if parent is None and cache_dir is not None:
+            parent = pathlib.Path(cache_dir)
+        if parent is not None:
+            parent.mkdir(parents=True, exist_ok=True)
+            if parent.resolve().is_relative_to(root):
+                raise PackageFetchError(
+                    "materialized files must be outside the HF snapshot"
+                )
+        destination = pathlib.Path(
+            tempfile.mkdtemp(prefix="openroboto-task-files-", dir=parent)
+        )
+        # All repository files, including dotfiles, participate in the digest.
+        # No SDK local_dir metadata or blobs directory is copied into this tree.
+        shutil.copytree(root, destination, symlinks=False, dirs_exist_ok=True)
+        return destination
+    except (OSError, RuntimeError, shutil.Error) as exc:
+        if destination is not None:
+            shutil.rmtree(destination)
+        raise PackageFetchError(
+            f"could not materialize {repo_id}@{commit[:8]}: {exc}"
+        ) from exc
+
+
+def _is_hf_blob_link(
+    path: pathlib.Path, blob_root: pathlib.Path, trusted_cache: pathlib.Path
+) -> bool:
+    """Accept snapshot -> repository blob [-> shared cache blob], nothing else."""
+    # Normalize '..' without following the first link into an arbitrary path.
+    blob = pathlib.Path(os.path.abspath(path.parent / os.readlink(path)))
+    if blob.parent != blob_root:
+        return False
+    if blob.is_symlink():
+        target = pathlib.Path(os.path.abspath(blob.parent / os.readlink(blob)))
+        shared = trusted_cache / "blobs"
+        if shared.is_symlink() or not target.is_relative_to(shared):
+            return False
+        # A second file link is HF's shared blob store. Directory aliases,
+        # extra file links and cycles are not part of that layout.
+        if target.is_symlink() or target.resolve(strict=True) != target:
+            return False
+        for parent in target.parents:
+            if parent == shared:
+                break
+            if parent.is_symlink():
+                return False
+        blob = target
+    return stat.S_ISREG(blob.lstat().st_mode)
 
 
 def discover_packages(root: str | pathlib.Path) -> list[pathlib.Path]:
