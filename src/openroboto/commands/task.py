@@ -45,6 +45,7 @@ from openroboto.task_package import (
     TASK_SOURCES,
     PackageFetchError,
     TaskPackageError,
+    digest_source,
     fetch_package,
     load_package,
     package_digest,
@@ -443,6 +444,7 @@ def inspect(directory: str | pathlib.Path) -> dict[str, Any]:
         "task_id": "",
         "instruction": "",
         "package_digest": "",
+        "digest_source": digest_source(),
         "file_count": 0,
         "total_bytes": 0,
         "files": [],
@@ -516,6 +518,7 @@ def _print_human(summary: dict[str, Any]) -> None:
         say(f"instruction:  {summary['instruction']}")
     say(f"files:        {summary['file_count']}")
     say(f"package_digest: {summary['package_digest']}")
+    say(f"digest_source:  {summary['digest_source']}")
     say("")
     for item in summary["files"]:
         say(f"  {item['sha256']}  {item['path']}")

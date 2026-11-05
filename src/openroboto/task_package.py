@@ -8,15 +8,20 @@ reference solution.
 
 ## The digest is a cross-repository contract
 
-🔴 **This module is a miner-side mirror, not a second authority.** The one
-implementation is the validator's ``task_source/package.py`` at ``e5fee86a``
-(plus the evaluation layer's verification of the same function). The correct
-home for a rule three sides must agree on is ``openroboto-protocol``; moving it
-there needs a protocol release, and until that exists the CLI cannot import it
-without breaking every install pinned to the published wheel. The golden value
-in ``tests/test_task_package.py`` was produced by the validator implementation
-on the same fixture -- if either side changes, re-run that check. Do not treat
-this copy as the place to "fix" a disagreement: the validator is the reference.
+🔴 **The shared protocol implementation is authoritative when installed.**
+OPE-211 added ``openroboto_protocol.package_digest`` (candidate 0.13.0), with
+the same rule as the validator's ``task_source/package.py`` at ``e5fee86a``.
+This module imports it and delegates; ``digest_source()`` reports
+``openroboto-protocol`` when that happened.
+
+The local implementation below exists **only** for the published 0.12.0 pin
+(which predates the shared module) and is reported as
+``cli-mirror(transitional)``. It is not a second authority: when the two
+disagree the validator/protocol is right, and the checkout that bumps the pin
+to 0.13.0 removes it. The golden value in ``tests/test_task_package.py`` was
+produced by the validator implementation on the same fixture; the candidate
+wheel comparison in ``scripts/verify_task_cli_install.py`` checks the shared
+function against the CLI's output.
 
 Three layers compute the same number and must agree byte for byte:
 
@@ -60,9 +65,36 @@ from __future__ import annotations
 import hashlib
 import json
 import pathlib
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Final
+
+#: The shared implementation, when the installed protocol release has it.
+#: OPE-211 adds it as ``openroboto_protocol.package_digest`` in 0.13.0. The
+#: published 0.12.0 pin predates it, so the CLI keeps a **transitional** local
+#: fallback until the pin moves. The shared module is authoritative whenever it
+#: is importable; ``digest_source()`` says which one ran.
+_shared_package_files: (
+    Callable[[str | pathlib.Path], tuple[tuple[str, str], ...]] | None
+) = None
+_shared_digest_of_files: Callable[[tuple[tuple[str, str], ...]], str] | None = None
+_shared_package_digest: Callable[[str | pathlib.Path], str] | None = None
+try:  # pragma: no cover - which branch runs depends on the installed wheel
+    from openroboto_protocol.package_digest import (  # type: ignore[import-not-found]
+        digest_of_files as _protocol_digest_of_files,
+    )
+    from openroboto_protocol.package_digest import (
+        package_digest as _protocol_package_digest,
+    )
+    from openroboto_protocol.package_digest import (
+        package_files as _protocol_package_files,
+    )
+
+    _shared_package_files = _protocol_package_files
+    _shared_digest_of_files = _protocol_digest_of_files
+    _shared_package_digest = _protocol_package_digest
+except ImportError:
+    pass
 
 TASK_FILE: Final = "task.json"
 SCHEMA_VERSION: Final = 1
@@ -149,11 +181,22 @@ def canonical_json_sha256(value: Any) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
-def package_files(directory: str | pathlib.Path) -> tuple[tuple[str, str], ...]:
-    """``(relative POSIX path, sha256)`` for every regular file, path-sorted.
+def digest_source() -> str:
+    """Which implementation the next digest call will use."""
+    return (
+        "openroboto-protocol"
+        if _shared_package_digest is not None
+        else "cli-mirror(transitional)"
+    )
 
-    The sort is over ``Path`` objects to match the validator exactly; see the
-    module docstring.
+
+def _local_package_files(
+    directory: str | pathlib.Path,
+) -> tuple[tuple[str, str], ...]:
+    """The OPE-211/validator rule, kept only for the unreleased-0.13.0 window.
+
+    When the installed protocol has ``package_digest`` this is never called;
+    the checkout that removes it is the one that bumps the pin to 0.13.0.
     """
     root = pathlib.Path(directory).expanduser().resolve()
     entries: list[tuple[str, str]] = []
@@ -165,14 +208,38 @@ def package_files(directory: str | pathlib.Path) -> tuple[tuple[str, str], ...]:
     return tuple(entries)
 
 
-def digest_of_files(files: tuple[tuple[str, str], ...]) -> str:
+def _local_digest_of_files(files: tuple[tuple[str, str], ...]) -> str:
     encoded = "\n".join(f"{relative}\0{digest}" for relative, digest in files)
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
+def _local_package_digest(directory: str | pathlib.Path) -> str:
+    return _local_digest_of_files(_local_package_files(directory))
+
+
+def package_files(directory: str | pathlib.Path) -> tuple[tuple[str, str], ...]:
+    """``(relative POSIX path, sha256)`` for every regular file, path-sorted."""
+    if _shared_package_files is not None:
+        return _shared_package_files(directory)
+    return _local_package_files(directory)
+
+
+def digest_of_files(files: tuple[tuple[str, str], ...]) -> str:
+    if _shared_digest_of_files is not None:
+        return _shared_digest_of_files(files)
+    return _local_digest_of_files(files)
+
+
 def package_digest(directory: str | pathlib.Path) -> str:
-    """The task package's content identity (see the module docstring)."""
-    return digest_of_files(package_files(directory))
+    """The task package's content identity (see the module docstring).
+
+    Delegates to ``openroboto_protocol.package_digest`` when the installed
+    release provides it; the local implementation exists only for the
+    published 0.12.0 pin and is reported by ``digest_source()``.
+    """
+    if _shared_package_digest is not None:
+        return _shared_package_digest(directory)
+    return _local_package_digest(directory)
 
 
 # ── loading ──────────────────────────────────────────────────────────────────
@@ -716,6 +783,7 @@ __all__ = [
     "canonical_json_sha256",
     "checker_types_in",
     "digest_of_files",
+    "digest_source",
     "discover_packages",
     "fetch_package",
     "load_package",

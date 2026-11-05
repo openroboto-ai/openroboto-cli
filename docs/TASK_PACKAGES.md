@@ -184,6 +184,39 @@ required. Until it is published:
   verification only; the final run must pin the released protocol and the
   merged CLI.
 
+## 6. Normal-install verification
+
+A `PYTHONPATH` splice is component verification, not proof that a miner can
+`pip install` and use the task commands. Once a candidate protocol wheel exists,
+verify the real install shape in a clean venv:
+
+```bash
+python scripts/verify_task_cli_install.py \
+  --protocol-wheel /path/to/openroboto_protocol-<version>-py3-none-any.whl \
+  --package /path/to/task/package \
+  --expect-digest <64-hex> \
+  --config <miner.yaml> \
+  --status-config <miner.yaml-with-wallet> \
+  --run-id <operator-run-id>
+```
+
+The script copies the working tree to a temporary directory, rewrites the
+protocol pin **only in that copy** to the candidate wheel's version, builds the
+CLI wheel, creates a fresh venv, installs both wheels with normal dependency
+resolution, and runs the installed `openroboto` binary without `PYTHONPATH`.
+It checks `Track.TASK`, `AXIS_LAYOUT`, the package digest, the live `/healthz`
++ `/readyz` probe, and (with `--status-config`) a signed `tasks/mine` read.
+
+`--shared-module` / `--shared-function` (default
+`openroboto_protocol.package_digest.package_digest`) compare the CLI digest
+with the shared implementation in the candidate wheel when it exists. Until the
+protocol release ships that module, the report says `available: false`; the
+CLI's local mirror must not be presented as the final authority.
+
+The candidate wheel is **not** a published release. Do not describe it as
+`pip install`-able from PyPI until the protocol maintainer publishes it and
+this CLI's pin is bumped to that version.
+
 ## Related documents
 
 - [CONTRIBUTOR.md](./CONTRIBUTOR.md) — the identity a task submission is paid to

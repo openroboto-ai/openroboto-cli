@@ -34,6 +34,10 @@ def test_json_output_has_the_per_file_digests_and_the_package_digest(
     assert summary["source"] == "axis"
     assert summary["task_id"] == "9001"
     assert summary["package_digest"] == tp.package_digest(package)
+    assert summary["digest_source"] in (
+        "openroboto-protocol",
+        "cli-mirror(transitional)",
+    )
     assert [item["path"] for item in summary["files"]] == [
         "benchmark.json",
         "payloads/9001-official-00.json",

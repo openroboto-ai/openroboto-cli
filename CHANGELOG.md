@@ -55,7 +55,12 @@ change — and that `main` line does not contain the 0.12.0 AXIS-layout change
 this CLI also imports. A release that merges both is needed. Until then,
 `init --include-task` and a task season's `submit` refuse with an explanation;
 local `openroboto task check` works with the pinned release because it never
-parses a competition row. `openroboto doctor` now reports
+parses a competition row.
+
+The package digest delegates to `openroboto_protocol.package_digest` when the
+installed release has it (candidate 0.13.0). The CLI keeps a **transitional**
+local implementation only while the pin is the published 0.12.0; `task check`
+reports which one ran as `digest_source`. `openroboto doctor` now reports
 `protocol capabilities` (`Track.TASK` / `AXIS_LAYOUT`) and fails a task
 workspace when `Track.TASK` is missing, so a temporary cherry-pick tree cannot
 be mistaken for the release a formal run must pin.

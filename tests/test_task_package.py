@@ -38,6 +38,26 @@ def test_digest_matches_the_validator_golden(tmp_path: Path) -> None:
     assert tp.package_digest(package) == GOLDEN_DIGEST
 
 
+def test_the_shared_protocol_implementation_is_preferred(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When the installed release has the shared module, the CLI must use it."""
+    monkeypatch.setattr(tp, "_shared_package_digest", lambda directory: "shared-digest")
+    monkeypatch.setattr(tp, "_shared_package_files", lambda directory: (("x", "y"),))
+    monkeypatch.setattr(tp, "_shared_digest_of_files", lambda files: "shared-files")
+
+    assert tp.package_digest("anything") == "shared-digest"
+    assert tp.package_files("anything") == (("x", "y"),)
+    assert tp.digest_of_files((("x", "y"),)) == "shared-files"
+    assert tp.digest_source() == "openroboto-protocol"
+
+
+def test_the_transitional_mirror_is_named_when_shared_is_absent() -> None:
+    if tp._shared_package_digest is not None:
+        pytest.skip("the installed protocol already provides the shared digest")
+    assert tp.digest_source() == "cli-mirror(transitional)"
+
+
 def test_files_are_sorted_as_paths_not_as_strings(tmp_path: Path) -> None:
     """`a/c.txt` comes before `a-b.txt` under ``Path`` ordering.
 
