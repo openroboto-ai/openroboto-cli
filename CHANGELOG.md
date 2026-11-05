@@ -24,7 +24,10 @@ openroboto submit
 `task status` uses the **MINER-level** `backend.public_key` and a hotkey
 signature for `/api/v1/tasks/mine`; it never reads the ADMIN_KEY. Both the
 probe and the task query print the backend `request_id`, so an evidence record
-can be matched against server logs. The probe sends no key at all. A `401 UNAUTHORIZED` means the MINER key is missing; a
+can be matched against server logs. `--run-id` records the operator's A/B run
+id in that output only -- the task endpoints have no run-id field and the
+backend rejects unknown query parameters, so it is not sent. The probe sends no
+key at all. A `401 UNAUTHORIZED` means the MINER key is missing; a
 `401 INVALID_SIGNATURE` means the wallet's hotkey is not the queried one.
 
 `task check` prints the SHA-256 of **every file** and the package digest. That

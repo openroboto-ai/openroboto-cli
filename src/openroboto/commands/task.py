@@ -130,6 +130,13 @@ def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) 
     status.add_argument("--skill", default="")
     status.add_argument("--limit", type=int, default=20)
     status.add_argument(
+        "--run-id",
+        default="",
+        help="operator run id recorded in the output for evidence. Miner task "
+        "endpoints have no run_id parameter or header; this is not sent on the "
+        "wire (unknown query parameters are rejected by the backend)",
+    )
+    status.add_argument(
         "--probe",
         action="store_true",
         help="only check GET /healthz and GET /readyz against backend.url; "
@@ -148,8 +155,9 @@ def _usage(parser: argparse.ArgumentParser) -> int:
 def status_run(args: argparse.Namespace) -> int:
     """Read-only: `/healthz` + `/readyz`, or this hotkey's own task packages."""
     settings = _task_settings(args.config)
+    run_id = str(getattr(args, "run_id", "") or "")
     if args.probe:
-        return _probe(settings, as_json=args.json)
+        return _probe(settings, as_json=args.json, run_id=run_id)
     if not settings.backend_url:
         fail(
             f"{args.config} does not name a backend (`backend.url`), so there "
@@ -201,6 +209,7 @@ def status_run(args: argparse.Namespace) -> int:
                     "hotkey": hotkey,
                     "miner_key_present": bool(key),
                     "request_id": envelope.meta.request_id,
+                    "run_id": run_id,
                     "tasks": [row.model_dump(mode="json") for row in envelope.data],
                 },
                 ensure_ascii=False,
@@ -213,6 +222,8 @@ def status_run(args: argparse.Namespace) -> int:
     say(f"backend:    {settings.backend_url}")
     say(f"hotkey:     {hotkey}")
     say(f"request_id: {envelope.meta.request_id}")
+    if run_id:
+        say(f"run_id:     {run_id}")
     if not envelope.data:
         say("no task packages for this hotkey")
         return 0
@@ -232,7 +243,7 @@ def status_run(args: argparse.Namespace) -> int:
     return 0
 
 
-def _probe(settings: Settings, *, as_json: bool) -> int:
+def _probe(settings: Settings, *, as_json: bool, run_id: str = "") -> int:
     """`/healthz` and `/readyz` only. No key, no signature, no writes."""
     if not settings.backend_url:
         fail(
@@ -252,6 +263,7 @@ def _probe(settings: Settings, *, as_json: bool) -> int:
             json.dumps(
                 {
                     "backend": settings.backend_url,
+                    "run_id": run_id,
                     "liveness": live.model_dump(mode="json"),
                     "readiness": ready.model_dump(mode="json"),
                 },

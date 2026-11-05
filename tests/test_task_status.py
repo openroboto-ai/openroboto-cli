@@ -227,11 +227,25 @@ def test_status_queries_with_the_miner_key_and_prints_the_package(
 
     monkeypatch.setattr(task_command, "fetch_my_tasks", _fetch)
 
-    assert main(["task", "status", "--config", str(_config(tmp_path)), "--json"]) == 0
+    assert (
+        main(
+            [
+                "task",
+                "status",
+                "--config",
+                str(_config(tmp_path)),
+                "--run-id",
+                "run-abc",
+                "--json",
+            ]
+        )
+        == 0
+    )
     output = json.loads(capsys.readouterr().out)
     assert output["miner_key_present"] is True
     assert output["hotkey"] == HOTKEY
     assert output["request_id"] == "req-123"
+    assert output["run_id"] == "run-abc"
     assert output["tasks"][0]["package_digest"] == "b" * 64
     assert captured["miner_key"] == MINER_KEY
     assert len(captured["signature"]) == 128

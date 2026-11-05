@@ -30,7 +30,13 @@ openroboto task status --json                   # your own tasks (MINER key + si
 sent), or `GET /api/v1/tasks/mine` for the tasks the configured hotkey
 submitted. Its JSON output includes the `meta.request_id` of the task query, so
 the line can be quoted in an evidence record and matched against backend
-logs. The latter needs **two independent proofs**, and they fail
+logs.
+
+`--run-id <id>` records an operator run id in that output. It is **not sent on
+the wire**: the miner task endpoints have no `run_id` field or header, and the
+backend rejects unknown query parameters with `400 UNKNOWN_QUERY_PARAM` rather
+than ignoring them. The run id is for joining the CLI evidence with the
+A/B budget/shared-run files, not part of the task request. The latter needs **two independent proofs**, and they fail
 differently:
 
 - the **MINER-level key** in `X-API-Key`, from `backend.public_key` (or the
