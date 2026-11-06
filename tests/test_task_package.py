@@ -58,9 +58,13 @@ def test_the_shared_protocol_implementation_is_preferred(
     assert tp.digest_source() == "openroboto-protocol"
 
 
-def test_unavailable_shared_digest_is_named() -> None:
-    if tp.digest_available():
-        pytest.skip("the installed protocol already provides the shared digest")
+def test_unavailable_shared_digest_is_named(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The pinned release has the shared module, so simulate a workspace running
+    # against an older protocol instead of skipping: the fallback has to stay
+    # covered for anyone still on a pre-0.13.0 install.
+    monkeypatch.setattr(tp, "_shared_package_files", None)
+    monkeypatch.setattr(tp, "_shared_digest_of_files", None)
+    monkeypatch.setattr(tp, "_shared_package_digest", None)
     assert tp.digest_source() == "unavailable(protocol release 0.13.0 needed)"
     with pytest.raises(tp.TaskPackageError, match=r"0\.13\.0"):
         tp.package_digest("anything")

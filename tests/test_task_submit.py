@@ -15,7 +15,6 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
-from openroboto_protocol.commitment import Track
 from openroboto_protocol.schemas import Competition
 
 from openroboto import backend_api
@@ -219,9 +218,10 @@ def test_a_task_season_must_be_collected_by_burn() -> None:
 def test_asking_for_task_seasons_needs_a_protocol_that_knows_them(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The pinned PyPI release predates `Track.TASK`; asking must say so."""
-    if getattr(Track, "TASK", None) is not None:
-        pytest.skip("the installed protocol already knows Track.TASK")
+    """A protocol without `Track.TASK` must say so instead of sending the query."""
+    # Simulated rather than skipped: the pin now has `Track.TASK`, but an older
+    # install still has to fail with the same message.
+    monkeypatch.setattr(backend_api, "Track", SimpleNamespace())
 
     with pytest.raises(backend_api.BackendError, match=r"Track\.TASK"):
         backend_api.fetch_competitions("https://api.example", include_task=True)

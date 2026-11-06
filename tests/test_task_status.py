@@ -75,11 +75,16 @@ def _task(**overrides: Any) -> dict[str, Any]:
 
 
 def test_task_check_refuses_without_the_shared_digest(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """On the published 0.12.0 pin there is no local mirror to fall back to."""
-    if tp.digest_available():
-        pytest.skip("the installed protocol already provides the shared digest")
+    """On a pre-0.13.0 pin there is no local mirror to fall back to."""
+    # Simulated rather than skipped: the pinned release does provide the module,
+    # and the refusal path still has to be exercised.
+    monkeypatch.setattr(tp, "_shared_package_files", None)
+    monkeypatch.setattr(tp, "_shared_digest_of_files", None)
+    monkeypatch.setattr(tp, "_shared_package_digest", None)
     package = axis_package(tmp_path / "pkg")
     assert main(["task", "check", str(package), "--json"]) == 1
     summary = json.loads(capsys.readouterr().out)
