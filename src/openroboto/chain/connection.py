@@ -85,6 +85,19 @@ def get_metagraph(netuid: int, network: str, subtensor: Any = None) -> Any:
     return meta
 
 
+def hotkey_signature(wallet: Any, message: bytes) -> str:
+    """The hotkey's sr25519 signature over `message`, lowercase hex.
+
+    `bittensor_wallet`'s `Keypair.sign` returns 64 raw bytes; the backend
+    expects 128 hex characters. Converting here (and only here) keeps the
+    "wrong encoding" failure from looking like a wrong key.
+    """
+    signature = wallet.hotkey.sign(message)
+    if isinstance(signature, str):
+        return signature.lower()
+    return bytes(signature).hex()
+
+
 def open_wallet(settings: Settings) -> Any:
     """Load the wallet from config. If no password is configured, let the SDK ask.
 

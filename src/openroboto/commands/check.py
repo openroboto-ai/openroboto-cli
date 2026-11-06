@@ -56,10 +56,10 @@ from openroboto_protocol.model_format import (
 
 from openroboto import adapters
 from openroboto.backend_api import BackendError, fetch_competitions
-from openroboto.competition import workspace_competition_id
+from openroboto.competition import load_snapshot, workspace_competition_id
 from openroboto.competition_state import resolve_output_dir
 from openroboto.config import ConfigError, Settings
-from openroboto.console import say
+from openroboto.console import fail, say
 
 
 def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
@@ -81,6 +81,19 @@ def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) 
 
 def run(args: argparse.Namespace) -> int:
     settings = competition_settings(args.config)
+    snapshot = load_snapshot(settings)
+    if snapshot is not None and snapshot.track == "task":
+        # A task package is not a checkpoint: the layout rules below would judge
+        # a `task.json` by the π0.5/LingBot file rules and reject a package the
+        # validator will happily admit.
+        fail(
+            f"{snapshot.label} is a task-authoring season, so its artifact is a "
+            f"task package, not a model checkpoint. This command judges model "
+            f"layouts and would reject a correct package.\n"
+            f"   → `openroboto task check <package>` prints the per-file hashes "
+            f"and the package digest the validator computes"
+        )
+        return 1
     directory = Path(
         args.path or resolve_output_dir(workspace_competition_id(settings))
     )

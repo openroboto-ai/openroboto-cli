@@ -1,6 +1,6 @@
 # OpenRoboto Subnet — Protocol & Incentive Mechanism
 
-> **Status**: current · **Updated**: 2026-09-02 · **Audience**: miners, external validators, auditors
+> **Status**: current · **Updated**: 2026-10-27 · **Audience**: miners, external validators, auditors
 > **Scope**: What the subnet rewards, and every rule that decides whether a submission counts.
 > **Note**: Numbers named here (fee, season, dataset URLs) are published **per season on the
 > competition row** — `GET /api/v1/competitions`, copied into your `miner.yaml` by
@@ -188,12 +188,16 @@ The backend resolves the ranking and exposes it via the API. A lightweight valid
 btcli subnet metagraph --netuid 80 --network finney
 ```
 
-Current emissions allocated across tracks are **15% simulation**, **42.5% real
-π0.5**, and **42.5% real LingBot-VLA 2.0**. The simulation ranking weights are
-relative weights within its 15% share, not percentages of all track emissions.
-Each real track accounts for its own seasonal prize pool and settles it under the
-existing 95% champion / 5% qualified-entry rules, with a claim period during which
-rewarded models stay public and can be challenged. See the
+Current emissions allocated across tracks are **15% simulation** and **85%
+egocentric data collection**. The real-robot track is **paused** for a workcell
+hardware upgrade and holds **0%**; the share it held before the pause moved to
+data collection, so the active shares add up to 100% and nothing is burned at the
+track level. Finished real-robot seasons keep their accrued awards and published
+unlock schedules. The simulation ranking weights are relative weights within its
+15% share, not percentages of all track emissions. Each real track accounts for
+its own seasonal prize pool and settles it under the existing 95% champion / 5%
+qualified-entry rules, with a claim period during which rewarded models stay
+public and can be challenged. See the
 [allocation overview](REAL_TRACKS.md#current-emission-allocation) and
 [settlement rules](REAL_TRACK.md). Entry-fee recipients do not identify prize pools.
 

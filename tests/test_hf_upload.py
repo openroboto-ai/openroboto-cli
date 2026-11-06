@@ -8,6 +8,9 @@ value is not an internal inconsistency -- it is a claim published in their name.
 from __future__ import annotations
 
 import json
+from pathlib import Path
+
+import pytest
 
 from openroboto.huggingface.upload import _write_run_info, push_model
 
@@ -69,3 +72,59 @@ def test_run_info_says_nothing_rather_than_guessing(tmp_path) -> None:
     _write_run_info(tmp_path, 1, None, "")
     info = json.loads((tmp_path / "run_info.json").read_text(encoding="utf-8"))
     assert info["model"] == ""
+
+
+def test_a_task_package_is_uploaded_without_run_info(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The validator's package digest counts **every** file.
+
+    `push_model` normally writes `run_info.json` into the directory it uploads.
+    For a task package that file would be part of the repository, so the digest
+    the miner checked locally would stop matching the one the subnet stores.
+    """
+    import huggingface_hub
+
+    class _Api:
+        def __init__(self, token: str = "") -> None:
+            pass
+
+        def repo_info(self, repo_id: str, repo_type: str = "model") -> object:
+            return type("R", (), {"sha": "a" * 40})()
+
+    monkeypatch.setattr(huggingface_hub, "HfApi", _Api)
+    monkeypatch.setattr(huggingface_hub, "create_repo", lambda **k: None)
+    monkeypatch.setattr(
+        huggingface_hub,
+        "upload_folder",
+        lambda **k: f"https://huggingface.co/x/y/commit/{'a' * 40}",
+    )
+
+    (tmp_path / "task.json").write_text("{}", encoding="utf-8")
+    push_model(
+        str(tmp_path),
+        "someone/task-package",
+        "hf_x",
+        competition_id=1,
+        write_run_info=False,
+        artifact="task package",
+    )
+
+    assert not (tmp_path / "run_info.json").exists()
+
+
+def test_the_default_repository_name_is_refused_for_a_task_season() -> None:
+    """`pi05-<hotkey>` is a claim about a model; a task package has no honest
+    default name, so the miner must name the repository."""
+    from openroboto.config import ConfigError, Settings
+    from openroboto.huggingface.repository import build_repo_id
+
+    settings = Settings.from_mapping(
+        {
+            "competition": {"track": "task", "seq": 1},
+            "huggingface": {"username": "someone"},
+            "subnet": {"hotkey_ss58": "5" + "M" * 47},
+        }
+    )
+    with pytest.raises(ConfigError, match=r"huggingface\.repo_id"):
+        build_repo_id(settings)

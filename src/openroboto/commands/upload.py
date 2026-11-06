@@ -51,6 +51,14 @@ def perform_upload(
 
     hotkey_ss58 = state.get("hotkey_ss58") or settings.hotkey_ss58
     repo_id = build_repo_id(settings, str(hotkey_ss58 or ""))
+    # A task package is uploaded **as written**. `run_info.json` would become a
+    # file in the package, and the validator's digest counts every file, so the
+    # digest the miner checked would stop matching the one the subnet stores.
+    #
+    # Compared as a string, not `Track.TASK`: the pinned protocol on PyPI may
+    # predate the task track, and `payload_track()` would raise on such a
+    # workspace long before the upload could matter.
+    is_task = str(settings.competition.get("track") or "") == "task"
     result = push_model(
         model_dir=output_dir,
         repo_id=repo_id,
@@ -58,6 +66,8 @@ def perform_upload(
         competition_id=competition_id,
         metrics=training_metrics(competition_id),
         base_model=settings.competition_base_model_family,
+        write_run_info=not is_task,
+        artifact="task package" if is_task else "model",
     )
 
     state["hf_repo_id"] = repo_id

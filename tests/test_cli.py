@@ -20,6 +20,7 @@ COMMANDS = (
     "check",
     "identity",
     "submit",
+    "task",
     "status",
     "validator",
 )

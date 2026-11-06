@@ -4,6 +4,89 @@ Every entry answers one question before it lists anything: **does a miner have t
 change something, and what breaks if they do not?** A diff summary without "who
 has to act" is not usable by the people who installed this.
 
+## 1.6.0
+
+### Task-authoring seasons: a package, not a model
+
+A season with `track: task` takes a **task package** (a `task.json`, its
+instances and manifests) instead of a model checkpoint. `openroboto check` would
+have judged that package by the π0.5/LingBot file rules and rejected a correct
+one, and `submit` would have refused it for having no weights. Both are fixed:
+
+```bash
+openroboto task check ./my-task            # local, offline
+openroboto task check --repo user/pkg --commit <40-hex>
+openroboto task status --probe             # GET /healthz + /readyz only
+openroboto task status                     # your own tasks, MINER key + signature
+openroboto submit
+```
+
+`task status` uses the **MINER-level** `backend.public_key` and a hotkey
+signature for `/api/v1/tasks/mine`; it never reads the ADMIN_KEY. Both the
+probe and the task query print the backend `request_id`, so an evidence record
+can be matched against server logs. `--run-id` records the operator's A/B run
+id in that output only -- the task endpoints have no run-id field and the
+backend rejects unknown query parameters, so it is not sent. `--backend-url`
+overrides `backend.url` for one read-only call, so pointing the CLI at an
+isolated instance does not require editing `miner.yaml`. The probe sends no key
+at all. A `401 UNAUTHORIZED` means the MINER key is missing; a
+`401 INVALID_SIGNATURE` means the wallet's hotkey is not the queried one.
+
+`task check` warns (`axis.reference_not_declared`) when an AXIS package has no
+reference solution: it is static-only and the validator's runtime admission
+rejects it as `reject_unsolvable`. `submit` refuses that shape **before the
+fee**, so a miner does not pay for a guaranteed runtime rejection. A declared reference must carry non-empty
+per-instance `actions`; a final-state-only file is an error. Adding a reference
+changes the digest, so it is a new package identity, not an edit of a frozen
+one. `scripts/build_task_package.py --reference` includes one and refuses an
+unusable file.
+
+`task check` prints the SHA-256 of **every file** and the package digest. That
+digest is the same rule the validator's admission uses and the backend stores in
+`tasks.package_digest`; `--expect-digest` lets a miner compare it with a value
+the subnet reported. It validates the declared source's structure (AXIS
+manifests and payload hashes, RoboDojo official task fields), but it does not
+claim the task is solvable or deterministic — that is runtime admission.
+
+`submit` now routes a task season to that package gate instead of the model
+layout/fingerprint gates, and refuses a package whose declared source differs
+from the season's `params.task.source`. The upload no longer writes
+`run_info.json` into a task package: the digest counts every file, so that file
+would change the package identity between what the miner checked and what the
+validator reads.
+
+`openroboto init --include-task` can create a task workspace; `--refresh`
+always asks for task seasons so an existing one can be refreshed. A task
+workspace must name `huggingface.repo_id` — `pi05-<hotkey>` is a claim about a
+model.
+
+⚠️ **Requires a protocol release that knows `Track.TASK`.** The source protocol
+repository's `main` has it, but the 0.12.0 wheel published on PyPI predates the
+change — and that `main` line does not contain the 0.12.0 AXIS-layout change
+this CLI also imports. A release that merges both is needed. Until then,
+`init --include-task`, `task check` and a task season's `submit` refuse with an
+explanation: the pinned release cannot parse `track=task` and has no shared
+`openroboto_protocol.package_digest`. `task status --probe` / signed
+`task status` still work (they do not compute a digest).
+
+The package digest is **only** `openroboto_protocol.package_digest` (OPE-211
+candidate 0.13.0). There is no local mirror. The production pin is still the
+published 0.12.0, which predates the module, so `task check` refuses with the
+release/candidate instruction and `task status`/`check` do not pretend to
+compute a digest until 0.13.0 is published and the pin moves. `digest_source`
+reports `openroboto-protocol` or
+`unavailable(protocol release 0.13.0 needed)`. A local development environment
+uses the candidate wheel via `scripts/verify_task_cli_install.py`; that is
+**not** a claim that 0.13.0 is pip-installable from PyPI. The verifier is
+fail-closed: a missing shared module/function, a non-zero probe,
+`digest_source` other than `openroboto-protocol`, or a digest mismatch exits
+non-zero.
+
+`openroboto doctor` reports `protocol capabilities` (`Track.TASK`,
+`AXIS_LAYOUT`, `package_digest`) and fails a task workspace when any is
+missing, so a temporary cherry-pick tree cannot be mistaken for the release a
+formal run must pin.
+
 ## 1.5.1
 
 ### Nothing to do; `openroboto check` stops warning about correct AXIS checkpoints

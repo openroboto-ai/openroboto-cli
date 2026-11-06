@@ -110,6 +110,19 @@ def build_repo_id(settings: Settings, hotkey_ss58: str = "") -> str:
     if settings.hf_repo_id:
         return settings.hf_repo_id
 
+    if str(settings.competition.get("track") or "") == "task":
+        # The default name (`pi05-<hotkey>`) is a claim about a model. A task
+        # season uploads a task package, so there is no honest default here --
+        # the miner names the package repository.
+        raise ConfigError(
+            "This workspace enters a task-authoring season, whose HF repository "
+            "holds a task package rather than a model checkpoint, so it has no "
+            "default repository name.\n"
+            "  → set `huggingface.repo_id` to the repository that holds the "
+            "package (for example `<hf-user>/task-<short-name>`), then upload "
+            "and submit again"
+        )
+
     username = settings.hf_username
     address = hotkey_ss58 or settings.hotkey_ss58
     family = settings.competition_base_model_family

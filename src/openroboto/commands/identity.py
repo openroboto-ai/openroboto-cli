@@ -28,7 +28,6 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import replace
-from typing import Any
 
 from openroboto.backend_api import (
     BackendError,
@@ -36,16 +35,13 @@ from openroboto.backend_api import (
     fetch_contributor,
     fetch_contributor_message,
     migrate_contributor,
+    miner_key,
     register_contributor,
     revoke_contributor_hotkey,
 )
+from openroboto.chain import hotkey_signature as sign_hotkey
 from openroboto.chain import open_wallet
-from openroboto.config import (
-    ConfigError,
-    ControlFetchError,
-    Settings,
-    fetch_control,
-)
+from openroboto.config import ConfigError, Settings
 from openroboto.console import fail, say
 from openroboto.contributor import (
     ContributorKey,
@@ -323,7 +319,7 @@ def run_bind(args: argparse.Namespace) -> int:
         # Second signature over the **same bytes**: proof that the hotkey is
         # yours. Without it anyone could attach someone else's hotkey and
         # collect that author's earnings.
-        hotkey_signature=_hotkey_sign(wallet, message),
+        hotkey_signature=sign_hotkey(wallet, message),
         miner_key=_miner_key(settings),
     )
 
@@ -444,29 +440,8 @@ def run_migrate(args: argparse.Namespace) -> int:
 
 
 def _miner_key(settings: Settings) -> str:
-    """The backend's **public** rate-limit key, or `""`.
-
-    `POST /contributors*` sits behind the MINER scope. That key is not a
-    secret -- the backend publishes it in control.json -- but a backend that
-    has one set answers 401 before it reads the signature, so the CLI has to
-    send it. Read it from `miner.yaml` (`backend.public_key`) or from the
-    control.json URL the environment already names; never prompt for it.
-
-    A failure here is not fatal: the request goes out without the header and
-    the backend's `UNAUTHORIZED` answer carries the fix.
-    """
-    if settings.backend_public_key:
-        return settings.backend_public_key
-    if not settings.control_json_url:
-        return ""
-    try:
-        fetched = fetch_control(settings.control_json_url)
-    except ControlFetchError:
-        return ""
-    if fetched.control is None:
-        return ""
-    key = fetched.control.get("public_key", "")
-    return key if isinstance(key, str) else ""
+    """Backwards-compatible name; the implementation is `backend_api.miner_key`."""
+    return miner_key(settings)
 
 
 def _settings(args: argparse.Namespace) -> Settings:
@@ -484,16 +459,3 @@ def _say_signing(action: str, key: ContributorKey) -> None:
     """Name the action and the identity before the network call. Never the key
     bytes -- this line is allowed in a log."""
     say(f"✍️  signing `{action}` with contributor {key.contributor_id}")
-
-
-def _hotkey_sign(wallet: Any, message: bytes) -> str:
-    """The hotkey's sr25519 signature, lowercase hex.
-
-    `bittensor_wallet`'s `Keypair.sign` returns 64 raw bytes; the backend
-    expects 128 hex characters. Converting here (and only here) keeps the
-    "wrong encoding" failure from looking like a wrong key.
-    """
-    signature = wallet.hotkey.sign(message)
-    if isinstance(signature, str):
-        return signature.lower()
-    return bytes(signature).hex()

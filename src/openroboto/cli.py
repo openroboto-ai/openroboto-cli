@@ -25,6 +25,7 @@ from openroboto.commands import (
     init,
     status,
     submit,
+    task,
     train,
     validator,
 )
@@ -50,6 +51,7 @@ COMMAND_MODULES: tuple[ModuleType, ...] = (
     check,
     identity,
     submit,
+    task,
     status,
     validator,
 )

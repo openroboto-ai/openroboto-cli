@@ -181,7 +181,15 @@ def say_roster(settings: Settings, hotkey: str) -> None:
 def _live_competition(settings: Settings, snapshot: Snapshot) -> Competition:
     """Resolve the workspace's competition against the backend, by `(track,
     seq)` -- the id in `miner.yaml` is local to one database."""
-    for row in fetch_competitions(settings.backend_url, include_archived=True).data:
+    if snapshot.track == "task":
+        # Task seasons are hidden from the default list. A task workspace that
+        # does not ask would be told its own season is not listed.
+        rows = fetch_competitions(
+            settings.backend_url, include_archived=True, include_task=True
+        ).data
+    else:
+        rows = fetch_competitions(settings.backend_url, include_archived=True).data
+    for row in rows:
         if row.track == snapshot.track and row.seq == snapshot.seq:
             return row
     raise BackendError(f"{settings.backend_url} does not list {snapshot.name}")

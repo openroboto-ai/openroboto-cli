@@ -60,6 +60,7 @@ import urllib.parse
 from datetime import datetime
 from typing import Any, TypeVar
 
+from openroboto_protocol.commitment import Track
 from openroboto_protocol.schemas import (
     Competition,
     Contract,
@@ -71,6 +72,7 @@ from openroboto_protocol.schemas import (
     Weights,
 )
 
+from openroboto.config import ControlFetchError, Settings, fetch_control
 from openroboto.http_client import build_request, urlopen
 
 #: 🔴 **Without sending this header you get no envelope at all.**
@@ -99,6 +101,9 @@ COMPETITIONS_PATH = "/api/v1/competitions"
 CONTRIBUTORS_PATH = "/api/v1/contributors"
 CONTRIBUTOR_MESSAGE_PATH = "/api/v1/contributors/message"
 HEALTH_PATH = "/healthz"
+READY_PATH = "/readyz"
+TASK_ACCESS_MESSAGE_PATH = "/api/v1/tasks/access-message"
+TASKS_MINE_PATH = "/api/v1/tasks/mine"
 WEIGHTS_PATH = "/api/v1/weights"
 #: The pre-v1 address. Still live, and still the only one an
 #: un-migrated backend has -- see `fetch_weights`.
@@ -232,7 +237,7 @@ def fetch_rejections(
 
 
 def fetch_competitions(
-    base_url: str, *, include_archived: bool = False
+    base_url: str, *, include_archived: bool = False, include_task: bool = False
 ) -> ListEnvelope[Competition]:
     """The competitions taking submissions, in `(track, seq)` order.
 
@@ -246,13 +251,35 @@ def fetch_competitions(
     here would be dropped by FastAPI as an undeclared query string: the archived
     season simply never comes back, **and nothing reports an error**.
     """
+    if include_task and getattr(Track, "TASK", None) is None:
+        # The backend serves `track="task"` rows only when asked. Parsing one
+        # needs a protocol release that knows the track; without it pydantic
+        # rejects the whole list, which is exactly why the backend hides them.
+        # Fail with the reason instead of a schema error.
+        raise BackendError(
+            "This workspace mines a task-authoring season, but the installed "
+            "openroboto-protocol does not know `track=task` yet, so the "
+            "competition list cannot be parsed.\n"
+            "   → install the protocol release that adds `Track.TASK` (the "
+            "pinned 0.12.0 on PyPI predates it), or run this CLI against a "
+            "checkout of the protocol repository\n"
+            "   Nothing was uploaded, paid or sent on chain."
+        )
     raw = _get(
         base_url,
         COMPETITIONS_PATH,
         # Sent only when asked for. `False` would go out as the string "False",
         # which happens to parse correctly today and is one backend refactor
         # away from not doing so.
-        {"include_archived": "true" if include_archived else ""},
+        {
+            "include_archived": "true" if include_archived else "",
+            # Task seasons (`track="task"`) are hidden by default because every
+            # CLI release before protocol 0.12.0 parsed the list with a `Track`
+            # enum that did not admit them. This client pins 0.12.0, so it can
+            # ask; a model miner still does not, so the list they see is
+            # unchanged.
+            "include_task": "true" if include_task else "",
+        },
     )
     return _parse(ListEnvelope[Competition], raw, COMPETITIONS_PATH)
 
@@ -297,6 +324,180 @@ def fetch_netuid(base_url: str) -> int:
             f"answers the probe"
         )
     return netuid
+
+
+def miner_key(settings: Settings) -> str:
+    """The backend's **MINER-level** key, or `""`.
+
+    It is a public rate-limit token (`control.json` publishes it), not a
+    secret. A backend that sets one answers 401 before it reads a signature, so
+    the CLI has to send it on task/contributor endpoints.
+
+    🔴 **Never the ADMIN_KEY.** That key configures seasons, fees and
+    settlements; it must not be copied into a miner workspace. There is no
+    config field for it here, and this helper never reads one.
+
+    A failure to find it is not fatal: the request goes out without the header
+    and the backend's `UNAUTHORIZED` answer carries the fix.
+    """
+    if settings.backend_public_key:
+        return settings.backend_public_key
+    if not settings.control_json_url:
+        return ""
+    try:
+        fetched = fetch_control(settings.control_json_url)
+    except ControlFetchError:
+        return ""
+    if fetched.control is None:
+        return ""
+    key = fetched.control.get("public_key", "")
+    return key if isinstance(key, str) else ""
+
+
+class Liveness(Contract):
+    """`GET /healthz`, bare JSON (probes are not enveloped)."""
+
+    status: str
+    competition: int
+    netuid: int
+
+
+class ReadinessCheck(Contract):
+    ok: bool
+    detail: str | None = None
+
+
+class Readiness(Contract):
+    """`GET /readyz`: DB reachable and the migration head matches the code.
+
+    A not-ready backend answers **503 with this same body**, so the body is
+    read from the error response too -- a bare "503" would hide which half
+    failed (`database` vs `migration`).
+    """
+
+    ready: bool
+    database: ReadinessCheck
+    migration: ReadinessCheck
+    alembic_version: str | None = None
+    expected_head: str | None = None
+
+
+class PrivateTask(Contract):
+    """One row of `GET /api/v1/tasks/mine` (the author's own task packages).
+
+    ⚠️ **A display-only model the protocol package does not publish yet**, like
+    `RosterEntry`. It carries the package locator and the digest the backend
+    stored from the validator's admission report -- exactly the values a miner
+    needs to tie a submission to a package. Do not branch money on it.
+    """
+
+    task_id: str
+    status: str
+    package_repo: str
+    package_commit: str
+    reject_reason: str | None = None
+    source: str | None = None
+    skill: str | None = None
+    package_digest: str | None = None
+    content_sha256: str | None = None
+    archived_at: datetime | None = None
+    retention_expires_at: datetime | None = None
+    content_state: str | None = None
+    visibility: str | None = None
+
+
+def fetch_liveness(base_url: str) -> Liveness:
+    """`GET /healthz`: process alive, the season it is pinned to, its netuid."""
+    return _parse(Liveness, _get(base_url, HEALTH_PATH), HEALTH_PATH)
+
+
+def fetch_readiness(base_url: str) -> Readiness:
+    """`GET /readyz`, including the 503 body.
+
+    Readiness is the gate for sending anything else: a backend whose database
+    or migration head is wrong answers 503, and the body says which. This is
+    the one place a non-2xx body is a **successful read** rather than an error.
+    """
+    url = f"{base_url.rstrip('/')}{READY_PATH}"
+    request = build_request(url, {"Accept": ACCEPT})
+    try:
+        with urlopen(request, REQUEST_TIMEOUT_SEC) as response:
+            return _parse(Readiness, response.read(), READY_PATH)
+    except urllib.error.HTTPError as exc:
+        raw = exc.read() if exc.fp is not None else b""
+        try:
+            return _parse(Readiness, raw, READY_PATH)
+        except BackendError as parse_error:
+            # The body was already consumed; `_http_failure` would re-read an
+            # empty stream. Keep the status and the reason instead.
+            raise BackendError(
+                f"{READY_PATH} answered HTTP {exc.code} and its body is not a "
+                f"readiness document.\n  {parse_error}",
+                retryable=exc.code >= 500,
+            ) from exc
+    except (OSError, urllib.error.URLError) as exc:
+        raise BackendError(
+            f"Cannot reach the backend {url}: {exc}", retryable=True
+        ) from exc
+
+
+def fetch_task_access_message(base_url: str, hotkey: str) -> str:
+    """The exact bytes `GET /tasks/mine` asks the hotkey to sign.
+
+    Public: it is only a formatting contract. Never rebuild it locally -- a
+    second spelling produces a signature that is valid for our bytes and
+    invalid for the backend's.
+    """
+    raw = _get(base_url, TASK_ACCESS_MESSAGE_PATH, {"hotkey": hotkey})
+    return _parse(
+        Envelope[TaskAccessMessage], raw, TASK_ACCESS_MESSAGE_PATH
+    ).data.message
+
+
+class TaskAccessMessage(Contract):
+    message: str
+
+
+def fetch_my_tasks(
+    base_url: str,
+    *,
+    hotkey: str,
+    signature: str,
+    miner_key: str = "",
+    limit: int = DEFAULT_LIMIT,
+    offset: int = 0,
+    status: str = "",
+    source: str = "",
+    skill: str = "",
+) -> ListEnvelope[PrivateTask]:
+    """`GET /api/v1/tasks/mine`: the caller's own task packages.
+
+    Two independent proofs, and they fail with different codes:
+
+    - the **MINER-level key** (`X-API-Key`) is a rate-limit token the backend
+      publishes; without it a protected backend answers `UNAUTHORIZED` before
+      it reads the signature;
+    - the **hotkey signature** is the identity proof; a bad one is
+      `INVALID_SIGNATURE`.
+
+    ⚠️ **Never the ADMIN_KEY.** That key configures seasons and can change
+    money; a miner workspace has no use for it and must not carry it.
+    """
+    raw = _get(
+        base_url,
+        TASKS_MINE_PATH,
+        {
+            "hotkey": hotkey,
+            "signature": signature,
+            "limit": limit,
+            "offset": offset,
+            "status": status,
+            "source": source,
+            "skill": skill,
+        },
+        api_key=miner_key,
+    )
+    return _parse(ListEnvelope[PrivateTask], raw, TASKS_MINE_PATH)
 
 
 class RosterEntry(Contract):

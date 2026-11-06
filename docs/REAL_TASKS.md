@@ -1,9 +1,14 @@
 # Real-robot evaluation tasks
 
 The real-robot tracks for **π0.5** and **LingBot-VLA 2.0** share the following
-seven tasks. Each submitted model runs **10 trials per task**, for **70 trials**
-in its selected competition. Results and qualification remain separate for
-each track.
+seven tasks. Each submitted model runs up to **10 trials per task**, for up to
+**70 trials** in its selected competition. Results and qualification remain
+separate for each track.
+
+**Early stop.** Each task starts with 3 trials: if none of them succeeds, that task stops
+there and its remaining trials count as failures; if any of them succeeds, the
+task runs all 10.
+The score is still counted out of 70.
 
 ## Task catalog
 
