@@ -79,7 +79,7 @@ _shared_package_files: (
 _shared_digest_of_files: Callable[[tuple[tuple[str, str], ...]], str] | None = None
 _shared_package_digest: Callable[[str | pathlib.Path], str] | None = None
 try:  # pragma: no cover - which branch runs depends on the installed wheel
-    from openroboto_protocol.package_digest import (  # type: ignore[import-not-found]
+    from openroboto_protocol.package_digest import (
         digest_of_files as _protocol_digest_of_files,
     )
     from openroboto_protocol.package_digest import (

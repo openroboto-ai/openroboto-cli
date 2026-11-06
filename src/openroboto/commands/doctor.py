@@ -22,6 +22,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError, requires, version
+from types import ModuleType
 
 from openroboto import adapters
 from openroboto.commands.build import competition_adapter, competition_image
@@ -134,6 +135,7 @@ def check_protocol_capabilities(settings: Settings) -> CheckResult:
 
     has_task = getattr(Track, "TASK", None) is not None
     has_axis_layout = hasattr(model_format, "AXIS_LAYOUT")
+    _shared_digest: ModuleType | None
     try:
         from openroboto_protocol import package_digest as _shared_digest
     except ImportError:
