@@ -94,15 +94,22 @@ what it does instead of implying a fresh submission.
 from __future__ import annotations
 
 import argparse
+import pathlib
+import tempfile
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Final
 
 from openroboto_protocol.commitment import Track
 from openroboto_protocol.model_format import FormatIssueCode, FormatReport
 from openroboto_protocol.model_hash import model_hash_from_hf_tree
 from openroboto_protocol.schemas import Competition
 
-from openroboto.backend_api import BackendError, fetch_roster
+from openroboto.backend_api import (
+    BackendError,
+    ContributorDetail,
+    fetch_contributor,
+    fetch_roster,
+)
 from openroboto.commands.announce import perform_announce
 from openroboto.commands.burn import perform_burn, perform_transfer
 from openroboto.commands.check import (
@@ -129,14 +136,35 @@ from openroboto.competition_state import (
 )
 from openroboto.config import Settings
 from openroboto.console import fail, say
+from openroboto.contributor import ContributorKeyError, load_key
 from openroboto.huggingface import TreeError, fetch_tree
 from openroboto.huggingface.access import AccessError, grant_to_of, lock_and_grant
+from openroboto.task_package import (
+    PackageFetchError,
+    TaskPackageError,
+    fetch_package,
+    load_package,
+    package_digest,
+    select_package,
+    validate_package,
+)
 
 #: One request instead of a paging loop, the same figure `status` uses -- it is
 #: the backend's maximum page size, and it is asked for **one hotkey's** rows in
 #: one season, so a second page would mean a miner who has paid a thousand entry
 #: fees for one competition.
 ROSTER_LIMIT = 1000
+
+#: `competitions.track` for task-authoring seasons.
+#:
+#: ⚠️ **A string, not `Track.TASK`.** The pinned protocol release on PyPI
+#: predates the task track, and this comparison sits on the money path of the
+#: simulation and real tracks too. A bare attribute access would turn "this
+#: install has no task track" into an `AttributeError` for miners who have
+#: nothing to do with contributors. The protocol package is what decides whether
+#: such a season can even be parsed; by the time a row is here, `live.track` is
+#: its string value.
+TASK_TRACK: Final = "task"
 
 
 def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
@@ -217,7 +245,13 @@ def run(args: argparse.Namespace) -> int:
         # reading them.
         try:
             verdict = resolve_competition(settings, snapshot, datetime.now(UTC))
+            if not contributor_is_bound(settings, state, verdict.live):
+                return 1
             if not layout_is_payable(settings, state, verdict.live):
+                return 1
+            if str(
+                verdict.live.track
+            ) == TASK_TRACK and not task_package_upload_is_unchanged(state, output_dir):
                 return 1
             if not slot_is_free(settings, state, verdict):
                 return 1
@@ -293,6 +327,148 @@ def _no_season(config_path: str) -> None:
     )
 
 
+def contributor_is_bound(
+    settings: Settings, state: dict[str, Any], live: Competition
+) -> bool:
+    """Will the backend accept this submission's author, or refuse it after the
+    fee? False = do not pay.
+
+    🔴 **Only the task track needs this**, and there it is not optional: the
+    backend resolves the author from the submitting hotkey's active contributor
+    binding at admission time. An unbound hotkey is refused with
+    `contributor_unbound` -- *after* the entry fee, with no refund. The
+    simulation and real tracks are unchanged: they do not consult a
+    contributor identity at all, so this gate returns True before any request.
+
+    The check happens here, before the fee, for the same reason the layout gate
+    does. Everything it can find is fixable by typing one command; everything
+    it misses is paid for.
+
+    A migrated identity is judged the way admission judges it: the binding may
+    sit on an older id, but the **end of the migration chain** has to be
+    active. `migrate` does not move existing bindings, so the key file records
+    the ids it inherited (`migrated_from`) and all of them are checked. Without
+    that, rotating a key would produce a gate that refuses a submission the
+    backend accepts.
+    """
+    if str(live.track) != TASK_TRACK:
+        return True
+
+    hotkey = str(state.get("hotkey_ss58") or settings.hotkey_ss58 or "")
+    if not hotkey:
+        fail(
+            f"This workspace enters {live.label}, whose task track ties a "
+            f"submission to a contributor identity, but the workspace does not "
+            f"say which hotkey will submit it -- so the binding cannot be "
+            f"checked. **Nothing was paid and nothing was sent on chain.**\n"
+            f"   → set subnet.hotkey_ss58 in miner.yaml (or the wallet settings "
+            f"that make `openroboto submit` use a hotkey) and run it again"
+        )
+        return False
+
+    try:
+        key = load_key()
+    except ContributorKeyError as exc:
+        fail(
+            f"This hotkey ({hotkey}) has no contributor identity on this "
+            f"machine, so {live.label}'s task track would refuse the submission "
+            f"with `contributor_unbound` **after taking the entry fee, without "
+            f"refunding it**. Nothing was paid.\n"
+            f"   {exc}"
+        )
+        return False
+
+    # 🔴 **Check the identities this key inherited too, not only its own.**
+    # `migrate` leaves existing bindings on the old identity, and admission
+    # resolves them forward along `merged_into`. Looking only at the current id
+    # would refuse a submission the backend accepts -- the miner would be told
+    # to bind a hotkey the backend already reports as belonging to the old
+    # identity, which is a loop they cannot get out of.
+    for identity_id in (key.contributor_id, *key.migrated_from):
+        try:
+            detail = fetch_contributor(settings.backend_url, identity_id)
+            owner = _end_of_migration_chain(settings, detail)
+        except BackendError as exc:
+            if exc.code == "CONTRIBUTOR_NOT_FOUND":
+                if identity_id != key.contributor_id:
+                    # An ancestor this backend no longer lists: try the rest
+                    # rather than refusing on a bookkeeping gap.
+                    continue
+                fail(
+                    f"The contributor identity {key.contributor_id} (from "
+                    f"{key.path}) is not registered on {settings.backend_url}, "
+                    f"so {live.label}'s task track would refuse the submission "
+                    f"with `contributor_unbound` **after taking the entry "
+                    f"fee**. Nothing was paid.\n"
+                    f"   → `openroboto identity register --reward-address <your "
+                    f"ss58>` registers it\n"
+                    f"   → then `openroboto identity bind` binds hotkey {hotkey}"
+                )
+            else:
+                fail(
+                    f"Could not ask {settings.backend_url} whether hotkey "
+                    f"{hotkey} is bound to a contributor identity, so **nothing "
+                    f"was paid and nothing was sent on chain**. A backend that "
+                    f"cannot answer this is not one to pay on the assumption "
+                    f"that the answer is yes -- the task track refuses unbound "
+                    f"hotkeys without refunding the fee.\n"
+                    f"   {exc}\n"
+                    f"   → run `openroboto submit` again once the backend answers"
+                )
+            return False
+
+        if owner.status != "active":
+            fail(
+                f"The contributor identity behind hotkey {hotkey} has been "
+                f"migrated and the migration chain does not end at an active "
+                f"identity, so {live.label}'s task track would refuse the "
+                f"submission with `contributor_unbound`. **Nothing was paid.**\n"
+                f"   identity: {identity_id} (key file {key.path})\n"
+                f"   → use the key that received the migration, then "
+                f"`openroboto identity show` to confirm it is active"
+            )
+            return False
+
+        if any(binding.hotkey == hotkey for binding in detail.bindings):
+            return True
+
+    inherited = (
+        f" (also checked the identities this key inherited: "
+        f"{', '.join(key.migrated_from)})"
+        if key.migrated_from
+        else ""
+    )
+    fail(
+        f"Hotkey {hotkey} is not bound to contributor {key.contributor_id}"
+        f"{inherited}, so {live.label}'s task track would refuse the submission "
+        f"with `contributor_unbound` **after taking the entry fee, without "
+        f"refunding it**. Nothing was paid.\n"
+        f"   → `openroboto identity bind` binds the hotkey from {settings.hotkey} "
+        f"in your wallet (the contributor key and the hotkey's own key both "
+        f"sign)"
+    )
+    return False
+
+
+def _end_of_migration_chain(
+    settings: Settings, detail: ContributorDetail
+) -> ContributorDetail:
+    """Follow `merged_into` to the identity that controls the earnings now.
+
+    Admission resolves lineage the same way. Bounded by the number of hops so a
+    cycle in the data cannot hang the CLI; a cycle is a backend bug, and
+    returning the last row makes the caller refuse rather than guess.
+    """
+    seen: set[str] = set()
+    current = detail
+    while current.status != "active" and current.merged_into:
+        if current.contributor_id in seen:
+            break
+        seen.add(current.contributor_id)
+        current = fetch_contributor(settings.backend_url, current.merged_into)
+    return current
+
+
 def evaluator_can_read(
     settings: Settings, state: dict[str, Any], live: Competition
 ) -> bool:
@@ -359,6 +535,13 @@ def layout_is_payable(
     reaches `cli.main`, which prints it and exits 1 -- unpaid, which is the
     point.
     """
+    if str(live.track) == TASK_TRACK:
+        # A task season buys a verdict on a **task package**, not on a
+        # checkpoint. The model layout rules do not apply and the fingerprint
+        # sentinel does not exist, so the equal of this gate is the package
+        # check below.
+        return task_package_is_payable(settings, state, live)
+
     if live.track == Track.REAL:
         # 🔴 **The real track has no rule book, so this gate has nothing to be
         #    the equal of.**
@@ -415,6 +598,183 @@ def layout_is_payable(
 
     say(f"✅ layout ok | {where} judged by the {rules_label(layout)} rules")
     return True
+
+
+def task_package_is_payable(
+    settings: Settings, state: dict[str, Any], live: Competition
+) -> bool:
+    """Would the validator's admission accept the package at this commit?
+
+    The fee buys a verdict on ``repo@commit``, so this gate downloads exactly
+    that revision and judges what the validator will read. The digest is the
+    same rule as ``task_source/package.py`` and is printed in full -- it is the
+    value the backend will store in ``tasks.package_digest``.
+
+    It does **not** claim the task is solvable, deterministic or not a freebie;
+    those are runtime admission. It answers the two things a static check can:
+    is this a well-formed package, and is it the same bytes the miner checked.
+    """
+    repo_id = str(state.get("hf_repo_id", ""))
+    commit = announced_commit(state)
+    where = f"{repo_id}@{commit[:8]}"
+
+    expected_source = _task_source_of(live.params)
+    if not expected_source:
+        fail(
+            f"{live.label} is a task-authoring season but it does not say which "
+            f"task source it runs (`params.task.source`), so the validator cannot "
+            f"choose a checker vocabulary and the backend would retry this "
+            f"submission forever. **Nothing was paid, nothing was sent on "
+            f"chain.**\n"
+            f"   This is the season's configuration, not your package.\n"
+            f"   → report it to the subnet operators; `openroboto init "
+            f"--refresh` cannot fix it"
+        )
+        return False
+
+    try:
+        with tempfile.TemporaryDirectory(prefix="openroboto-task-submit-") as cache:
+            snapshot_root = fetch_package(
+                repo_id, commit, token=settings.hf_token, cache_dir=cache
+            )
+            # The validator digs the package out of the snapshot and digests the
+            # package directory, so this side must select the same directory.
+            # Selected without a source filter on purpose: the check below names
+            # the mismatch, which is more useful than "no robodojo package here"
+            # when the repository holds a perfectly good axis package.
+            directory = select_package(snapshot_root)
+            package = load_package(directory)
+            issues = validate_package(package)
+            digest = package_digest(directory)
+    except (PackageFetchError, TaskPackageError) as exc:
+        fail(
+            f"Could not read the task package at {where}, so it was **not** "
+            f"judged -- and **nothing was paid, nothing was sent on chain**.\n"
+            f"   {exc}\n"
+            f"   This is not a verdict on your package: the validator reads the "
+            f"same repository, and a package it cannot read is retried by the "
+            f"backend rather than rejected. Fix the upload or the access and run "
+            f"`openroboto submit` again; the upload is reused."
+        )
+        return False
+
+    errors = [issue for issue in issues if issue.is_error]
+    if errors:
+        lines = "\n".join(f"   ❌ [{issue.code}] {issue.message}" for issue in errors)
+        fail(
+            f"The task package at {where} is not well formed, so the validator "
+            f"would reject it **after the fee was paid**. **Nothing was paid, "
+            f"nothing was sent on chain.**\n"
+            f"{lines}\n"
+            f"   → fix the package, re-upload, and run `openroboto task check "
+            f"{repo_id}@{commit}` before submitting again"
+        )
+        return False
+
+    # Static format is not runtime admission. OPE-145 measured a package with
+    # no reference actions passing every static check and being rejected by
+    # the runtime as `reject_unsolvable`; paying for it would buy a rejection.
+    runtime_fatal = [
+        issue for issue in issues if issue.code == "axis.reference_not_declared"
+    ]
+    if runtime_fatal:
+        fail(
+            f"The task package at {where} has no reference solution actions, so "
+            f"the validator's runtime admission rejects it as "
+            f"`reject_unsolvable` (OPE-145 measured this on an official-payload "
+            f"package). The fee would buy a rejection. **Nothing was paid, "
+            f"nothing was sent on chain.**\n"
+            f"   → supply `reference.json` with non-empty `actions` for every "
+            f"instance, rebuild the package (the digest changes), run "
+            f"`openroboto task check` and submit again"
+        )
+        return False
+
+    if package.source != expected_source:
+        fail(
+            f"{live.label} runs task source `{expected_source}`, but the package "
+            f"at {where} declares `{package.source}`. The validator would use "
+            f"the season's checker vocabulary on a package written for another "
+            f"source. **Nothing was paid, nothing was sent on chain.**\n"
+            f"   → submit a `{expected_source}` package, or report the season's "
+            f"configuration if it is wrong"
+        )
+        return False
+
+    for issue in issues:
+        if not issue.is_error:
+            say(f"⚠️  [{issue.code}] {issue.message}")
+
+    # Written down before the fee so `status`/the evidence trail can quote the
+    # same number the backend will store. `save_state` runs later in the same
+    # command; a crash before it leaves the file as it was, which is the safe
+    # direction (nothing was paid).
+    state["package_digest"] = digest
+    state["package_source"] = package.source
+    state["package_task_id"] = package.task_id
+    say(f"✅ task package ok | {where} ({package.source}/{package.task_id})")
+    say(f"   package_digest: {digest}")
+    return True
+
+
+def task_package_upload_is_unchanged(state: dict[str, Any], output_dir: str) -> bool:
+    """Is the repository's package byte-identical to the local one?
+
+    The gate above digests what the validator will read. That is authoritative,
+    but a miner who checked a local package and then had the uploader add a file
+    would pay for a different package -- the classic case is the model
+    uploader's `run_info.json`, which ``perform_upload`` now skips for this
+    track. This compares the two sides before the fee and refuses a silent
+    difference.
+
+    A missing local directory is not a refusal: the upload may have been reused
+    from an earlier run on another machine, and the repository is still the
+    authoritative package. Say so rather than invent a verdict.
+    """
+    remote = str(state.get("package_digest") or "")
+    if not remote:
+        return True
+    root = pathlib.Path(output_dir)
+    if not root.is_dir():
+        say(
+            "ℹ️  local package directory is not present; the repository digest "
+            "stays authoritative"
+        )
+        return True
+    try:
+        local = package_digest(select_package(root))
+    except TaskPackageError as exc:
+        say(f"ℹ️  could not compare the local package: {exc}")
+        return True
+    if local == remote:
+        state["package_local_digest"] = local
+        say(f"✅ upload unchanged | package_digest {local}")
+        return True
+    fail(
+        f"The repository package and the local package are not byte-identical, "
+        f"so the digest the validator will store differs from the one you "
+        f"checked. **Nothing was paid, nothing was sent on chain.**\n"
+        f"   repository: {remote}\n"
+        f"   local:      {local}\n"
+        f"   A leftover `run_info.json` or any added/removed file changes the "
+        f"digest; the task uploader itself does not add one.\n"
+        f"   → run `openroboto task check --repo <repo> --commit <commit>` to "
+        f"see the per-file difference, remove the extra file, and submit again"
+    )
+    return False
+
+
+def _task_source_of(params: dict[str, Any]) -> str:
+    """``params.task.source``, read the way the backend's ``task_pool`` reads it.
+
+    Missing is ``""`` and the caller refuses: the backend turns a missing source
+    into a permanent ``retry``, so paying would strand the entry fee.
+    """
+    section = params.get("task")
+    if not isinstance(section, dict):
+        return ""
+    value = section.get("source")
+    return value.strip() if isinstance(value, str) and value.strip() else ""
 
 
 def _no_weights(where: str) -> None:

@@ -22,6 +22,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError, requires, version
+from types import ModuleType
 
 from openroboto import adapters
 from openroboto.commands.build import competition_adapter, competition_image
@@ -80,6 +81,7 @@ def run(args: argparse.Namespace) -> int:
     if settings is not None:
         results.extend(check_settings(settings))
         results.append(check_competition(settings))
+        results.append(check_protocol_capabilities(settings))
         results.append(check_hf_token(settings))
         results.append(check_wallet(settings))
 
@@ -104,6 +106,69 @@ def run(args: argparse.Namespace) -> int:
         return 1
     say("✅ All required checks passed")
     return 0
+
+
+def check_protocol_capabilities(settings: Settings) -> CheckResult:
+    """Whether the installed protocol has the features this workspace needs.
+
+    The version pin answers "is this the release the CLI was built against";
+    it cannot answer "does this release contain both changes". The task track
+    and the AXIS layout landed on two diverged lines:
+
+    - protocol `main` `61c1642` has `Track.TASK`, no `AXIS_LAYOUT`;
+    - tag `v0.12.0` (`443fdbb`) has `AXIS_LAYOUT`, no `Track.TASK`;
+    - the PyPI `0.12.0` wheel has neither the TASK change nor a version bump
+      for it.
+
+    A merged release is required before a formal run. A local cherry-pick tree
+    is component verification only; this check is what stops it being mistaken
+    for the pinned release. Only a task workspace **requires** `Track.TASK`:
+    a model miner on the published pin keeps working, and failing their doctor
+    for a track they do not mine would be noise.
+
+    `AXIS_LAYOUT` is reported but not made a failure here: this module imports
+    it at CLI start-up, so a CLI that runs at all already has it. Saying so
+    keeps the matrix complete when the release is chosen.
+    """
+    from openroboto_protocol import model_format
+    from openroboto_protocol.commitment import Track
+
+    has_task = getattr(Track, "TASK", None) is not None
+    has_axis_layout = hasattr(model_format, "AXIS_LAYOUT")
+    _shared_digest: ModuleType | None
+    try:
+        from openroboto_protocol import package_digest as _shared_digest
+    except ImportError:
+        _shared_digest = None
+    has_shared_digest = _shared_digest is not None
+    snapshot = load_snapshot(settings)
+    needs_task = snapshot is not None and snapshot.track == "task"
+
+    detail = (
+        f"Track.TASK={'yes' if has_task else 'no'}, "
+        f"AXIS_LAYOUT={'yes' if has_axis_layout else 'no'}, "
+        f"package_digest={'yes' if has_shared_digest else 'no'}"
+    )
+    if needs_task and not (has_task and has_shared_digest):
+        return CheckResult(
+            "protocol capabilities",
+            False,
+            detail,
+            "this workspace mines a task-authoring season, but the installed "
+            "protocol is missing `Track.TASK` and/or the shared "
+            "`openroboto_protocol.package_digest` (OPE-211 candidate 0.13.0). "
+            "The production pin is still 0.12.0 and 0.13.0 is not on PyPI: "
+            "use the candidate wheel in a development environment "
+            "(`scripts/verify_task_cli_install.py`), or wait for the release. "
+            "Do not substitute a cherry-pick tree or a local mirror.",
+            required=True,
+        )
+    return CheckResult(
+        "protocol capabilities",
+        True,
+        detail,
+        required=needs_task,
+    )
 
 
 def check_python() -> CheckResult:

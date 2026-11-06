@@ -1,6 +1,6 @@
 [project]
 name = "openroboto"
-version = "1.5.1"
+version = "1.6.0"
 description = "OpenRoboto subnet (Bittensor netuid 80) CLI — everything a miner or external validator types."
 readme = "README.md"
 license = "MIT"
@@ -21,6 +21,12 @@ requires-python = ">=3.11"
 #   pyyaml             — miner.yaml
 #   bittensor          — chain interaction (burn / commitment / set_weights)
 #   huggingface_hub    — model upload
+#   cryptography       — the Ed25519 contributor key behind `openroboto identity`
+#                        (generation, signing, and verifying the key file's own
+#                        pair). bittensor_wallet also ships an Ed25519 keypair,
+#                        but its API is the SDK's private surface and it would
+#                        make "read your contributor key" depend on the chain
+#                        stack being installed.
 # HTTP always goes through stdlib urllib; requests is not pulled in.
 dependencies = [
     # Pinned exactly, not `>=`. The version number **is** the contract version: a
@@ -31,13 +37,17 @@ dependencies = [
     # `==` is present; whether the specific version is correct is beyond it — that
     # depends on keeping this in sync with the protocol package).
     #
-    # ⚠️ This number must equal the latest published release of that package.
+    # This number must equal the protocol release used by the CLI. Publishing
+    # that release is a prerequisite for an index-only production install.
     # A path override in `[tool.uv.sources]` **bypasses the version constraint**,
     # so a wrong number here leaves local and CI green and only blows up once the
     # override is removed and the install really comes from PyPI — which is
     # release time. `tests/test_packaging.py` compares this against the version
     # actually resolved into the environment.
-    "openroboto-protocol==0.12.0",
+    # Candidate 0.13.0 supplies the shared task-package digest. Until the
+    # protocol is published, install both candidate wheels through --find-links;
+    # do not bypass this constraint with --no-deps or an editable override.
+    "openroboto-protocol==0.13.0",
     "pyyaml>=6.0",
     # Production miner machines run 10.5.0 (the old requirements.txt pinned that
     # version). The two APIs used are private surface of the SDK:
@@ -46,6 +56,10 @@ dependencies = [
     # bound to move them, so the upper bound is locked at 11.
     "bittensor>=10.5,<11",
     "huggingface_hub>=0.24.0",
+    # The backend pins cryptography==50.0.2 for the same Ed25519 operations;
+    # a range is enough on this side because the API used (Raw private bytes,
+    # Ed25519 sign/verify) has been stable since 42.
+    "cryptography>=42",
 ]
 
 classifiers = [

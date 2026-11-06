@@ -60,9 +60,11 @@ import urllib.parse
 from datetime import datetime
 from typing import Any, TypeVar
 
+from openroboto_protocol.commitment import Track
 from openroboto_protocol.schemas import (
     Competition,
     Contract,
+    Envelope,
     ErrorEnvelope,
     ListEnvelope,
     ScanRejection,
@@ -70,6 +72,7 @@ from openroboto_protocol.schemas import (
     Weights,
 )
 
+from openroboto.config import ControlFetchError, Settings, fetch_control
 from openroboto.http_client import build_request, urlopen
 
 #: 🔴 **Without sending this header you get no envelope at all.**
@@ -95,7 +98,12 @@ DEFAULT_LIMIT = 20
 HISTORY_PATH = "/api/v1/submissions/history"
 REJECTIONS_PATH = "/api/v1/scan-rejections"
 COMPETITIONS_PATH = "/api/v1/competitions"
+CONTRIBUTORS_PATH = "/api/v1/contributors"
+CONTRIBUTOR_MESSAGE_PATH = "/api/v1/contributors/message"
 HEALTH_PATH = "/healthz"
+READY_PATH = "/readyz"
+TASK_ACCESS_MESSAGE_PATH = "/api/v1/tasks/access-message"
+TASKS_MINE_PATH = "/api/v1/tasks/mine"
 WEIGHTS_PATH = "/api/v1/weights"
 #: The pre-v1 address. Still live, and still the only one an
 #: un-migrated backend has -- see `fetch_weights`.
@@ -229,7 +237,7 @@ def fetch_rejections(
 
 
 def fetch_competitions(
-    base_url: str, *, include_archived: bool = False
+    base_url: str, *, include_archived: bool = False, include_task: bool = False
 ) -> ListEnvelope[Competition]:
     """The competitions taking submissions, in `(track, seq)` order.
 
@@ -243,13 +251,35 @@ def fetch_competitions(
     here would be dropped by FastAPI as an undeclared query string: the archived
     season simply never comes back, **and nothing reports an error**.
     """
+    if include_task and getattr(Track, "TASK", None) is None:
+        # The backend serves `track="task"` rows only when asked. Parsing one
+        # needs a protocol release that knows the track; without it pydantic
+        # rejects the whole list, which is exactly why the backend hides them.
+        # Fail with the reason instead of a schema error.
+        raise BackendError(
+            "This workspace mines a task-authoring season, but the installed "
+            "openroboto-protocol does not know `track=task` yet, so the "
+            "competition list cannot be parsed.\n"
+            "   → install the protocol release that adds `Track.TASK` (the "
+            "pinned 0.12.0 on PyPI predates it), or run this CLI against a "
+            "checkout of the protocol repository\n"
+            "   Nothing was uploaded, paid or sent on chain."
+        )
     raw = _get(
         base_url,
         COMPETITIONS_PATH,
         # Sent only when asked for. `False` would go out as the string "False",
         # which happens to parse correctly today and is one backend refactor
         # away from not doing so.
-        {"include_archived": "true" if include_archived else ""},
+        {
+            "include_archived": "true" if include_archived else "",
+            # Task seasons (`track="task"`) are hidden by default because every
+            # CLI release before protocol 0.12.0 parsed the list with a `Track`
+            # enum that did not admit them. This client pins 0.12.0, so it can
+            # ask; a model miner still does not, so the list they see is
+            # unchanged.
+            "include_task": "true" if include_task else "",
+        },
     )
     return _parse(ListEnvelope[Competition], raw, COMPETITIONS_PATH)
 
@@ -294,6 +324,180 @@ def fetch_netuid(base_url: str) -> int:
             f"answers the probe"
         )
     return netuid
+
+
+def miner_key(settings: Settings) -> str:
+    """The backend's **MINER-level** key, or `""`.
+
+    It is a public rate-limit token (`control.json` publishes it), not a
+    secret. A backend that sets one answers 401 before it reads a signature, so
+    the CLI has to send it on task/contributor endpoints.
+
+    🔴 **Never the ADMIN_KEY.** That key configures seasons, fees and
+    settlements; it must not be copied into a miner workspace. There is no
+    config field for it here, and this helper never reads one.
+
+    A failure to find it is not fatal: the request goes out without the header
+    and the backend's `UNAUTHORIZED` answer carries the fix.
+    """
+    if settings.backend_public_key:
+        return settings.backend_public_key
+    if not settings.control_json_url:
+        return ""
+    try:
+        fetched = fetch_control(settings.control_json_url)
+    except ControlFetchError:
+        return ""
+    if fetched.control is None:
+        return ""
+    key = fetched.control.get("public_key", "")
+    return key if isinstance(key, str) else ""
+
+
+class Liveness(Contract):
+    """`GET /healthz`, bare JSON (probes are not enveloped)."""
+
+    status: str
+    competition: int
+    netuid: int
+
+
+class ReadinessCheck(Contract):
+    ok: bool
+    detail: str | None = None
+
+
+class Readiness(Contract):
+    """`GET /readyz`: DB reachable and the migration head matches the code.
+
+    A not-ready backend answers **503 with this same body**, so the body is
+    read from the error response too -- a bare "503" would hide which half
+    failed (`database` vs `migration`).
+    """
+
+    ready: bool
+    database: ReadinessCheck
+    migration: ReadinessCheck
+    alembic_version: str | None = None
+    expected_head: str | None = None
+
+
+class PrivateTask(Contract):
+    """One row of `GET /api/v1/tasks/mine` (the author's own task packages).
+
+    ⚠️ **A display-only model the protocol package does not publish yet**, like
+    `RosterEntry`. It carries the package locator and the digest the backend
+    stored from the validator's admission report -- exactly the values a miner
+    needs to tie a submission to a package. Do not branch money on it.
+    """
+
+    task_id: str
+    status: str
+    package_repo: str
+    package_commit: str
+    reject_reason: str | None = None
+    source: str | None = None
+    skill: str | None = None
+    package_digest: str | None = None
+    content_sha256: str | None = None
+    archived_at: datetime | None = None
+    retention_expires_at: datetime | None = None
+    content_state: str | None = None
+    visibility: str | None = None
+
+
+def fetch_liveness(base_url: str) -> Liveness:
+    """`GET /healthz`: process alive, the season it is pinned to, its netuid."""
+    return _parse(Liveness, _get(base_url, HEALTH_PATH), HEALTH_PATH)
+
+
+def fetch_readiness(base_url: str) -> Readiness:
+    """`GET /readyz`, including the 503 body.
+
+    Readiness is the gate for sending anything else: a backend whose database
+    or migration head is wrong answers 503, and the body says which. This is
+    the one place a non-2xx body is a **successful read** rather than an error.
+    """
+    url = f"{base_url.rstrip('/')}{READY_PATH}"
+    request = build_request(url, {"Accept": ACCEPT})
+    try:
+        with urlopen(request, REQUEST_TIMEOUT_SEC) as response:
+            return _parse(Readiness, response.read(), READY_PATH)
+    except urllib.error.HTTPError as exc:
+        raw = exc.read() if exc.fp is not None else b""
+        try:
+            return _parse(Readiness, raw, READY_PATH)
+        except BackendError as parse_error:
+            # The body was already consumed; `_http_failure` would re-read an
+            # empty stream. Keep the status and the reason instead.
+            raise BackendError(
+                f"{READY_PATH} answered HTTP {exc.code} and its body is not a "
+                f"readiness document.\n  {parse_error}",
+                retryable=exc.code >= 500,
+            ) from exc
+    except (OSError, urllib.error.URLError) as exc:
+        raise BackendError(
+            f"Cannot reach the backend {url}: {exc}", retryable=True
+        ) from exc
+
+
+def fetch_task_access_message(base_url: str, hotkey: str) -> str:
+    """The exact bytes `GET /tasks/mine` asks the hotkey to sign.
+
+    Public: it is only a formatting contract. Never rebuild it locally -- a
+    second spelling produces a signature that is valid for our bytes and
+    invalid for the backend's.
+    """
+    raw = _get(base_url, TASK_ACCESS_MESSAGE_PATH, {"hotkey": hotkey})
+    return _parse(
+        Envelope[TaskAccessMessage], raw, TASK_ACCESS_MESSAGE_PATH
+    ).data.message
+
+
+class TaskAccessMessage(Contract):
+    message: str
+
+
+def fetch_my_tasks(
+    base_url: str,
+    *,
+    hotkey: str,
+    signature: str,
+    miner_key: str = "",
+    limit: int = DEFAULT_LIMIT,
+    offset: int = 0,
+    status: str = "",
+    source: str = "",
+    skill: str = "",
+) -> ListEnvelope[PrivateTask]:
+    """`GET /api/v1/tasks/mine`: the caller's own task packages.
+
+    Two independent proofs, and they fail with different codes:
+
+    - the **MINER-level key** (`X-API-Key`) is a rate-limit token the backend
+      publishes; without it a protected backend answers `UNAUTHORIZED` before
+      it reads the signature;
+    - the **hotkey signature** is the identity proof; a bad one is
+      `INVALID_SIGNATURE`.
+
+    ⚠️ **Never the ADMIN_KEY.** That key configures seasons and can change
+    money; a miner workspace has no use for it and must not carry it.
+    """
+    raw = _get(
+        base_url,
+        TASKS_MINE_PATH,
+        {
+            "hotkey": hotkey,
+            "signature": signature,
+            "limit": limit,
+            "offset": offset,
+            "status": status,
+            "source": source,
+            "skill": skill,
+        },
+        api_key=miner_key,
+    )
+    return _parse(ListEnvelope[PrivateTask], raw, TASKS_MINE_PATH)
 
 
 class RosterEntry(Contract):
@@ -358,6 +562,266 @@ def fetch_roster(
     path = f"{COMPETITIONS_PATH}/{competition_id}/roster"
     raw = _get(base_url, path, {"hotkey": hotkey, "limit": limit, "offset": offset})
     return _parse(ListEnvelope[RosterEntry], raw, path)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Contributor identity (`POST /api/v1/contributors*`)
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# ⚠️ **These response models are a local copy**, like `RosterEntry` above: the
+# pinned `openroboto-protocol` release predates the contributor endpoints, and
+# adding models there means a protocol release plus a re-pin here. The field
+# names are the backend's `ContributorOut` / `ContributorDetail` /
+# `BindingOut`, verbatim. Move them into the protocol package at its next
+# release rather than letting this grow into a second contract book.
+#
+# 🔴 The **id is never sent as input**. `POST /contributors` takes only the
+# public key, reward address and signature; the server recomputes
+# `contributor_id` from the key. A client-chosen primary key would let anyone
+# claim an identity by naming it.
+
+
+class Contributor(Contract):
+    """One persistent contributor identity, as the backend publishes it."""
+
+    contributor_id: str
+    public_key: str
+    reward_address: str
+    #: `active` or `migrated`. A `migrated` row still owns its historical
+    #: tasks; `merged_into` names the identity that controls the earnings now.
+    status: str
+    merged_into: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ContributorBinding(Contract):
+    """One currently active hotkey binding."""
+
+    hotkey: str
+    created_at: datetime
+
+
+class ContributorDetail(Contributor):
+    """An identity plus the hotkeys it has bound **right now**.
+
+    Revoked bindings are absent by design -- the tasks frozen against them are
+    what keeps the history, not this list.
+    """
+
+    #: Required, not defaulted: the endpoint always sends it, and "we did not
+    #: see the list" must not be read as "there are no bindings" before a paid
+    #: submission.
+    bindings: list[ContributorBinding]
+
+
+class ContributorMessage(Contract):
+    """The exact bytes to sign, from `GET /contributors/message`."""
+
+    message: str
+
+
+#: What to do next for each stable contributor error code. Appended to the
+#: backend's message so a miner does not have to translate a 401 into an
+#: action. Keys are the backend's codes (`services/contributors.py`).
+_CONTRIBUTOR_FIXES: dict[str, str] = {
+    "INVALID_CONTRIBUTOR_PROOF": (
+        "re-sign the exact text `openroboto identity ...` printed -- it comes "
+        "from GET /api/v1/contributors/message, and a re-typed or reordered "
+        "copy will not verify. For `bind`, both the contributor key and the "
+        "hotkey must sign that same text"
+    ),
+    "HOTKEY_SIGNATURE_INVALID": (
+        "the sr25519 hotkey signature is missing or wrong. `openroboto identity "
+        "bind` signs with the hotkey in your wallet config; check that "
+        "subnet.hotkey matches the hotkey you are binding"
+    ),
+    "CONTRIBUTOR_NOT_FOUND": (
+        "this identity is not registered on this backend. → `openroboto "
+        "identity register --reward-address <your ss58>`"
+    ),
+    "CONTRIBUTOR_ALREADY_MIGRATED": (
+        "this identity was migrated to another key. Point the command at the "
+        "current identity (the key that received it), or use the identity "
+        "`openroboto identity show` reports as active"
+    ),
+    "HOTKEY_ALREADY_BOUND": (
+        "that hotkey belongs to a different contributor identity. The old "
+        "identity has to sign an `unbind` first (`openroboto identity unbind "
+        "--hotkey <ss58>` with the old key)"
+    ),
+    "HOTKEY_NOT_BOUND": (
+        "that hotkey is not bound to this identity. → `openroboto identity "
+        "bind --hotkey <ss58>`"
+    ),
+    "PUBLIC_KEY_ALREADY_REGISTERED": (
+        "that public key already has an identity; to merge two identities "
+        "contact the operators for an arbitration migration"
+    ),
+    "REWARD_ADDRESS_MISMATCH": (
+        "that public key is already registered with a different reward "
+        "address. Changing the address is a signed migration: `openroboto "
+        "identity migrate --new-key-file <path> --reward-address <new ss58>`"
+    ),
+    # The MINER scope key is public (control.json); it is a rate-limit token,
+    # not a secret. Without it the backend never reads the signature.
+    "UNAUTHORIZED": (
+        "this backend wants its public rate-limit key on write requests. Put "
+        "it in miner.yaml as `backend.public_key` (the `public_key` value from "
+        "control.json) or set `urls.control_json` so the CLI can fetch it"
+    ),
+}
+
+
+def fetch_contributor_message(base_url: str, kind: str, **fields: str) -> str:
+    """Ask the backend for the canonical text to sign.
+
+    🔴 **Never assemble this locally.** The backend rebuilds the message from
+    `kind` and a fixed field order; a second spelling here would produce a
+    signature that is valid for our bytes and invalid for theirs, and the only
+    symptom would be "signature invalid".
+    """
+    try:
+        raw = _get(base_url, CONTRIBUTOR_MESSAGE_PATH, {"kind": kind, **fields})
+    except BackendError as exc:
+        raise _with_contributor_fix(exc) from exc
+    return _parse(
+        Envelope[ContributorMessage], raw, CONTRIBUTOR_MESSAGE_PATH
+    ).data.message
+
+
+def register_contributor(
+    base_url: str,
+    *,
+    public_key: str,
+    reward_address: str,
+    signature: str,
+    miner_key: str = "",
+) -> Contributor:
+    """Register an identity. Replaying the same key + address is idempotent."""
+    raw = _post_contributor(
+        base_url,
+        CONTRIBUTORS_PATH,
+        {
+            "public_key": public_key,
+            "reward_address": reward_address,
+            "signature": signature,
+        },
+        api_key=miner_key,
+    )
+    return _parse(Envelope[Contributor], raw, CONTRIBUTORS_PATH).data
+
+
+def fetch_contributor(base_url: str, contributor_id: str) -> ContributorDetail:
+    """One identity and its active bindings. 404 when it is not registered."""
+    path = f"{CONTRIBUTORS_PATH}/{contributor_id}"
+    try:
+        raw = _get(base_url, path)
+    except BackendError as exc:
+        raise _with_contributor_fix(exc) from exc
+    return _parse(Envelope[ContributorDetail], raw, path).data
+
+
+def bind_contributor_hotkey(
+    base_url: str,
+    contributor_id: str,
+    *,
+    hotkey: str,
+    signature: str,
+    hotkey_signature: str,
+    miner_key: str = "",
+) -> ContributorBinding:
+    """Bind a hotkey. **Two signatures over the same message.**
+
+    `signature` is the contributor Ed25519 key; `hotkey_signature` is the
+    hotkey's sr25519 key. The backend answers 401 without the second one --
+    otherwise anyone could attach someone else's hotkey and collect that
+    author's earnings.
+    """
+    path = f"{CONTRIBUTORS_PATH}/{contributor_id}/hotkeys"
+    raw = _post_contributor(
+        base_url,
+        path,
+        {
+            "hotkey": hotkey,
+            "signature": signature,
+            "hotkey_signature": hotkey_signature,
+        },
+        api_key=miner_key,
+    )
+    return _parse(Envelope[ContributorBinding], raw, path).data
+
+
+def revoke_contributor_hotkey(
+    base_url: str,
+    contributor_id: str,
+    *,
+    hotkey: str,
+    signature: str,
+    miner_key: str = "",
+) -> ContributorDetail:
+    """Unbind a hotkey (contributor key only). Historical tasks keep the
+    identity they were frozen with; only future submissions are affected."""
+    path = f"{CONTRIBUTORS_PATH}/{contributor_id}/hotkeys/{hotkey}/revoke"
+    raw = _post_contributor(base_url, path, {"signature": signature}, api_key=miner_key)
+    return _parse(Envelope[ContributorDetail], raw, path).data
+
+
+def migrate_contributor(
+    base_url: str,
+    contributor_id: str,
+    *,
+    new_public_key: str,
+    new_reward_address: str,
+    signature: str,
+    miner_key: str = "",
+) -> Contributor:
+    """Rotate the signing key. **Signed by the old identity's private key.**
+
+    The message names the new public key *and* the new reward address, so one
+    signature authorises both -- filling in a new address alone is not an
+    action.
+    """
+    path = f"{CONTRIBUTORS_PATH}/{contributor_id}/migrate"
+    raw = _post_contributor(
+        base_url,
+        path,
+        {
+            "new_public_key": new_public_key,
+            "new_reward_address": new_reward_address,
+            "signature": signature,
+        },
+        api_key=miner_key,
+    )
+    return _parse(Envelope[Contributor], raw, path).data
+
+
+def _post_contributor(
+    base_url: str, path: str, payload: dict[str, Any], *, api_key: str = ""
+) -> bytes:
+    try:
+        return _post(base_url, path, payload, api_key=api_key)
+    except BackendError as exc:
+        raise _with_contributor_fix(exc) from exc
+
+
+def _with_contributor_fix(exc: BackendError) -> BackendError:
+    """Append the next step for a known contributor code; pass others through.
+
+    The status code alone is not actionable: a miner reading "401" reasonably
+    concludes the server is broken, when the answer is "fetch the message
+    again and re-sign it".
+    """
+    fix = _CONTRIBUTOR_FIXES.get(exc.code)
+    if fix is None:
+        return exc
+    original = str(exc.args[0]) if exc.args else ""
+    return BackendError(
+        f"{original}\n  → {fix}",
+        code=exc.code,
+        retryable=exc.retryable,
+        request_id=exc.request_id,
+    )
 
 
 def fetch_weights(base_url: str, public_key: str = "") -> Weights:
@@ -446,9 +910,54 @@ def _get(
     return raw
 
 
-def _http_failure(url: str, exc: urllib.error.HTTPError) -> BackendError:
-    """Turn a 4xx / 5xx into an error a miner can act on."""
-    hint = KEY_HINT if exc.code == 401 else ""
+def _post(
+    base_url: str, path: str, payload: dict[str, Any], api_key: str = ""
+) -> bytes:
+    """POST one JSON object and return the raw response body.
+
+    Same envelope rules as `_get`: a success carries `data`, a failure carries
+    `error`, and an error body inside a 4xx must be read rather than discarded
+    -- it is where `code`, `retryable` and `request_id` live. A contributor
+    proof failure is a 401, so losing the body would leave a miner with
+    nothing but "unauthorized".
+    """
+    url = f"{base_url.rstrip('/')}{path}"
+    body = json.dumps(payload).encode("utf-8")
+    headers = {"Accept": ACCEPT, "Content-Type": "application/json"}
+    # The MINER scope key is a **rate-limit token**, not an authorisation
+    # secret (the backend publishes it in control.json). The real proof on
+    # these endpoints is the signature; without any key a backend with
+    # PUBLIC_KEY set answers 401 before it ever looks at the signature.
+    if api_key:
+        headers["X-API-Key"] = api_key
+    request = build_request(url, headers, data=body)
+
+    try:
+        with urlopen(request, REQUEST_TIMEOUT_SEC) as response:
+            raw: bytes = response.read()
+    except urllib.error.HTTPError as exc:
+        raise _http_failure(url, exc, key_hint=False) from exc
+    except (OSError, urllib.error.URLError) as exc:
+        raise BackendError(
+            f"Cannot reach the backend {url}: {exc}", retryable=True
+        ) from exc
+
+    failure = _error_envelope(raw)
+    if failure is not None:
+        raise _from_envelope(failure)
+    return raw
+
+
+def _http_failure(
+    url: str, exc: urllib.error.HTTPError, *, key_hint: bool = True
+) -> BackendError:
+    """Turn a 4xx / 5xx into an error a miner can act on.
+
+    `key_hint` is off for contributor endpoints: they authenticate with a
+    signature, not an API key, and telling a miner to copy `public_key` there
+    would send them looking in the wrong file.
+    """
+    hint = KEY_HINT if exc.code == 401 and key_hint else ""
 
     # An HTTPError whose fp is None has no readable body (the connection is
     # already closed, or the error was constructed by hand).

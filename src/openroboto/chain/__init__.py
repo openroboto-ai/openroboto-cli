@@ -12,6 +12,7 @@ from openroboto.chain.connection import (
     get_metagraph,
     get_subtensor,
     get_wallet,
+    hotkey_signature,
     open_wallet,
 )
 from openroboto.chain.weights import (
@@ -28,6 +29,7 @@ __all__ = [
     "get_metagraph",
     "get_subtensor",
     "get_wallet",
+    "hotkey_signature",
     "normalize_weights",
     "open_wallet",
     "set_weights_on_chain",

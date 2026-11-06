@@ -41,10 +41,17 @@ def certificate_context() -> ssl.SSLContext | None:
 
 
 def build_request(
-    url: str, headers: dict[str, str] | None = None
+    url: str,
+    headers: dict[str, str] | None = None,
+    data: bytes | None = None,
+    method: str | None = None,
 ) -> urllib.request.Request:
-    """Build a GET request carrying the UA."""
-    request = urllib.request.Request(url)
+    """Build a request carrying the UA.
+
+    `data` makes it a POST; `method` is passed through for the rare explicit
+    case. Existing GET callers pass neither and are unchanged.
+    """
+    request = urllib.request.Request(url, data=data, method=method)
     request.add_header("User-Agent", USER_AGENT)
     for key, value in (headers or {}).items():
         request.add_header(key, value)

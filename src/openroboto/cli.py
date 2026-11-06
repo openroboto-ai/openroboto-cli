@@ -21,14 +21,17 @@ from openroboto.commands import (
     build,
     check,
     doctor,
+    identity,
     init,
     status,
     submit,
+    task,
     train,
     validator,
 )
 from openroboto.config import ConfigError, ControlFetchError
 from openroboto.console import fail
+from openroboto.contributor import ContributorKeyError
 from openroboto.huggingface import UploadError
 from openroboto.logging import setup_logger
 from openroboto.payment import BurnError, TransferError
@@ -46,7 +49,9 @@ COMMAND_MODULES: tuple[ModuleType, ...] = (
     build,
     train,
     check,
+    identity,
     submit,
+    task,
     status,
     validator,
 )
@@ -61,6 +66,7 @@ EXPECTED_ERRORS = (
     BurnError,
     ChainError,
     ConfigError,
+    ContributorKeyError,
     ControlFetchError,
     TrainingError,
     TransferError,

@@ -22,6 +22,8 @@ you find the same rule stated in two files, that is a bug — report it.
 | set up a real machine (GPU, Docker, systemd) | [MINER_DEPLOY.md](./MINER_DEPLOY.md) |
 | know what every `miner.yaml` field does | [CONFIG.md](./CONFIG.md) |
 | know exactly what the evaluation fee costs me and when it is wasted | [PAYMENT.md](./PAYMENT.md) |
+| register the identity a **task-track** submission is paid to | [CONTRIBUTOR.md](./CONTRIBUTOR.md) |
+| check a **task package** before a task-authoring season's fee | [TASK_PACKAGES.md](./TASK_PACKAGES.md) |
 | know how the **real-robot** track pays — prize pool, claim period, challenges | [REAL_TRACK.md](./REAL_TRACK.md) |
 | understand the parallel π0.5 and LingBot real tracks | [REAL_TRACKS.md](./REAL_TRACKS.md) |
 | read the shared real-robot tasks, instructions and trial count | [REAL_TASKS.md](./REAL_TASKS.md) |
@@ -39,8 +41,9 @@ Entry fees are **not refundable** — burned or transferred. Two commands exist 
 so that a mistake costs you nothing:
 
 ```bash
-openroboto doctor    # config, competition + entry fee, HF permissions, balance, Docker, GPU, image
-openroboto check     # the evaluation format rules, applied locally
+openroboto doctor       # config, competition + entry fee, HF permissions, balance, Docker, GPU, image
+openroboto check        # the evaluation format rules, applied locally
+openroboto task check   # task-authoring seasons: per-file hashes + package digest
 ```
 
 Run both before `openroboto submit`. The rules they enforce are documented in

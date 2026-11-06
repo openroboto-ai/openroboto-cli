@@ -129,6 +129,12 @@ def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) 
         help="where to ask for the competition list; defaults to backend.url in "
         "the target's miner.yaml, or to production",
     )
+    parser.add_argument(
+        "--include-task",
+        action="store_true",
+        help="also list task-authoring seasons (track=task). Those take a task "
+        "package, not a model checkpoint; model miners should leave this off",
+    )
     parser.add_argument("--force", action="store_true", help="overwrite existing files")
     parser.set_defaults(handler=run)
 
@@ -142,7 +148,13 @@ def run(args: argparse.Namespace) -> int:
     target = Path(args.directory)
     try:
         backend_url = _backend_url(args, target)
-        rows = _competitions(backend_url)
+        # `--refresh` always asks for task seasons too: its whole job is to
+        # find the season the workspace already mines, and a task workspace
+        # cannot do that if the list omits tracks the CLI now understands.
+        rows = _competitions(
+            backend_url,
+            include_task=getattr(args, "include_task", False) or args.refresh,
+        )
         # 🔴 `--refresh` re-reads **the season this workspace already mines**.
         #    It must not ask.
         #
@@ -208,8 +220,21 @@ def run(args: argparse.Namespace) -> int:
         "  1. Fill in huggingface.token / username and subnet.hotkey_ss58 in miner.yaml"
     )
     say("  2. `openroboto doctor` — catch environment problems before you pay")
-    say("  3. `openroboto build` → `openroboto train` →")
-    say("     `openroboto check` → `openroboto submit`")
+    if str(live.track) == "task":
+        # A task season takes a task package, not a model. Telling the miner to
+        # run `build`/`train` would have them train something no one evaluates.
+        say(
+            "  3. Put the task package under the output directory, then "
+            "`openroboto task check <package>`"
+        )
+        say("  4. `openroboto submit` — uploads the package and pays the entry fee")
+        say(
+            "     Set `huggingface.repo_id` to the package repository; the "
+            "default `pi05-…` name is a model name"
+        )
+    else:
+        say("  3. `openroboto build` → `openroboto train` →")
+        say("     `openroboto check` → `openroboto submit`")
     say("")
     say("⚠️  miner.yaml will hold your wallet password and HF token; .gitignore")
     say("    already excludes it. Do not take it off the ignore list.")
@@ -310,9 +335,12 @@ def _config_text(subnet: Subnet) -> str:
     )
 
 
-def _competitions(backend_url: str) -> list[Competition]:
+def _competitions(backend_url: str, *, include_task: bool = False) -> list[Competition]:
     """Ask which competitions are open. Unreachable = stop, never a default."""
-    rows = list(fetch_competitions(backend_url).data)
+    if include_task:
+        rows = list(fetch_competitions(backend_url, include_task=True).data)
+    else:
+        rows = list(fetch_competitions(backend_url).data)
     if not rows:
         raise BackendError(
             f"{backend_url} lists no competition taking submissions right now.\n"
