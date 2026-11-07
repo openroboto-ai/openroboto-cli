@@ -23,7 +23,7 @@ GOLDEN_DIGEST = "c9ed7c7266f5dd8dae6126c9df2012791ec3065a3ea302222277eb9c8e2b6ec
 
 requires_shared = pytest.mark.skipif(
     not tp.digest_available(),
-    reason="needs the OPE-211 candidate protocol wheel 0.13.0 (not on PyPI)",
+    reason="needs the shared package digest module",
 )
 
 
@@ -66,7 +66,7 @@ def test_unavailable_shared_digest_is_named(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr(tp, "_shared_digest_of_files", None)
     monkeypatch.setattr(tp, "_shared_package_digest", None)
     assert tp.digest_source() == "unavailable(protocol release 0.13.0 needed)"
-    with pytest.raises(tp.TaskPackageError, match=r"0\.13\.0"):
+    with pytest.raises(tp.TaskPackageError, match="exact protocol release"):
         tp.package_digest("anything")
 
 
@@ -186,6 +186,7 @@ def axis_package(
     _write_json(
         root / "benchmark.json",
         {
+            "protocol": {"max_control_steps_per_trial": 500},
             "tasks": [
                 {
                     "task_id": 9001,
@@ -193,7 +194,7 @@ def axis_package(
                     "checker_sha256": checker_hash,
                     "initial_state_sha256": state_hash,
                 }
-            ]
+            ],
         },
     )
     _write_json(
@@ -300,6 +301,45 @@ def test_axis_without_a_reference_is_a_warning(tmp_path: Path) -> None:
     warnings = [issue for issue in issues if issue.severity == "warning"]
     assert [issue.code for issue in warnings] == ["axis.reference_not_declared"]
     assert not any(issue.is_error for issue in issues)
+
+
+@pytest.mark.parametrize("limit", [None, True, 0, -1, 1.0, "1"])
+def test_axis_reference_budget_requires_an_explicit_positive_integer(
+    tmp_path: Path, limit: object
+) -> None:
+    root = axis_package(tmp_path / "pkg")
+    benchmark = json.loads((root / "benchmark.json").read_text())
+    benchmark["protocol"]["max_control_steps_per_trial"] = limit
+    _write_json(root / "benchmark.json", benchmark)
+    assert "axis.reference_step_budget" in {
+        issue.code for issue in tp.validate_package(tp.load_package(root))
+    }
+
+
+def test_axis_reference_budget_is_inclusive_and_checks_action_count(
+    tmp_path: Path,
+) -> None:
+    root = axis_package(tmp_path / "pkg")
+    benchmark = json.loads((root / "benchmark.json").read_text())
+    benchmark["protocol"]["max_control_steps_per_trial"] = 1
+    _write_json(root / "benchmark.json", benchmark)
+    assert tp.validate_package(tp.load_package(root)) == []
+    ref = json.loads((root / "reference.json").read_text())
+    ref["instances"]["0"]["actions"] *= 2
+    _write_json(root / "reference.json", ref)
+    assert "axis.reference_step_budget" in {
+        issue.code for issue in tp.validate_package(tp.load_package(root))
+    }
+
+
+def test_axis_reference_extra_instance_is_rejected(tmp_path: Path) -> None:
+    root = axis_package(tmp_path / "pkg")
+    ref = json.loads((root / "reference.json").read_text())
+    ref["instances"]["extra"] = ref["instances"]["0"]
+    _write_json(root / "reference.json", ref)
+    assert "axis.reference_instance_mismatch" in {
+        issue.code for issue in tp.validate_package(tp.load_package(root))
+    }
 
 
 # ── RoboDojo ─────────────────────────────────────────────────────────────────

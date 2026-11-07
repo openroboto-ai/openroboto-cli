@@ -156,11 +156,9 @@ def check_protocol_capabilities(settings: Settings) -> CheckResult:
             detail,
             "this workspace mines a task-authoring season, but the installed "
             "protocol is missing `Track.TASK` and/or the shared "
-            "`openroboto_protocol.package_digest` (OPE-211 candidate 0.13.0). "
-            "The production pin is still 0.12.0 and 0.13.0 is not on PyPI: "
-            "use the candidate wheel in a development environment "
-            "(`scripts/verify_task_cli_install.py`), or wait for the release. "
-            "Do not substitute a cherry-pick tree or a local mirror.",
+            "`openroboto_protocol.package_digest`. Reinstall the exact protocol "
+            "release required by this CLI. Do not substitute a source-tree "
+            "splice or a local mirror.",
             required=True,
         )
     return CheckResult(

@@ -86,13 +86,10 @@ admission results, not something a static check can answer.
 
 ## 2. The digest rule
 
-> The implementation is `openroboto_protocol.package_digest`
-> (OPE-211, candidate 0.13.0), byte-for-byte the rule from the validator's
-> `task_source/package.py` (`e5fee86a`). The CLI has **no local mirror**. The
-> production pin is the published 0.12.0, which predates the module, so task
-> digest commands refuse with the release/candidate instruction until 0.13.0
-> is published and the pin moves. The candidate wheel is a local development
-> dependency, not a PyPI release.
+> The implementation is `openroboto_protocol.package_digest`, introduced in
+> protocol 0.13.0. The CLI has no local mirror. Protocol 0.14.0 adds the
+> restricted authoring contract without changing this digest or the on-chain
+> format. See the release requirement below for the unpublished candidate.
 
 The miner, the admission worker and the backend must compute the same value
 byte for byte:
@@ -196,28 +193,13 @@ requires Isaac Sim 5.1 and an A100.
 
 ## 5. Requirement on the protocol release
 
-The `track=task` value and the shared package digest are in the OPE-211
-candidate 0.13.0 (`Track.TASK`, `AXIS_LAYOUT` and
-`openroboto_protocol.package_digest`). The 0.12.0 wheel published on PyPI
-predates them, and the protocol `main` line with `Track.TASK` does not include
-the 0.12.0 AXIS-layout change. **0.13.0 is not published on PyPI.** Until it is:
-
-- `openroboto task check` and a task season's `submit` refuse with the
-  release/candidate instruction (`digest_source` is
-  `unavailable(protocol release 0.13.0 needed)`); there is no local mirror;
-- `openroboto task status --probe` and a signed `task status` still work: they
-  do not compute a package digest;
-- `openroboto init --include-task` and a task season's `submit` also refuse
-  because the installed protocol cannot parse `track=task`;
-- `openroboto doctor` reports a `protocol capabilities` line
-  (`Track.TASK=yes/no, AXIS_LAYOUT=yes/no, package_digest=yes/no`) and fails a
-  **task workspace** when any is missing. A temporary cherry-pick tree is
-  component verification only; the final run must pin the released protocol
-  and the merged CLI.
-
-Use `scripts/verify_task_cli_install.py` with the candidate wheel for a local
-development environment. That is not a claim that the version is
-`pip install`-able from PyPI.
+Protocol 0.13.0 is the published baseline for task commitments and shared
+package digests. The new restricted authoring commands require protocol 0.14.0.
+This version is a local candidate until the maintainer publishes it. Do not
+claim index-only installation or update a registry lock with invented URLs.
+Install the candidate protocol and CLI wheels together with normal dependency
+resolution for review. After publication, resolve and commit the real lock
+before release. No local protocol copy or editable dependency override is used.
 
 ## 6. Normal-install verification
 
@@ -250,11 +232,72 @@ module or function, a non-zero probe, malformed output, a non-64-hex value,
 non-zero. There is no fail-open diagnostic mode; a probe pointed at a missing
 function must be red.
 
-The candidate wheel is **not** a published release. Do not describe it as
-`pip install`-able from PyPI until the protocol maintainer publishes it and
-this CLI's pin is bumped to that version. Until then, a task workspace on the
-published 0.12.0 pin is refused by `task check` and by `doctor`'s
-`protocol capabilities` line.
+The candidate wheel is not a published release. Production installation must
+wait for protocol publication and a genuinely resolved CLI lock.
+
+## 7. Create a task using the restricted tabletop scheme
+
+These commands are a local authoring flow, not a task submission. They do not
+upload, pay, call a model or grant an admission result themselves:
+
+```bash
+openroboto task catalog --json
+openroboto task create task-definition.json
+# Edit positions and goals within the catalog's ranges.
+openroboto task build --definition task-definition.json --output ./my-task \
+  --runtime-python /path/to/task-runtime/bin/python
+openroboto task record-reference ./my-task --example \
+  --runtime-python /path/to/task-runtime/bin/python
+openroboto task self-test ./my-task --output ./self-test.json \
+  --runtime-python /path/to/task-runtime/bin/python
+openroboto task check ./my-task --json
+```
+
+The lightweight CLI does not install a simulator. Install the separately
+versioned `openroboto-task-runtime` wheel in a dedicated environment and select
+its Python with `--runtime-python`. A missing or failed runtime is an error;
+there is no mock or fallback runtime. The runtime's wheel and its exact protocol
+release must also be available before this becomes a public installation path.
+
+The initial scheme uses one Franka Panda arm, one or two fixed rigid cubes and
+round target areas on a fixed tabletop. `task catalog` publishes the exact
+object sizes, mass, position ranges, success conditions and fixed runtime
+reference. Authors may change only the listed fields. An arbitrary mesh,
+robot, gravity, object mass or checker is not accepted by this scheme.
+
+`--example` is a verified local one-cube push demonstration, not a general
+solver. For other tasks, record the author's own local reference:
+
+```bash
+openroboto task record-reference ./my-task --script ./solve.py \
+  --runtime-python /path/to/task-runtime/bin/python
+```
+
+`solve.py` defines `solve(runtime, task, instance)`. It runs explicitly on the
+author's machine. Keep it outside the task package; remote workers only replay
+the resulting action JSON. Keep self-test reports outside too: every package
+file affects the digest. Build outputs and reports never overwrite existing
+files. `task check` checks format and shared budget rules; only a successful
+physical self-test demonstrates the reference can run. The official admission
+worker must independently repeat its own checks after submission.
+
+A new definition freezes `execution_profile` (id, version and digest) and a
+restricted `task_definition`. The CLI, runtime and backend use the same shared
+validation. If a season requires that profile, omitting it cannot fall back to
+a legacy task. Existing task bytes and digests are never rewritten.
+
+Public display is opt-in: pass `--public-summary public.json` to `task create`
+or `task build`. The synopsis must explicitly declare title, instruction,
+robot, execution_profile and origin (`original`, `derived` or `imported`).
+It is intended to be public. Omitting it leaves no public synopsis; old private
+instructions are not copied into it. Start from the exact reference returned
+by `task catalog`, rather than typing a digest by hand.
+
+When local validation is complete, reuse the existing task workspace,
+Hugging Face upload and `openroboto submit` flow. The live season's fee and
+required profile are rechecked before payment. Static validity or an example
+reference is not a promise of discrimination, author emissions or launch
+readiness.
 
 ## Related documents
 

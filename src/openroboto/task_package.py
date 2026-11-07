@@ -9,14 +9,11 @@ reference solution.
 ## The digest is a cross-repository contract
 
 🔴 **The shared protocol implementation is the only implementation.**
-OPE-211 added ``openroboto_protocol.package_digest`` (candidate 0.13.0), with
-the same rule as the validator's ``task_source/package.py`` at ``e5fee86a``.
-This module imports it and delegates; ``digest_source()`` reports
-``openroboto-protocol``. **There is no local fallback.** The published 0.12.0
-pin predates the module, so task digest commands refuse with the release/
-candidate instruction until 0.13.0 is published and the pin moves. The golden
-value in ``tests/test_task_package.py`` and the candidate-wheel comparison in
-``scripts/verify_task_cli_install.py`` both check the shared function.
+The shared ``openroboto_protocol.package_digest`` implementation supplies the
+unchanged digest rule. This module delegates to it; ``digest_source()`` reports
+``openroboto-protocol``. There is no local fallback. The shared
+``task_contract`` module also validates new restricted task profiles and
+reference headers before payment. Neither static check proves physical success.
 
 Three layers compute the same number and must agree byte for byte:
 
@@ -68,11 +65,13 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Final
 
-#: The shared implementation, when the installed protocol release has it.
-#: OPE-211 adds it as ``openroboto_protocol.package_digest`` in 0.13.0. The
-#: published 0.12.0 pin predates it, so the task commands refuse clearly until
-#: the pin moves. **No local fallback exists** -- a second implementation of a
-#: rule three consumers must agree on is the drift this package prevents.
+from openroboto_protocol.task_contract import (
+    reference_contract_issues,
+    validate_task_document,
+)
+
+#: The shared implementation is mandatory. No local fallback exists: a second
+#: rule for the same package would make the CLI, worker and backend disagree.
 _shared_package_files: (
     Callable[[str | pathlib.Path], tuple[tuple[str, str], ...]] | None
 ) = None
@@ -182,11 +181,8 @@ def canonical_json_sha256(value: Any) -> str:
 
 _NO_SHARED = (
     "The installed openroboto-protocol does not provide "
-    "`openroboto_protocol.package_digest`, which the task track needs. The "
-    "production pin is still the published 0.12.0; the shared implementation "
-    "ships in the OPE-211 candidate 0.13.0, which is **not published on PyPI**.\n"
-    "   → run the CLI against the candidate wheel in a development environment "
-    "(`scripts/verify_task_cli_install.py`), or wait for the 0.13.0 release.\n"
+    "`openroboto_protocol.package_digest`, which the task track needs. "
+    "Reinstall the exact protocol release required by this CLI.\n"
     "   Nothing was paid, uploaded or sent on chain."
 )
 
@@ -227,8 +223,8 @@ def package_digest(directory: str | pathlib.Path) -> str:
 
     There is **no local fallback**: a second implementation of a rule the
     validator, backend and CLI must agree on is the drift the protocol package
-    exists to prevent. On the published 0.12.0 pin this raises with the
-    release/candidate instruction until 0.13.0 is published and the pin moves.
+    exists to prevent. A broken or incompatible install refuses with a clear
+    reinstall instruction before any payment.
     """
     if _shared_package_digest is None:
         raise TaskPackageError(_NO_SHARED)
@@ -520,13 +516,20 @@ def select_package(
     return matches[0][0]
 
 
-def validate_package(package: TaskPackage) -> list[Issue]:
+def validate_package(
+    package: TaskPackage, *, expected_execution_profile: object = None
+) -> list[Issue]:
     """Source-specific structure and manifest consistency.
 
     Errors are the ones the validator's static checks make terminal; warnings
     are facts a miner should see but that do not make the package invalid.
     """
-    issues: list[Issue] = []
+    issues = [
+        Issue(f"task.{finding.code}", f"{finding.path}: {finding.message}")
+        for finding in validate_task_document(
+            package.task, expected_execution_profile=expected_execution_profile
+        )
+    ]
     if package.source == "axis":
         issues.extend(_validate_axis(package))
     elif package.source == "robodojo":
@@ -655,7 +658,15 @@ def _validate_axis(package: TaskPackage) -> list[Issue]:
                     )
                 )
             else:
-                issues.extend(_validate_axis_reference(package, path, variants))
+                protocol = benchmark.get("protocol") if benchmark is not None else None
+                limit = (
+                    protocol.get("max_control_steps_per_trial")
+                    if isinstance(protocol, Mapping)
+                    else None
+                )
+                issues.extend(
+                    _validate_axis_reference(package, path, variants, step_limit=limit)
+                )
 
     if instances and benchmark_task:
         first = instances[0]
@@ -692,62 +703,28 @@ def _validate_axis_reference(
     package: TaskPackage,
     path: pathlib.Path,
     variants: list[Mapping[str, Any]],
+    *,
+    step_limit: object,
 ) -> list[Issue]:
-    """The reference must carry replayable actions for every instance.
+    """Use the worker's pure reference contract before an author pays.
 
-    A declared `reference.json` with only `final_state` is the shape OPE-145's
-    runtime admission rejected as `reject_unsolvable`: the checker layer can
-    read it, but the simulator has no trajectory to replay. This is a static
-    check of the shape; whether the actions actually succeed is runtime.
+    A valid shape and action count do not establish physical success. The frozen
+    benchmark must state its own positive step cap; no default is inferred.
     """
     try:
         value = read_json(path)
     except TaskPackageError as exc:
         return [Issue("axis.reference_invalid", str(exc))]
-    if not isinstance(value, Mapping):
-        return [Issue("axis.reference_invalid", f"{path} must be a JSON object")]
-    issues: list[Issue] = []
-    if value.get("schema_version") != SCHEMA_VERSION:
-        issues.append(
-            Issue(
-                "axis.reference_schema",
-                f"{path}: unsupported schema_version {value.get('schema_version')!r}",
-            )
+    instances = [v["instance"] for v in variants if type(v.get("instance")) is int]
+    return [
+        Issue(f"axis.{finding.code}", f"{finding.path}: {finding.message}")
+        for finding in reference_contract_issues(
+            value,
+            task_id=package.task_id,
+            instance_ids=instances,
+            step_limit=step_limit,
         )
-    if str(value.get("task_id")) != package.task_id:
-        issues.append(
-            Issue(
-                "axis.reference_task_id",
-                f"{path}: task_id {value.get('task_id')!r} != {package.task_id!r}",
-            )
-        )
-    instances = value.get("instances")
-    if not isinstance(instances, Mapping):
-        issues.append(
-            Issue("axis.reference_instances", f"{path}: no `instances` object")
-        )
-        return issues
-
-    problems: list[str] = []
-    for variant in variants:
-        number = variant.get("instance")
-        if not isinstance(number, int) or isinstance(number, bool):
-            continue
-        entry = instances.get(str(number))
-        if not isinstance(entry, Mapping):
-            problems.append(f"instance {number}: no entry")
-            continue
-        actions = entry.get("actions")
-        if not isinstance(actions, list) or not actions:
-            problems.append(f"instance {number}: `actions` missing or empty")
-    if problems:
-        issues.append(
-            Issue(
-                "axis.reference_actions_missing",
-                "reference.json cannot be replayed: " + "; ".join(problems),
-            )
-        )
-    return issues
+    ]
 
 
 def _validate_axis_variant(

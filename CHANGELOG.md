@@ -4,6 +4,20 @@ Every entry answers one question before it lists anything: **does a miner have t
 change something, and what breaks if they do not?** A diff summary without "who
 has to act" is not usable by the people who installed this.
 
+## 1.7.0 (candidate)
+
+Task authors can create a restricted Panda tabletop definition, build its
+package in a separately installed simulator, record local reference actions,
+and run physical self-tests. The CLI remains free of simulator dependencies.
+`task catalog` exposes the exact supported objects and ranges. Static checking
+and pre-payment submit validation now share reference header and step-budget
+rules with the worker; a season-required execution profile cannot be omitted.
+Old task packages and the shared package digest are unchanged.
+
+This candidate requires protocol 0.14.0. It is not an index-only installation
+until that protocol is published and the registry lock is resolved. Review
+installs use both candidate wheels with normal dependency resolution.
+
 ## 1.6.0
 
 ### Task-authoring seasons: a package, not a model

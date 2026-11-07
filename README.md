@@ -26,6 +26,17 @@ as open.
 
 ---
 
+## Restricted task authoring (candidate)
+
+Task authors can inspect the allowed Panda tabletop robot and objects with
+`openroboto task catalog`, then use `task create`, `task build`,
+`task record-reference` and `task self-test`. Simulator commands run in an
+explicit, separately installed task runtime; installing the CLI does not install
+MuJoCo. [Task package guide](docs/TASK_PACKAGES.md#7-create-a-task-using-the-restricted-tabletop-scheme)
+explains the ranges, local reference recording and optional public synopsis.
+Protocol 0.14.0 and the runtime are candidates pending publication; this is not
+an announcement that a production authoring season is open.
+
 ## Requirements
 
 - Linux, an NVIDIA GPU (24 GB VRAM minimum) and a recent driver

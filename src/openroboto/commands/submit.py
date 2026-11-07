@@ -96,6 +96,7 @@ from __future__ import annotations
 import argparse
 import pathlib
 import tempfile
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any, Final
 
@@ -103,6 +104,7 @@ from openroboto_protocol.commitment import Track
 from openroboto_protocol.model_format import FormatIssueCode, FormatReport
 from openroboto_protocol.model_hash import model_hash_from_hf_tree
 from openroboto_protocol.schemas import Competition
+from openroboto_protocol.task_contract import execution_profile_ref
 
 from openroboto.backend_api import (
     BackendError,
@@ -632,6 +634,20 @@ def task_package_is_payable(
         )
         return False
 
+    task_policy = live.params.get("task")
+    expected_profile = (
+        task_policy.get("execution_profile")
+        if isinstance(task_policy, Mapping)
+        else None
+    )
+    if expected_profile is not None and expected_profile != execution_profile_ref():
+        fail(
+            f"{live.label} requires an execution profile this CLI does not support. "
+            "Nothing was paid or sent on chain. Update to the operator's declared "
+            "CLI version; if it still differs, report the season configuration."
+        )
+        return False
+
     try:
         with tempfile.TemporaryDirectory(prefix="openroboto-task-submit-") as cache:
             snapshot_root = fetch_package(
@@ -644,7 +660,9 @@ def task_package_is_payable(
             # when the repository holds a perfectly good axis package.
             directory = select_package(snapshot_root)
             package = load_package(directory)
-            issues = validate_package(package)
+            issues = validate_package(
+                package, expected_execution_profile=expected_profile
+            )
             digest = package_digest(directory)
     except (PackageFetchError, TaskPackageError) as exc:
         fail(

@@ -109,6 +109,46 @@ def test_a_package_without_reference_actions_is_refused_before_payment(
     assert "Nothing was paid" in message
 
 
+def test_over_budget_reference_is_refused_before_payment(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    package = axis_package(tmp_path / "pkg")
+    path = package / "benchmark.json"
+    benchmark = json.loads(path.read_text())
+    benchmark["protocol"]["max_control_steps_per_trial"] = 0
+    path.write_text(json.dumps(benchmark))
+    monkeypatch.setattr(submit_command, "fetch_package", lambda *a, **k: package)
+    assert not submit_command.task_package_is_payable(_settings(), _state(), _live())
+
+
+def test_required_profile_cannot_be_omitted_before_payment(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from openroboto_protocol.task_contract import execution_profile_ref
+
+    package = axis_package(tmp_path / "pkg")
+    monkeypatch.setattr(submit_command, "fetch_package", lambda *a, **k: package)
+    live = _live()
+    live.params["task"]["execution_profile"] = execution_profile_ref()
+    assert not submit_command.task_package_is_payable(_settings(), _state(), live)
+
+
+def test_unknown_operator_profile_is_not_blame_on_author(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def no_fetch(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("An unsupported season must stop before package fetch.")
+
+    monkeypatch.setattr(submit_command, "fetch_package", no_fetch)
+    live = _live()
+    live.params["task"]["execution_profile"] = {"id": "unknown"}
+    assert not submit_command.task_package_is_payable(_settings(), _state(), live)
+    assert "season configuration" in capsys.readouterr().err
+
+
 def test_a_package_for_another_source_is_refused_before_payment(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

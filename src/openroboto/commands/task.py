@@ -39,6 +39,7 @@ from openroboto.backend_api import (
 )
 from openroboto.chain import hotkey_signature as sign_hotkey
 from openroboto.chain import open_wallet
+from openroboto.commands.task_authoring import add_authoring_parsers
 from openroboto.config import ConfigError, Settings
 from openroboto.console import fail, say
 from openroboto.task_package import (
@@ -63,6 +64,7 @@ def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) 
         help="inspect and validate a task package (task-authoring seasons)",
     )
     subparsers_ = parser.add_subparsers(dest="task_command")
+    add_authoring_parsers(subparsers_)
     check = subparsers_.add_parser(
         "check",
         help="print per-file SHA-256s and the package digest; validate the format",
