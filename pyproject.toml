@@ -44,10 +44,11 @@ dependencies = [
     # override is removed and the install really comes from PyPI — which is
     # release time. `tests/test_packaging.py` compares this against the version
     # actually resolved into the environment.
-    # Candidate 0.13.0 supplies the shared task-package digest. Until the
-    # protocol is published, install both candidate wheels through --find-links;
-    # do not bypass this constraint with --no-deps or an editable override.
-    "openroboto-protocol==0.13.0",
+    # Candidate 0.14.0 supplies shared restricted task and reference validation.
+    # Review installs resolve both candidate wheels normally. Publication and a
+    # real registry lock are prerequisites for an index-only release; do not
+    # invent lock entries or bypass this pin with --no-deps/path overrides.
+    "openroboto-protocol==0.14.0",
     "pyyaml>=6.0",
     # Production miner machines run 10.5.0 (the old requirements.txt pinned that
     # version). The two APIs used are private surface of the SDK:

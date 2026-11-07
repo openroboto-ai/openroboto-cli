@@ -46,7 +46,7 @@ def test_a_task_workspace_fails_when_track_task_is_missing(
     assert result.required is True
     assert "Track.TASK=no" in result.detail
     assert "package_digest=no" in result.detail
-    assert "0.13.0" in result.fix
+    assert "exact protocol release" in result.fix
     assert "cherry-pick" in result.fix
 
 
