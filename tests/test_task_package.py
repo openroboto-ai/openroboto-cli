@@ -442,6 +442,13 @@ def test_restricted_checker_is_accepted_only_with_exact_profile(
         for i in tp.validate_package(tp.load_package(root))
     )
     task["reference_solution"] = "reference.json"
+    for identifier in ("franka", "target_zone_0", "target_zone_custom"):
+        task["task_definition"]["objects"][0]["id"] = identifier
+        _write_json(task_path, task)
+        assert "axis.profile_reserved_object_id" in [
+            i.code for i in tp.validate_package(tp.load_package(root))
+        ]
+    task["task_definition"]["objects"][0]["id"] = "cube_a"
     task["execution_profile"]["digest"] = "0" * 64
     _write_json(task_path, task)
     codes = [i.code for i in tp.validate_package(tp.load_package(root))]

@@ -282,3 +282,39 @@ def test_include_task_is_sent_as_a_query_parameter(
     with pytest.raises(backend_api.BackendError):
         backend_api.fetch_competitions("https://api.example", include_task=True)
     assert seen["include_task"] == "true"
+
+
+@pytest.mark.parametrize(
+    "identifier", ["franka", "target_zone_0", "target_zone_custom"]
+)
+def test_reserved_runtime_names_are_rejected_before_payment(
+    identifier: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from openroboto_protocol.task_contract import execution_profile_ref
+
+    package = axis_package(tmp_path / "pkg")
+    task_path = package / "task.json"
+    task = json.loads(task_path.read_text())
+    task["execution_profile"] = execution_profile_ref()
+    task["task_definition"] = {
+        "template": "place_in_zones",
+        "instance_count": 1,
+        "seed": 0,
+        "objects": [
+            {
+                "id": identifier,
+                "asset_id": "cube-60mm-v1",
+                "position": [0.46, -0.04, 0.782],
+            }
+        ],
+        "goals": [{"object_id": identifier, "target_position": [0.68, -0.04, 0.782]}],
+    }
+    task_path.write_text(json.dumps(task))
+    monkeypatch.setattr(submit_command, "fetch_package", lambda *a, **k: package)
+    assert (
+        submit_command.task_package_is_payable(_settings(), _state(), _live()) is False
+    )
+    assert "axis.profile_reserved_object_id" in capsys.readouterr().err

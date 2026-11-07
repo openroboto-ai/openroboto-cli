@@ -642,6 +642,19 @@ def _validate_axis(package: TaskPackage) -> list[Issue]:
                 )
             )
         definition = task.get("task_definition")
+        objects = definition.get("objects") if isinstance(definition, Mapping) else None
+        if isinstance(objects, list):
+            for obj in objects:
+                identifier = obj.get("id") if isinstance(obj, Mapping) else None
+                if isinstance(identifier, str) and (
+                    identifier == "franka" or identifier.startswith("target_zone_")
+                ):
+                    issues.append(
+                        Issue(
+                            "axis.profile_reserved_object_id",
+                            f"Object id {identifier!r} is reserved for runtime bodies.",
+                        )
+                    )
         count = (
             definition.get("instance_count")
             if isinstance(definition, Mapping)
