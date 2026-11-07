@@ -157,8 +157,8 @@ def check_protocol_capabilities(settings: Settings) -> CheckResult:
             "this workspace mines a task-authoring season, but the installed "
             "protocol is missing `Track.TASK` and/or the shared "
             "`openroboto_protocol.package_digest`. Reinstall the exact protocol "
-            "release required by this CLI. Do not substitute a source-tree "
-            "splice or a local mirror.",
+            "release required by this CLI. Do not substitute a cherry-pick "
+            "tree or a local mirror.",
             required=True,
         )
     return CheckResult(
