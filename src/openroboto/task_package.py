@@ -66,6 +66,7 @@ from dataclasses import dataclass
 from typing import Any, Final
 
 from openroboto_protocol.task_contract import (
+    checker_types_for_profile,
     reference_contract_issues,
     validate_task_document,
 )
@@ -549,7 +550,10 @@ def _validate_axis(package: TaskPackage) -> list[Issue]:
         declared: set[str] = set()
     else:
         declared = checker_types_in(checker)
-        unknown = sorted(declared - set(AXIS_CHECKER_TYPES))
+        allowed = set(AXIS_CHECKER_TYPES) | set(
+            checker_types_for_profile(task.get("execution_profile"))
+        )
+        unknown = sorted(declared - allowed)
         if not declared:
             issues.append(
                 Issue("axis.checker_empty", "task.json `checker` declares no type")

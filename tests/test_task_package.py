@@ -385,3 +385,43 @@ def test_robodojo_requires_the_official_task_name(tmp_path: Path) -> None:
     (root / "task.json").write_text(json.dumps(task), encoding="utf-8")
     issues = tp.validate_package(tp.load_package(root))
     assert any(issue.code == "robodojo.official_task_mismatch" for issue in issues)
+
+
+def test_restricted_checker_is_accepted_only_with_exact_profile(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from openroboto_protocol.task_contract import execution_profile_ref
+
+    goals = [{"object_id": "cube_a", "target_position": [0.68, -0.04, 0.782]}]
+    monkeypatch.setitem(
+        globals(),
+        "CHECKER",
+        {"checker": {"type": "TabletopZoneChecker", "goals": goals}},
+    )
+    root = axis_package(tmp_path / "pkg")
+    assert "axis.checker_unknown" in [
+        i.code for i in tp.validate_package(tp.load_package(root))
+    ]
+    task_path = root / "task.json"
+    task = json.loads(task_path.read_text())
+    task["execution_profile"] = execution_profile_ref()
+    task["task_definition"] = {
+        "template": "place_in_zones",
+        "instance_count": 1,
+        "seed": 0,
+        "objects": [
+            {
+                "id": "cube_a",
+                "asset_id": "cube-60mm-v1",
+                "position": [0.46, -0.04, 0.782],
+            }
+        ],
+        "goals": [{"object_id": "cube_a", "target_position": [0.68, -0.04, 0.782]}],
+    }
+    _write_json(task_path, task)
+    assert tp.validate_package(tp.load_package(root)) == []
+    task["execution_profile"]["digest"] = "0" * 64
+    _write_json(task_path, task)
+    codes = [i.code for i in tp.validate_package(tp.load_package(root))]
+    assert "axis.checker_unknown" in codes
+    assert "task.execution_profile_invalid" in codes

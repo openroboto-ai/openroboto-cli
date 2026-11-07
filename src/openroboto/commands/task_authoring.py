@@ -167,8 +167,8 @@ def run_create(args: argparse.Namespace) -> int:
                     "id": "cube_a",
                     "asset_id": profile["assets"][0]["id"],
                     "position": [
-                        ranges["x"][0] + 0.04,
-                        ranges["y"][0] + 0.02,
+                        round(ranges["x"][0] + 0.02, 3),
+                        round(ranges["y"][0] + 0.06, 3),
                         ranges["z"][0],
                     ],
                 }
@@ -177,8 +177,8 @@ def run_create(args: argparse.Namespace) -> int:
                 {
                     "object_id": "cube_a",
                     "target_position": [
-                        ranges["x"][1] - 0.04,
-                        ranges["y"][1] - 0.02,
+                        round(ranges["x"][1] - 0.02, 3),
+                        round(ranges["y"][0] + 0.06, 3),
                         ranges["z"][0],
                     ],
                 }
