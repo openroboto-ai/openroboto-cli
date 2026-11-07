@@ -278,6 +278,8 @@ def run_build(args: argparse.Namespace) -> int:
         ("--public-summary", args.public_summary),
     ):
         if value:
+            if flag == "--public-summary":
+                value = str(pathlib.Path(value).expanduser().resolve())
             command.extend([flag, value])
     return _runtime(args, command)
 

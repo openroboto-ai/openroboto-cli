@@ -68,6 +68,7 @@ from typing import Any, Final
 from openroboto_protocol.task_contract import (
     checker_types_for_profile,
     reference_contract_issues,
+    task_profile_catalog,
     validate_task_document,
 )
 
@@ -541,6 +542,7 @@ def validate_package(
 def _validate_axis(package: TaskPackage) -> list[Issue]:
     issues: list[Issue] = []
     task = package.task
+    profile_types = checker_types_for_profile(task.get("execution_profile"))
 
     checker = task.get("checker")
     if not isinstance(checker, Mapping):
@@ -550,9 +552,7 @@ def _validate_axis(package: TaskPackage) -> list[Issue]:
         declared: set[str] = set()
     else:
         declared = checker_types_in(checker)
-        allowed = set(AXIS_CHECKER_TYPES) | set(
-            checker_types_for_profile(task.get("execution_profile"))
-        )
+        allowed = set(AXIS_CHECKER_TYPES) | set(profile_types)
         unknown = sorted(declared - allowed)
         if not declared:
             issues.append(
@@ -623,6 +623,38 @@ def _validate_axis(package: TaskPackage) -> list[Issue]:
             )
         )
 
+    if profile_types:
+        profile = task_profile_catalog()[0]
+        protocol = benchmark.get("protocol") if isinstance(benchmark, Mapping) else None
+        limit = (
+            protocol.get("max_control_steps_per_trial")
+            if isinstance(protocol, Mapping)
+            else None
+        )
+        if (
+            type(limit) is not int
+            or limit != profile["limits"]["max_control_steps_per_trial"]
+        ):
+            issues.append(
+                Issue(
+                    "axis.profile_step_budget",
+                    "The benchmark must use the profile's exact control-step cap.",
+                )
+            )
+        definition = task.get("task_definition")
+        count = (
+            definition.get("instance_count")
+            if isinstance(definition, Mapping)
+            else None
+        )
+        if count != len(variants):
+            issues.append(
+                Issue(
+                    "axis.profile_instance_count",
+                    "The payload count must equal task_definition.instance_count.",
+                )
+            )
+
     for variant in variants:
         issue = _validate_axis_variant(package, task, variant, declared)
         if issue is not None:
@@ -636,16 +668,15 @@ def _validate_axis(package: TaskPackage) -> list[Issue]:
         # The format allows an omitted reference, but the validator's runtime
         # admission then has no trajectory to replay and rejects as
         # `reject_unsolvable` (OPE-145's CPU run measured exactly that on a
-        # package that passed every static check). Warning, not error: the
-        # static format is valid, and the miner has to know the package is not
-        # a complete submission.
+        # package that passed every static check). Legacy packages retain the
+        # warning. The new restricted scheme requires a reference before payment.
         issues.append(
             Issue(
                 "axis.reference_not_declared",
                 "no reference solution; the validator's runtime admission will "
                 "reject this as unsolvable unless a reference with per-instance "
                 "`actions` is supplied",
-                severity="warning",
+                severity="error" if profile_types else "warning",
             )
         )
     else:

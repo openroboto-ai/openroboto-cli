@@ -420,6 +420,28 @@ def test_restricted_checker_is_accepted_only_with_exact_profile(
     }
     _write_json(task_path, task)
     assert tp.validate_package(tp.load_package(root)) == []
+    benchmark_path = root / "benchmark.json"
+    benchmark = json.loads(benchmark_path.read_text())
+    benchmark["protocol"]["max_control_steps_per_trial"] = 499
+    _write_json(benchmark_path, benchmark)
+    assert "axis.profile_step_budget" in [
+        i.code for i in tp.validate_package(tp.load_package(root))
+    ]
+    benchmark["protocol"]["max_control_steps_per_trial"] = 500
+    _write_json(benchmark_path, benchmark)
+    task["task_definition"]["instance_count"] = 2
+    _write_json(task_path, task)
+    assert "axis.profile_instance_count" in [
+        i.code for i in tp.validate_package(tp.load_package(root))
+    ]
+    task["task_definition"]["instance_count"] = 1
+    task.pop("reference_solution")
+    _write_json(task_path, task)
+    assert any(
+        i.code == "axis.reference_not_declared" and i.is_error
+        for i in tp.validate_package(tp.load_package(root))
+    )
+    task["reference_solution"] = "reference.json"
     task["execution_profile"]["digest"] = "0" * 64
     _write_json(task_path, task)
     codes = [i.code for i in tp.validate_package(tp.load_package(root))]
