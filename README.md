@@ -34,8 +34,8 @@ Task authors can inspect the allowed Panda tabletop robot and objects with
 explicit, separately installed task runtime; installing the CLI does not install
 MuJoCo. [Task package guide](docs/TASK_PACKAGES.md#7-create-a-task-using-the-restricted-tabletop-scheme)
 explains the ranges, local reference recording and optional public synopsis.
-Protocol 0.14.0 and the runtime are candidates pending publication; this is not
-an announcement that a production authoring season is open.
+Protocol 0.14.0 is published. CLI 1.7.0 and the separate task runtime remain
+review candidates; this does not announce a production authoring season.
 
 ## Requirements
 

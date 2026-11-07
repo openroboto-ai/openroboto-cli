@@ -44,10 +44,9 @@ dependencies = [
     # override is removed and the install really comes from PyPI — which is
     # release time. `tests/test_packaging.py` compares this against the version
     # actually resolved into the environment.
-    # Candidate 0.14.0 supplies shared restricted task and reference validation.
-    # Review installs resolve both candidate wheels normally. Publication and a
-    # real registry lock are prerequisites for an index-only release; do not
-    # invent lock entries or bypass this pin with --no-deps/path overrides.
+    # Release 0.14.0 supplies shared restricted task and reference validation.
+    # Resolve the published release normally; never invent registry lock entries
+    # or bypass this exact pin with --no-deps or editable/path overrides.
     "openroboto-protocol==0.14.0",
     "pyyaml>=6.0",
     # Production miner machines run 10.5.0 (the old requirements.txt pinned that

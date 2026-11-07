@@ -14,9 +14,9 @@ and pre-payment submit validation now share reference header and step-budget
 rules with the worker; a season-required execution profile cannot be omitted.
 Old task packages and the shared package digest are unchanged.
 
-This candidate requires protocol 0.14.0. It is not an index-only installation
-until that protocol is published and the registry lock is resolved. Review
-installs use both candidate wheels with normal dependency resolution.
+This CLI candidate pins published protocol 0.14.0 with a registry-resolved lock.
+The separate simulator runtime remains a review candidate. Normal dependency
+resolution is used for both installed environments.
 
 ## 1.6.0
 

@@ -89,7 +89,7 @@ admission results, not something a static check can answer.
 > The implementation is `openroboto_protocol.package_digest`, introduced in
 > protocol 0.13.0. The CLI has no local mirror. Protocol 0.14.0 adds the
 > restricted authoring contract without changing this digest or the on-chain
-> format. See the release requirement below for the unpublished candidate.
+> format. See the release requirement below for the separately installed runtime.
 
 The miner, the admission worker and the backend must compute the same value
 byte for byte:
@@ -195,11 +195,10 @@ requires Isaac Sim 5.1 and an A100.
 
 Protocol 0.13.0 is the published baseline for task commitments and shared
 package digests. The new restricted authoring commands require protocol 0.14.0.
-This version is a local candidate until the maintainer publishes it. Do not
-claim index-only installation or update a registry lock with invented URLs.
-Install the candidate protocol and CLI wheels together with normal dependency
-resolution for review. After publication, resolve and commit the real lock
-before release. No local protocol copy or editable dependency override is used.
+Protocol 0.14.0 is published on PyPI and this checkout has a real registry lock.
+CLI 1.7.0 and the separate simulator runtime remain review candidates. Installing
+the CLI candidate wheel resolves the exact published protocol normally. No local
+protocol copy, invented registry entry or editable dependency override is used.
 
 ## 6. Normal-install verification
 
@@ -232,8 +231,9 @@ module or function, a non-zero probe, malformed output, a non-64-hex value,
 non-zero. There is no fail-open diagnostic mode; a probe pointed at a missing
 function must be red.
 
-The candidate wheel is not a published release. Production installation must
-wait for protocol publication and a genuinely resolved CLI lock.
+The simulator runtime candidate is not a published release. Review it as an
+explicit local wheel, with normal dependency resolution; installing the CLI
+alone does not install the simulator.
 
 ## 7. Create a task using the restricted tabletop scheme
 
@@ -256,8 +256,8 @@ openroboto task check ./my-task --json
 The lightweight CLI does not install a simulator. Install the separately
 versioned `openroboto-task-runtime` wheel in a dedicated environment and select
 its Python with `--runtime-python`. A missing or failed runtime is an error;
-there is no mock or fallback runtime. The runtime's wheel and its exact protocol
-release must also be available before this becomes a public installation path.
+there is no mock or fallback runtime. The runtime wheel must be published before
+this becomes an index-only public runtime installation path.
 
 The initial scheme uses one Franka Panda arm, one or two fixed rigid cubes and
 round target areas on a fixed tabletop. `task catalog` publishes the exact
