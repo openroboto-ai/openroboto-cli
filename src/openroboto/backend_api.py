@@ -405,6 +405,16 @@ class PrivateTask(Contract):
     content_state: str | None = None
     visibility: str | None = None
 
+    # Display the backend's original values; an absent field is unknown.
+    discrimination: float | None = None
+    hardness: float | None = None
+    effective_hardness: float | None = None
+    score: float | None = None
+    settlement_eligible: bool | None = None
+    hardness_proof_hash: str | None = None
+    reference_panel_version: str | None = None
+    needs_recheck: bool | None = None
+
 
 def fetch_liveness(base_url: str) -> Liveness:
     """`GET /healthz`: process alive, the season it is pinned to, its netuid."""

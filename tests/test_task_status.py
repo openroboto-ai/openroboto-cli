@@ -367,3 +367,72 @@ def test_probe_exits_non_zero_when_not_ready(
     )
     output = json.loads(capsys.readouterr().out)
     assert output["readiness"]["ready"] is False
+
+
+@pytest.mark.parametrize(
+    "reward",
+    [
+        {
+            "discrimination": 0.0,
+            "hardness": 0.8,
+            "effective_hardness": 0.8,
+            "score": 0.8,
+            "settlement_eligible": True,
+            "hardness_proof_hash": "e" * 64,
+        },
+        {
+            "discrimination": 0.0,
+            "hardness": 0.8,
+            "effective_hardness": 0.0,
+            "score": 0.0,
+            "settlement_eligible": False,
+            "hardness_proof_hash": "e" * 64,
+        },
+        {},
+    ],
+    ids=["verified-hard-task", "classified-proof-unavailable", "old-api"],
+)
+def test_status_preserves_backend_reward_fields_in_json_and_text(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    reward: dict[str, Any],
+) -> None:
+    """Exercise response parsing and both command outputs without model calls."""
+    monkeypatch.setattr(task_command, "open_wallet", lambda settings: _FakeWallet())
+    monkeypatch.setattr(
+        task_command,
+        "fetch_task_access_message",
+        lambda base_url, hotkey: f"sign this for {hotkey}",
+    )
+    _serving(monkeypatch, _envelope([_task(**reward)]))
+    command = ["task", "status", "--config", str(_config(tmp_path))]
+
+    assert main([*command, "--json"]) == 0
+    parsed = json.loads(capsys.readouterr().out)["tasks"][0]
+    for field in (
+        "discrimination",
+        "hardness",
+        "effective_hardness",
+        "score",
+        "settlement_eligible",
+        "hardness_proof_hash",
+    ):
+        assert parsed[field] == reward.get(field)
+
+    assert main(command) == 0
+    printed = capsys.readouterr().out
+    assert "task_abc  admitted  axis/grasp-lift" in printed
+    assert "someone/axis-task-22@" + "a" * 40 in printed
+    if not reward:
+        assert "D=unknown  H(current)=unknown  S=unknown  eligible=unknown" in printed
+        assert "H(classified): unknown" in printed
+        assert "hard proof: (not reported)" in printed
+    elif reward["settlement_eligible"]:
+        assert "D=0  H(current)=0.8  S=0.8  eligible=yes" in printed
+        assert "H(classified): 0.8" in printed
+        assert "hard proof: " + "e" * 64 in printed
+    else:
+        assert "D=0  H(current)=0  S=0  eligible=no" in printed
+        assert "H(classified): 0.8" in printed
+        assert "hard proof: " + "e" * 64 in printed

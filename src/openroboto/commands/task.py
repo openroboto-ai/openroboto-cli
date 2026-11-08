@@ -242,6 +242,20 @@ def status_run(args: argparse.Namespace) -> int:
         say(f"{row.task_id}  {row.status}  {row.source or '?'}/{row.skill or '-'}")
         say(f"   package: {row.package_repo}@{row.package_commit}")
         say(f"   digest:  {row.package_digest or '(not reported yet)'}")
+        eligible = (
+            "unknown"
+            if row.settlement_eligible is None
+            else "yes"
+            if row.settlement_eligible
+            else "no"
+        )
+        say(
+            f"   reward (backend): D={_reported_score(row.discrimination)}"
+            f"  H(current)={_reported_score(row.effective_hardness)}"
+            f"  S={_reported_score(row.score)}  eligible={eligible}"
+        )
+        say(f"   H(classified): {_reported_score(row.hardness)}")
+        say(f"   hard proof: {row.hardness_proof_hash or '(not reported)'}")
         if row.content_sha256:
             say(f"   content: {row.content_sha256}")
         if row.reject_reason:
@@ -252,6 +266,11 @@ def status_run(args: argparse.Namespace) -> int:
                 f"{' / ' + row.visibility if row.visibility else ''}"
             )
     return 0
+
+
+def _reported_score(value: float | None) -> str:
+    """Format only a backend-reported score; never infer missing rewards."""
+    return "unknown" if value is None else f"{value:.6g}"
 
 
 def _probe(settings: Settings, *, as_json: bool, run_id: str = "") -> int:
