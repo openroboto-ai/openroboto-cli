@@ -4,7 +4,16 @@ Every entry answers one question before it lists anything: **does a miner have t
 change something, and what breaks if they do not?** A diff summary without "who
 has to act" is not usable by the people who installed this.
 
-## 1.7.1 (candidate)
+## 1.7.2 (candidate)
+
+Miners using a season with gated submissions must upgrade from 1.7.1. Its access
+list check used an incorrect SDK field and stopped real submissions before
+upload or payment. This patch reads the SDK's `AccessRequest.username` field;
+tests use the actual SDK data type. Unreadable or malformed access lists still
+refuse submission with an actionable error, without exposing request emails or
+form fields. The upload-before-payment privacy gates remain unchanged.
+
+## 1.7.1
 
 Task authors submitting to a season with `params.hf.grant_to` must upgrade before
 uploading a new package. `submit` now reads the live access policy and confirms

@@ -86,15 +86,21 @@ def _check_accepted_accounts(api: HfApi, repo_id: str, grant_to: str) -> set[str
     accepted: set[str] = set()
     try:
         for request in api.list_accepted_access_requests(repo_id):
-            user = request.user
-            if not isinstance(user, str) or not user:
+            user = getattr(request, "username", None)
+            if not isinstance(user, str) or not user.strip():
                 raise AccessError(
                     "The repository access list contains an unreadable account."
                 )
             accepted.add(user.casefold())
-    except HfHubHTTPError as exc:
+    except AccessError:
+        raise
+    except Exception as exc:
+        # SDK parsing and transport errors must refuse the upload as cleanly as
+        # an HTTP refusal. Never expose access-request emails or form fields.
         raise AccessError(
-            f"Could not verify the accepted access list for {repo_id}: {exc}"
+            f"Could not verify the accepted access list for {repo_id}. "
+            "Check the token's repository permissions, network connection and "
+            "Hugging Face SDK compatibility before retrying."
         ) from exc
     unexpected = accepted - allowed
     if unexpected:

@@ -1,11 +1,13 @@
 """Exercise submission ordering with a stateful HF API, never a real account."""
 
 import argparse
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from huggingface_hub.hf_api import AccessRequest
 from huggingface_hub.utils import HfHubHTTPError, RepositoryNotFoundError
 
 from openroboto.commands import submit as command
@@ -68,7 +70,16 @@ class Hub:
         self.calls.append("acl")
         if self.fail_at == "acl":
             raise Refused()
-        return [SimpleNamespace(user=user) for user in sorted(self.accepted)]
+        return [
+            AccessRequest(
+                username=user,
+                fullname="Test account",
+                email=None,
+                timestamp=datetime(2026, 11, 9, tzinfo=UTC),
+                status="accepted",
+            )
+            for user in sorted(self.accepted)
+        ]
 
     def grant_access(self, **kwargs: Any) -> None:
         self.calls.append("grant:" + kwargs["user"])
@@ -258,7 +269,15 @@ def test_acl_with_unreadable_account_refuses_access(monkeypatch: Any) -> None:
     monkeypatch.setattr(
         hub,
         "list_accepted_access_requests",
-        lambda repo_id: [SimpleNamespace(user=None)],
+        lambda repo_id: [
+            AccessRequest(
+                username="",
+                fullname="Test account",
+                email=None,
+                timestamp=datetime(2026, 11, 9, tzinfo=UTC),
+                status="accepted",
+            )
+        ],
     )
     with pytest.raises(access.AccessError, match="unreadable"):
         access.prepare_gated_repository(
@@ -299,3 +318,34 @@ def test_real_upload_pipeline_only_sends_files_after_confirmed_gating(
     assert checkpoint["hf_repo_id"] == "owner/package"
     assert checkpoint["hf_commit"] == "a" * 40
     assert paid == [0.25]
+
+
+@pytest.mark.parametrize("error", [KeyError, AttributeError, TypeError, RuntimeError])
+def test_sdk_access_list_failure_is_controlled_and_never_uploads(
+    monkeypatch: Any, tmp_path: Path, capsys: Any, error: type[Exception]
+) -> None:
+    _, hub, paid = setup_submission(monkeypatch, tmp_path)
+
+    def broken_sdk(repo_id: str) -> Any:
+        raise error("private-request-email@example.invalid")
+
+    monkeypatch.setattr(hub, "list_accepted_access_requests", broken_sdk)
+    assert run() == 1
+    assert "upload" not in hub.calls
+    assert paid == []
+    err = capsys.readouterr().err
+    assert "Could not verify the accepted access list" in err
+    assert "SDK compatibility" in err
+    assert "private-request-email" not in err
+    assert "Traceback" not in err
+
+
+def test_unknown_sdk_request_shape_is_rejected_without_attribute_error(
+    monkeypatch: Any,
+) -> None:
+    hub = Hub()
+    monkeypatch.setattr(
+        hub, "list_accepted_access_requests", lambda repo_id: [object()]
+    )
+    with pytest.raises(access.AccessError, match="unreadable account"):
+        access._check_accepted_accounts(hub, "owner/package", GRANT_TO)

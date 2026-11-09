@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import io
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -2453,7 +2454,17 @@ def test_an_account_that_is_already_on_the_list_is_success(
             return SimpleNamespace(private=False, gated="manual")
 
         def list_accepted_access_requests(self, repo_id: str) -> list[Any]:
-            return [SimpleNamespace(user=GRANT_TO)]
+            from huggingface_hub.hf_api import AccessRequest
+
+            return [
+                AccessRequest(
+                    username=GRANT_TO,
+                    fullname="Test account",
+                    email=None,
+                    timestamp=datetime(2026, 11, 9, tzinfo=UTC),
+                    status="accepted",
+                )
+            ]
 
         def grant_access(self, *, repo_id: str, user: str) -> None:
             # Verbatim from HuggingFace, 2026-09-12.
