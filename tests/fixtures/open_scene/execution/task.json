@@ -78,9 +78,9 @@
       "wall_seconds": 60.0
     },
     "execution_profile": {
-      "digest": "052ede59310a10eecdaefb43584f06340bc3ad461dbca8579cdb23b8ec4ad3d5",
+      "digest": "9badf61d742ed5787e7af4ad19adc90b616147ee4c62159915bddeff53f9a1a2",
       "id": "panda-open-scene-v1",
-      "version": "2.0.0"
+      "version": "2.1.0"
     },
     "harness": {
       "name": "headless"
@@ -103,16 +103,16 @@
     "version": 3
   },
   "execution_profile": {
-    "digest": "052ede59310a10eecdaefb43584f06340bc3ad461dbca8579cdb23b8ec4ad3d5",
+    "digest": "9badf61d742ed5787e7af4ad19adc90b616147ee4c62159915bddeff53f9a1a2",
     "id": "panda-open-scene-v1",
-    "version": "2.0.0"
+    "version": "2.1.0"
   },
   "instruction": "Interface example only; this is not a physical task or a reference success.",
   "public_summary": {
     "execution_profile": {
-      "digest": "052ede59310a10eecdaefb43584f06340bc3ad461dbca8579cdb23b8ec4ad3d5",
+      "digest": "9badf61d742ed5787e7af4ad19adc90b616147ee4c62159915bddeff53f9a1a2",
       "id": "panda-open-scene-v1",
-      "version": "2.0.0"
+      "version": "2.1.0"
     },
     "instruction": "Schema and identity example only.",
     "origin": "original",

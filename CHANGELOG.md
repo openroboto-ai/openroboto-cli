@@ -2,6 +2,13 @@
 
 ## Unreleased — imported-scene CLI candidate (OPE-234)
 
+- Add `task scene instruction` through the same runtime's optional pure renderer.
+  Authors can explicitly prepare NEW E with only its instruction token changed;
+  existing private roots/proofs are never copied or rebound. Fresh recording and
+  self-test remain required. Missing capability and unsupported text stay nonzero.
+- Recheck E/P/manifest/contract after the final runtime probe, preserving the
+  identity actually tested. Reject malformed nested receipts and overflowing
+  JSON numbers with bounded public errors, retaining private evidence.
 - Reject special/oversized scene inputs before opening JSON. Recheck opened
   descriptors and bound reads so replacing an input with a FIFO cannot hang.
 - Look up scene registrations across authenticated author pages, with a bounded
@@ -18,8 +25,10 @@
 - Verify exact runtime/schema/profile/environment/agent identities and E/P/joint
   before execution, bound subprocess time/output, and project private diagnostics
   into safe public reports. Physical acceptance and server/reward gates stay separate.
-- Pin candidate protocol 0.17.1 with linear frame-tree validation and unchanged
-  schema/execution/profile identities. Its index release and formal lock
+- Pin candidate protocol 0.18.0/profile 2.1 with a separately bound 16384-code-point
+  scene instruction capacity. Previous unpublished scene profile 2.0 packages
+  require their original 0.17.1 reader; they are rejected without relabeling here.
+  V1/v2 interfaces remain unchanged. Its index release and formal lock
   integration remain release gates; local reviewed-wheel installs use normal resolution.
 
 Every entry answers one question before it lists anything: **does a miner have to

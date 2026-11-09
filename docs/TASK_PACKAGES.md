@@ -301,7 +301,7 @@ readiness.
 
 ## 8. Composed tabletop development candidate
 
-The unpublished CLI 1.8.0 now consumes protocol 0.17.1, which retains the
+The unpublished CLI 1.8.0 now consumes protocol 0.18.0, which retains the
 controlled-v2 contract introduced in 0.15.0. Use the matching reviewed CPU task
 runtime for v1/v2 authoring. Consumer index lockfiles cannot be
 regenerated against an unpublished protocol version. Do not deploy this checkout
@@ -354,13 +354,18 @@ renaming a primitive or loading a mesh does not establish that capability.
 ## 9. Author-owned scenes (schema 3)
 
 This is an unpublished development path. The protocol input is commit
-`2b3c043ac1cffd146272d7818560f5e65bfa069c`, version `0.17.1`, task schema 3,
-execution contract 3 and `panda-open-scene-v1@2.0.0` with profile digest
-`052ede59310a10eecdaefb43584f06340bc3ad461dbca8579cdb23b8ec4ad3d5`.
+`ea476625c7f84e4ce8fbd9fed4e56ac001c01109`, version `0.18.0`, task schema 3,
+execution contract 3 and `panda-open-scene-v1@2.1.0` with profile digest
+`9badf61d742ed5787e7af4ad19adc90b616147ee4c62159915bddeff53f9a1a2`.
 The reviewed final protocol wheel SHA-256 is
-`bc99d357c04c28a72ccca6a70bf5a1d5a938d9d797d216c285243a25f8c27761`.
-This patch retains the schema, execution contract and profile identity while
-validating frame ancestry in linear time.
+`f2b59b83c3ac561b41bcd6b3ddf359406dd74cae9fb37198b84be75931ce63b8`.
+This candidate gives SceneTask.instruction its own 16384 Unicode code point
+capacity, bound into the new profile. Other text fields retain their old limits;
+v1/v2, physics, tools, budgets and linear frame validation are unchanged.
+Previous unpublished scene profile 2.0 packages remain reproducible with their
+original 0.17.1 wheel. They are explicitly rejected by this reader, even below
+1000 characters. There is no alias or in-place migration: a new profile/runtime
+requires deliberately authored NEW E and fresh P/manifest/proof.
 Install that wheel and this CLI wheel together using normal resolution. The
 registry lock is still the released baseline; an index-only install and
 `uv sync --locked` are blocked until the authorized protocol release and lock
@@ -408,6 +413,49 @@ paths, symlinks, resource overflow, invalid public metadata and stale bindings.
 Its JSON says `scope=structure_only`, `local_physics=not_run`,
 `server_admission=not_run`, `reward_status=not_evaluated`.
 
+Canonical instruction generation uses an optional capability in the same runtime:
+
+```bash
+openroboto task scene instruction --execution ./source/execution \
+  --runtime-python /path/to/runtime/bin/python \
+  --output ./instruction-public.json --prepared-execution ./prepared/execution
+```
+
+The runtime's single pure `task_source.scene_instruction` renderer supplies the
+complete text and program/render-input/renderer/policy identities. The CLI does
+not render predicates, infer intent from keywords, shorten text or fall back to
+a model. It checks the exact installed protocol/profile/environment/agent and
+requires the advertised `scene-render-instruction` capability. A runtime lacking
+that optional command returns structured unsupported; its existing record and
+self-test capabilities remain usable.
+
+`--prepared-execution` must name a NEW directory outside retained input bundles.
+Only E is copied. Only the top-level `task.json.instruction` string token changes;
+other JSON tokens (including numeric precision, escaped keys and public summary)
+and every other file stay byte-identical. Source E, existing P, manifest and proof
+are untouched. No private root is copied, created or rebound. Omitting this flag
+only produces the public report; rerun with a NEW E target to avoid manual text
+escaping or numeric formatting. Keep public output outside the retained bundle.
+
+New E requires fresh recording and self-test, within the operator's existing
+registered trial plan. No physical experiment or model request is authorized by
+rendering or preparation. Continue with `--execution ./prepared/execution`,
+`--private ./prepared/private` and `--manifest ./prepared/submission.json` for
+recording; never silently reuse an old private proof after changing E.
+
+Generation uses a bounded isolated subprocess (default 30 seconds, maximum 60),
+the shared output/JSON byte limits, and the unchanged installed SceneTask schema.
+Unsupported length, vision or incomplete coverage returns nonzero and creates
+no prepared E. Complete public text, when returned with an unsupported length
+result, is retained in full rather than truncated or replaced by a digest.
+Protocol 0.18.0/profile 2.1 uses the registered 16384-code-point capacity and
+scene-instruction-admission/2; the renderer remains scene-program-text/1.
+The CLI never changes schema capacity. Previous 0.17.1/profile 2.0 and its
+1000-character policy remain historical candidates, with their original results.
+Formal
+renderer API/version integration remains gated until a reviewed runtime exposes
+it; a synthetic interface test is not a generated or admitted task.
+
 The runtime bridge uses the reviewed `task_source.authoring` scene API, not the
 legacy v1 recorder. Start with materialized E at `./authored/execution` and choose
 an explicit **new** private root and detached manifest. They need not exist for
@@ -442,9 +490,11 @@ CLI verifies installed protocol and runtime distributions, schema 3/execution 3,
 exact profile, structured scene command capabilities, canonical registry identity,
 robot/control and the frozen agent binding. It verifies runtime identity again
 after execution. The 0.3.x scene API v1 runtime is an unpublished candidate; the initial d3821a5
-wheel pins protocol 0.17.0 and is incompatible with this CLI's 0.17.1 baseline.
+wheel pins protocol 0.17.0 and is incompatible with this CLI's 0.18.0 baseline.
 Patch 0.3.1 retains the same authoring interface and changes environment identity.
-Use the final reviewed 0.17.1 runtime identity supplied by OPE-231. This bridge
+The reviewed 0.3.3 wheel uses protocol 0.17.1 and lacks the optional renderer.
+Use the final reviewed 0.18.0/profile 2.1 runtime identity supplied by OPE-231.
+This bridge
 cannot make an unregistered environment supported or authorize an experiment.
 
 Recording invokes `scene-record-reference` with immutable E and NEW P/manifest;

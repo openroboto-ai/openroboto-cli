@@ -8,6 +8,7 @@ import json
 import shutil
 import sys
 import time
+from importlib.metadata import version
 from pathlib import Path
 
 import pytest
@@ -40,7 +41,7 @@ def runtime_case(tmp_path, monkeypatch):
         "version": "synthetic-runtime-identity",
         "runtime": {
             "version": "0.3.0",
-            "protocol_version": "0.17.1",
+            "protocol_version": version("openroboto-protocol"),
             "source_digest": "a" * 64,
             "execution_profile": profile_ref(),
             "agent": task["execution_contract"]["agent"],
@@ -57,7 +58,7 @@ def runtime_case(tmp_path, monkeypatch):
         execution, tmp_path / "submission", private=FIXTURE / "private"
     )
     metadata = {
-        "protocol_version": "0.17.1",
+        "protocol_version": version("openroboto-protocol"),
         "runtime_version": "0.3.0",
         "profile": profile_catalog(),
         "refs": {
@@ -457,6 +458,129 @@ def test_record_receipt_requires_all_initial_states(runtime_case, capsys):
     assert report["issues"][0]["code"] == "runtime_report_invalid"
 
 
+@pytest.mark.parametrize("steps", ["01", [1, 1], True, None, {"0": True, "1": 1}])
+def test_record_steps_requires_a_mapping_before_coverage_checks(
+    runtime_case, capsys, steps
+):
+    case = runtime_case
+    case["mutate"] = lambda body: body.update(steps=steps)
+    assert main(command(case)) == 1
+    report = json.loads(capsys.readouterr().out)
+    assert report["issues"][0]["code"] == "runtime_report_invalid"
+    assert case["output"].exists()
+    assert "never-publish-this" not in case["output"].read_text()
+
+
+@pytest.mark.parametrize("change", ["private", "execution", "contract"])
+def test_post_probe_cannot_rebind_checked_self_test_A_as_B(
+    runtime_case, monkeypatch, capsys, change
+):
+    from openroboto_protocol.scene_contract import (
+        SubmissionIdentity,
+        parse_execution_contract,
+    )
+
+    case = runtime_case
+    case["private"] = case["root"] / "private"
+    case["manifest"] = case["root"] / "submission.json"
+    original_manifest = load_submission(case["root"]).manifest
+    invoke = case["bridge"]._invoke
+    completed = False
+    changed = False
+
+    def post_probe(python, argv, *, timeout):
+        nonlocal completed, changed
+        result = invoke(python, argv, timeout=timeout)
+        if "scene-self-test" in argv:
+            completed = True
+        elif completed and not changed and argv[0] == "-c":
+            changed = True
+            if change != "private":
+                document = json.loads((case["execution"] / "task.json").read_text())
+                if change == "execution":
+                    document["instruction"] = "B has a different instruction."
+                else:
+                    document["execution_contract"]["budget"]["max_api_calls"] = 11
+                (case["execution"] / "task.json").write_text(json.dumps(document))
+            task, execution_files = execution_input(case["execution"])
+            e_digest = contents_digest(execution_files)
+            binding_path = case["private"] / "reference-binding.json"
+            binding = json.loads(binding_path.read_text())
+            binding.update(
+                execution_package_digest=e_digest,
+                execution_contract_digest=canonical_digest(
+                    parse_execution_contract(task.execution_contract)
+                ),
+            )
+            binding_path.write_text(json.dumps(binding))
+            (case["private"] / "post-probe-note").write_text("private B marker")
+            private_files = {
+                str(p.relative_to(case["private"])): p.read_bytes()
+                for p in case["private"].rglob("*")
+                if p.is_file()
+            }
+            new_identity = SubmissionIdentity(e_digest, contents_digest(private_files))
+            case["manifest"].write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "execution_package_digest": e_digest,
+                        "private_package_digest": new_identity.private_package_digest,
+                        "submission_digest": new_identity.digest,
+                    }
+                )
+            )
+            assert load_submission(case["root"]).manifest != original_manifest
+        return result
+
+    monkeypatch.setattr(case["bridge"], "_invoke", post_probe)
+    assert (
+        main(
+            [
+                *command(case, "self-test"),
+                "--expect-submission-digest",
+                original_manifest.submission_digest,
+            ]
+        )
+        == 1
+    )
+    report = json.loads(capsys.readouterr().out)
+    assert changed is True
+    assert report["local_physics"] == "incomplete"
+    assert report["issues"][0]["code"] in {"execution_drift", "submission_drift"}
+    assert (
+        report.get("submission", original_manifest.model_dump())
+        == original_manifest.model_dump()
+    )
+    assert case["private_report"].exists()
+
+
+@pytest.mark.parametrize("payload", [b'{"nested":{"x":1e999}}', b'{"steps":[-1e999]}'])
+def test_json_overflow_is_not_a_finite_runtime_receipt(runtime_case, payload):
+    with pytest.raises(ScenePackageError, match="runtime_output_invalid"):
+        runtime_case["bridge"]._decode(payload)
+
+
+@pytest.mark.parametrize(
+    "checks",
+    [
+        "01",
+        {"runtime.solvable": True},
+        ["runtime.solvable"],
+        [True],
+        [{"name": [], "passed": True, "detail": {}}],
+    ],
+)
+def test_nested_check_shapes_are_strict(runtime_case, capsys, checks):
+    case = runtime_case
+    case["private"] = case["root"] / "private"
+    case["manifest"] = case["root"] / "submission.json"
+    case["mutate"] = lambda body: body.update(checks=checks)
+    assert main(command(case, "self-test")) == 1
+    report = json.loads(capsys.readouterr().out)
+    assert report["issues"][0]["code"] == "runtime_report_invalid"
+
+
 @pytest.mark.parametrize("name", ["runtime.solvable", "runtime.noise", "runtime.nop"])
 def test_self_test_receipt_cannot_skip_an_initial_state(runtime_case, capsys, name):
     case = runtime_case
@@ -636,3 +760,97 @@ def test_retained_default_diagnostics_are_private_and_self_test_shorthand_works(
     # Clean only the synthetic test directory, never an author's retained report.
     assert diagnostic.parent.name.startswith("openroboto-scene-private-")
     shutil.rmtree(diagnostic.parent)
+
+
+@pytest.mark.parametrize(
+    "commands",
+    [
+        {"scene-record-reference": True, "scene-self-test": True},
+        "scene-record-reference",
+        [True, "scene-record-reference", "scene-self-test"],
+        ["scene-record-reference", "scene-self-test", "scene-self-test"],
+        None,
+    ],
+)
+def test_describe_requires_an_unambiguous_command_list(runtime_case, capsys, commands):
+    case = runtime_case
+    case["description"]["scene_authoring"]["commands"] = commands
+    assert main(command(case)) == 1
+    result = json.loads(capsys.readouterr().out)
+    assert result["issues"][0]["code"] == "runtime_identity_mismatch"
+    assert not case["private"].exists()
+
+
+@pytest.mark.parametrize("field", ["runtime.solvable", "runtime.nop", "runtime.noise"])
+def test_check_totals_are_integers_not_equal_float_values(runtime_case, capsys, field):
+    case = runtime_case
+    case["private"] = case["root"] / "private"
+    case["manifest"] = case["root"] / "submission.json"
+
+    def mutate(body):
+        row = next(item for item in body["checks"] if item["name"] == field)
+        row["detail"]["total"] = float(row["detail"]["total"])
+
+    case["mutate"] = mutate
+    assert main(command(case, "self-test")) == 1
+    result = json.loads(capsys.readouterr().out)
+    assert result["issues"][0]["code"] == "runtime_report_invalid"
+
+
+def test_post_probe_cannot_rebind_a_newly_recorded_receipt(
+    runtime_case, monkeypatch, capsys
+):
+    from openroboto_protocol.scene_contract import SubmissionIdentity
+
+    case = runtime_case
+    invoke = case["bridge"]._invoke
+    completed = False
+    changed = False
+    original = None
+
+    def post_probe(python, argv, *, timeout):
+        nonlocal completed, changed, original
+        result = invoke(python, argv, timeout=timeout)
+        if "scene-record-reference" in argv:
+            completed = True
+            original = json.loads(case["manifest"].read_text())
+        elif completed and not changed and argv[0] == "-c":
+            changed = True
+            (case["private"] / "extra").write_text("private B")
+            private_files = {
+                str(p.relative_to(case["private"])): p.read_bytes()
+                for p in case["private"].rglob("*")
+                if p.is_file()
+            }
+            new = SubmissionIdentity(
+                original["execution_package_digest"], contents_digest(private_files)
+            )
+            case["manifest"].write_text(
+                json.dumps(
+                    {
+                        **original,
+                        "private_package_digest": new.private_package_digest,
+                        "submission_digest": new.digest,
+                    }
+                )
+            )
+        return result
+
+    monkeypatch.setattr(case["bridge"], "_invoke", post_probe)
+    assert main(command(case)) == 1
+    report = json.loads(capsys.readouterr().out)
+    assert report["issues"][0]["code"] == "submission_drift"
+    assert report.get("submission") is None or report["submission"] == original
+    assert case["private_report"].is_file()
+
+
+@pytest.mark.parametrize("value", [True, 1.0, [], "1"])
+def test_receipt_manifest_schema_version_has_exact_json_type(
+    runtime_case, capsys, value
+):
+    case = runtime_case
+    case["mutate"] = lambda body: body["submission"].update(schema_version=value)
+    assert main(command(case)) == 1
+    report = json.loads(capsys.readouterr().out)
+    assert report["issues"][0]["code"] == "runtime_report_invalid"
+    assert case["private_report"].exists()

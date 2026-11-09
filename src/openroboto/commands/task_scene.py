@@ -25,6 +25,7 @@ from openroboto.scene_api import (
     registration_message,
 )
 from openroboto.scene_authoring import run_authoring
+from openroboto.scene_instruction import run_instruction
 from openroboto.scene_package import (
     ScenePackageError,
     build_submission,
@@ -55,6 +56,24 @@ def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) 
     check.add_argument("--config", default="miner.yaml")
     check.add_argument("--expect-submission-digest", default="")
     check.set_defaults(handler=run_check)
+    instruction = commands.add_parser(
+        "instruction", help="render full canonical text in the exact scene runtime"
+    )
+    instruction.add_argument("--execution", required=True, type=pathlib.Path)
+    instruction.add_argument("--output", required=True, type=pathlib.Path)
+    instruction.add_argument(
+        "--prepared-execution",
+        type=pathlib.Path,
+        help="optional NEW E; replace only task.json.instruction",
+    )
+    instruction.add_argument("--runtime-python", default=sys.executable)
+    instruction.add_argument(
+        "--timeout-seconds",
+        type=float,
+        default=30,
+        help="pure workflow deadline, at most 60 seconds",
+    )
+    instruction.set_defaults(handler=run_instruction_command)
     for name in ("record-reference", "self-test"):
         command = commands.add_parser(
             name, help="run the exact installed scene runtime"
@@ -210,6 +229,12 @@ def run_check(args: argparse.Namespace) -> int:
     except (ScenePackageError, OSError) as exc:
         return _error(exc)
     return 0
+
+
+def run_instruction_command(args: argparse.Namespace) -> int:
+    report = run_instruction(args)
+    _emit(report)
+    return 0 if report["ok"] else 1
 
 
 def run_runtime(args: argparse.Namespace) -> int:

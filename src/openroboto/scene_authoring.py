@@ -83,8 +83,19 @@ def _decode(data: bytes) -> dict[str, Any]:
     def constant(_: str) -> None:
         raise ValueError("nonfinite JSON")
 
+    def finite_float(token: str) -> float:
+        value = float(token)
+        if not math.isfinite(value):
+            raise ValueError("nonfinite JSON number")
+        return value
+
     try:
-        value = json.loads(data, object_pairs_hook=pairs, parse_constant=constant)
+        value = json.loads(
+            data,
+            object_pairs_hook=pairs,
+            parse_constant=constant,
+            parse_float=finite_float,
+        )
         if not isinstance(value, dict):
             raise ValueError("object required")
         return value
@@ -178,24 +189,35 @@ def _probe(python: str, task: SceneTask, deadline: float) -> dict[str, Any]:
         runtime = registry["runtime"]
         refs = metadata["refs"]
         contract = parse_execution_contract(task.execution_contract)
+        commands = description["commands"]
         valid = (
             status == rc == 0
+            and isinstance(description, dict)
+            and isinstance(registry, dict)
+            and isinstance(runtime, dict)
+            and isinstance(refs, dict)
             and metadata["protocol_version"] == version("openroboto-protocol")
             and isinstance(metadata["runtime_version"], str)
             and bool(metadata["runtime_version"])
             and metadata["runtime_version"]
             == description["runtime_version"]
             == runtime["version"]
-            and metadata["profile"] == profile_catalog()
+            and isinstance(metadata["profile"], dict)
+            and canonical_digest(metadata["profile"])
+            == canonical_digest(profile_catalog())
+            and type(metadata["profile"]["task_schema_version"]) is int
             and metadata["profile"]["task_schema_version"] == task.schema_version == 3
+            and type(metadata["profile"]["execution_contract_version"]) is int
             and metadata["profile"]["execution_contract_version"]
             == contract["version"]
             == 3
             and type(description["api_version"]) is int
             and description["api_version"] == 1
             and description["status"] == "development"
-            and set(description["commands"])
-            >= {"scene-record-reference", "scene-self-test"}
+            and isinstance(commands, list)
+            and all(isinstance(command, str) for command in commands)
+            and len(set(commands)) == len(commands)
+            and set(commands) >= {"scene-record-reference", "scene-self-test"}
             and runtime["protocol_version"] == metadata["protocol_version"]
             and description["execution_profile"]
             == runtime["execution_profile"]
@@ -275,9 +297,14 @@ def _result(
             and body["runtime_version"] == identity["metadata"]["runtime_version"]
             and body["execution_profile"] == profile_ref()
             and body["environment"] == task.environment.model_dump()
-            and body["registry"] == identity["description"]["registry"]
-            and body["execution_contract"] == contract
+            and isinstance(body["registry"], dict)
+            and canonical_digest(body["registry"])
+            == canonical_digest(identity["description"]["registry"])
+            and isinstance(body["execution_contract"], dict)
+            and canonical_digest(body["execution_contract"])
+            == canonical_digest(contract)
             and body["execution_package_digest"] == digest
+            and manifest.execution_package_digest == digest
         ):
             raise ValueError("report binding")
         total = len(task.scene.initial_states)
@@ -287,12 +314,15 @@ def _result(
                 body["reference_ready"] is True
                 and type(body["instances"]) is int
                 and body["instances"] == total
+                and isinstance(steps, dict)
                 and set(steps) == {str(i) for i in range(total)}
                 and all(
                     type(n) is int and 0 < n <= contract["budget"]["max_steps"]
                     for n in steps.values()
                 )
-                and body["submission"] == manifest.model_dump(mode="json")
+                and isinstance(body["submission"], dict)
+                and canonical_digest(body["submission"])
+                == canonical_digest(manifest.model_dump(mode="json"))
             ):
                 raise ValueError("reference coverage")
             return {
@@ -301,7 +331,19 @@ def _result(
                 "instances": total,
                 "local_physics": "reference_recorded",
             }
-        checks = {item["name"]: item for item in body["checks"]}
+        rows = body["checks"]
+        if not (
+            isinstance(rows, list)
+            and all(
+                isinstance(item, dict)
+                and isinstance(item.get("name"), str)
+                and type(item.get("passed")) is bool
+                and isinstance(item.get("detail"), dict)
+                for item in rows
+            )
+        ):
+            raise ValueError("check shapes")
+        checks = {item["name"]: item for item in rows}
         if not (
             body["physical_checks_complete"] is True
             and type(body["accepted"]) is bool
@@ -309,10 +351,13 @@ def _result(
             and len(checks) == len(body["checks"])
             and CHECK_NAMES <= checks.keys()
             and all(type(item["passed"]) is bool for item in checks.values())
+            and type(checks["runtime.solvable"]["detail"]["total"]) is int
             and checks["runtime.solvable"]["detail"]["total"] == total
+            and type(checks["runtime.nop"]["detail"]["total"]) is int
             and checks["runtime.nop"]["detail"]["total"] == total
             and type(checks["runtime.noise"]["detail"]["trials"]) is int
             and checks["runtime.noise"]["detail"]["trials"] > 0
+            and type(checks["runtime.noise"]["detail"]["total"]) is int
             and checks["runtime.noise"]["detail"]["total"]
             == total * checks["runtime.noise"]["detail"]["trials"]
             and body["accepted"]
@@ -422,6 +467,8 @@ def run_authoring(args: argparse.Namespace) -> dict[str, Any]:
         bound = None
         if not recording:
             task, bound = load_bound_roots(execution, private, manifest)
+            if bound.execution_package_digest != digest:
+                _fail("execution_drift", "E changed while binding the input.")
             if (
                 args.expect_submission_digest
                 and bound.submission_digest != args.expect_submission_digest
@@ -509,12 +556,34 @@ def run_authoring(args: argparse.Namespace) -> dict[str, Any]:
                 and load_bound_roots(execution, private, manifest)[1] != bound
             ):
                 _fail("submission_drift", "Runtime changed P/manifest; do not submit.")
-        if _probe(python, task, deadline) != identity:
+        # Snapshot the receipt and its binding before the post-execution probe.
+        # The probe must not turn a check of A into an accepted receipt for B.
+        body = _decode(_read_regular(diagnostic, limit=MAX_REPORT_BYTES))
+        result_manifest = bound
+        if recording and body.get("ok") is True:
+            _, result_manifest = load_bound_roots(execution, private, manifest)
+        if canonical_digest(_probe(python, task, deadline)) != canonical_digest(
+            identity
+        ):
             _fail(
                 "runtime_identity_drift",
                 "The selected runtime changed during execution.",
             )
-        body = _decode(_read_regular(diagnostic, limit=MAX_REPORT_BYTES))
+        final_task, final_files = execution_input(execution)
+        if contents_digest(final_files) != digest or canonical_digest(
+            parse_execution_contract(final_task.execution_contract)
+        ) != canonical_digest(contract):
+            _fail(
+                "execution_drift", "E/contract changed during the final runtime probe."
+            )
+        if result_manifest is not None:
+            _, final_manifest = load_bound_roots(execution, private, manifest)
+            if final_manifest != result_manifest or (
+                not recording
+                and args.expect_submission_digest
+                and final_manifest.submission_digest != args.expect_submission_digest
+            ):
+                _fail("submission_drift", "P/manifest changed during the final probe.")
         if body.get("ok") is not True:
             if body.get("capability") in ("invalid_package", "unsupported", "failed"):
                 report["capability"] = body["capability"]
@@ -525,7 +594,7 @@ def run_authoring(args: argparse.Namespace) -> dict[str, Any]:
                 message
                 or "Inspect the private runtime report; no completed physics receipt.",
             )
-        _, result_manifest = load_bound_roots(execution, private, manifest)
+        assert result_manifest is not None
         result = _result(
             body, task, identity, digest, result_manifest, recording=recording
         )

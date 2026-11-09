@@ -1,0 +1,9 @@
+{
+  "execution_contract_digest": "0081315f29bec91437ff3c2236657ffcdd9c9e89db66289f59e0696f42a6f84e",
+  "execution_package_digest": "470d4428540ee2ae4fc8b1ec964adb490e76d5f258d9821ceb77daf979d367cc",
+  "reference_files": [
+    "reference.json"
+  ],
+  "reference_schema_version": 1,
+  "schema_version": 1
+}

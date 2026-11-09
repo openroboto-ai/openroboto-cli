@@ -1,6 +1,7 @@
 """Synthetic contract fixtures and interface simulations, never physics evidence.
 
-The input tree is copied verbatim from protocol aea37aa examples/open_scene/valid.
+The current input tree is copied from protocol ea476625 examples/open_scene/valid.
+The previous profile-2.0 tree is retained verbatim for explicit refusal checks.
 Its mesh has no runnable robot and its reference has no actions. Passing these
 tests establishes only packaging, client routing and privacy boundaries.
 """
@@ -608,3 +609,14 @@ def test_normal_submit_entry_orders_gates_and_reuses_paid_checkpoint(
         assert "pay" not in calls
         if failure in {"dependency", "account", "route"}:
             assert "upload" not in calls
+
+
+def test_previous_scene_profile_is_explicitly_rejected_without_migration(capsys):
+    old = FIXTURE.with_name("open_scene_profile_2_0")
+    before = {p.relative_to(old): p.read_bytes() for p in old.rglob("*") if p.is_file()}
+    assert main(["task", "scene", "check", str(old)]) == 1
+    report = read_output(capsys)
+    assert report["ok"] is False and report["scope"] == "structure_only"
+    assert before == {
+        p.relative_to(old): p.read_bytes() for p in old.rglob("*") if p.is_file()
+    }
