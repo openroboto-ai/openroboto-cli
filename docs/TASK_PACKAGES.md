@@ -301,7 +301,7 @@ readiness.
 
 ## 8. Composed tabletop development candidate
 
-The unpublished CLI 1.8.0 now consumes protocol 0.17.0, which retains the
+The unpublished CLI 1.8.0 now consumes protocol 0.17.1, which retains the
 controlled-v2 contract introduced in 0.15.0. Use the matching reviewed CPU task
 runtime for v1/v2 authoring. Consumer index lockfiles cannot be
 regenerated against an unpublished protocol version. Do not deploy this checkout
@@ -354,11 +354,13 @@ renaming a primitive or loading a mesh does not establish that capability.
 ## 9. Author-owned scenes (schema 3)
 
 This is an unpublished development path. The protocol input is commit
-`aea37aa1f22683acedb8656decb3096229ea001b`, version `0.17.0`, task schema 3,
+`2b3c043ac1cffd146272d7818560f5e65bfa069c`, version `0.17.1`, task schema 3,
 execution contract 3 and `panda-open-scene-v1@2.0.0` with profile digest
 `052ede59310a10eecdaefb43584f06340bc3ad461dbca8579cdb23b8ec4ad3d5`.
 The reviewed final protocol wheel SHA-256 is
-`c1b249e59cda539f175e7feb21b4057dc0da2d68138b01e74a7d3a94f68a3a33`.
+`bc99d357c04c28a72ccca6a70bf5a1d5a938d9d797d216c285243a25f8c27761`.
+This patch retains the schema, execution contract and profile identity while
+validating frame ancestry in linear time.
 Install that wheel and this CLI wheel together using normal resolution. The
 registry lock is still the released baseline; an index-only install and
 `uv sync --locked` are blocked until the authorized protocol release and lock

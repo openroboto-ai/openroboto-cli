@@ -44,10 +44,11 @@ dependencies = [
     # override is removed and the install really comes from PyPI — which is
     # release time. `tests/test_packaging.py` compares this against the version
     # actually resolved into the environment.
-    # Candidate 0.17.0 adds schema-3 scenes; install the reviewed local wheel for
-    # development. Its index release and regenerated lockfile are prerequisites
-    # for deployment. Never invent registry URLs or bypass the exact dependency.
-    "openroboto-protocol==0.17.0",
+    # Candidate 0.17.1 retains schema-3 scenes with linear frame-tree validation;
+    # install the reviewed local wheel for development. Its index release and
+    # regenerated lockfile are prerequisites for deployment. Never invent
+    # registry URLs or bypass the exact dependency.
+    "openroboto-protocol==0.17.1",
     "pyyaml>=6.0",
     # Production miner machines run 10.5.0 (the old requirements.txt pinned that
     # version). The two APIs used are private surface of the SDK:

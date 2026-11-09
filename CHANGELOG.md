@@ -14,8 +14,9 @@
   status. No private reference text is emitted in public summaries or diagnostics.
 - Diagnose the unavailable P02/P03 scene recording/self-test bridge with nonzero
   structured results. No scene physical success is claimed.
-- Pin candidate protocol 0.17.0. Its index release and formal lock integration
-  remain release gates; local reviewed-wheel installs use normal resolution.
+- Pin candidate protocol 0.17.1 with linear frame-tree validation and unchanged
+  schema/execution/profile identities. Its index release and formal lock
+  integration remain release gates; local reviewed-wheel installs use normal resolution.
 
 Every entry answers one question before it lists anything: **does a miner have to
 change something, and what breaks if they do not?** A diff summary without "who

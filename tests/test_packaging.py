@@ -16,7 +16,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 #: The protocol release this repository resolves to. Pinned in `pyproject.toml`;
 #: repeated here on purpose -- see the test below.
-PROTOCOL_VERSION = "0.17.0"
+PROTOCOL_VERSION = "0.17.1"
 
 
 def test_package_does_not_vendor_the_protocol() -> None:
