@@ -104,8 +104,8 @@ def push_model(
         # publishing is not undoable: whoever fetched them while the repo was
         # open still has them.
         #
-        # Withholding the weights is supported, and `submit` arranges it a few
-        # steps later: it makes the repository **gated** and puts the evaluator
+        # Withholding the weights is supported, and `submit` arranges it before
+        # uploading: it makes the repository **gated** and puts the evaluator
         # on its access list (`huggingface/access.py`). That is deliberately not
         # done here -- an upload is not a submission, and `openroboto upload`
         # alone must not change who can read a miner's repository.

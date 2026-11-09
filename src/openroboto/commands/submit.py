@@ -1,5 +1,5 @@
-"""`openroboto submit` -- upload → resolve the competition → check the layout →
-check that this model is not already entered → pay → announce.
+"""`openroboto submit` -- resolve access policy → gate/grant → upload →
+recheck the live competition → check layout and duplicate entry → pay → announce.
 
 🔴 **One implementation of each step, and this command calls it.** The steps are
 the very same functions the `upload` / `burn` / `announce` commands run; a second
@@ -139,8 +139,13 @@ from openroboto.competition_state import (
 from openroboto.config import Settings
 from openroboto.console import fail, say
 from openroboto.contributor import ContributorKeyError, load_key
-from openroboto.huggingface import TreeError, fetch_tree
-from openroboto.huggingface.access import AccessError, grant_to_of, lock_and_grant
+from openroboto.huggingface import TreeError, build_repo_id, fetch_tree
+from openroboto.huggingface.access import (
+    AccessError,
+    grant_to_of,
+    lock_and_grant,
+    prepare_gated_repository,
+)
 from openroboto.task_package import (
     PackageFetchError,
     TaskPackageError,
@@ -219,6 +224,45 @@ def run(args: argparse.Namespace) -> int:
         state.pop("burn_block", None)
         save_state(competition_id, state)
 
+    upload_grant_to: str | None = None
+    if not state.get("burn_tx_hash"):
+        try:
+            upload_verdict = resolve_competition(settings, snapshot, datetime.now(UTC))
+            upload_grant_to = grant_to_of(upload_verdict.live.params)
+            saved_grant_to = grant_to_of(dict(snapshot.params))
+            if (
+                saved_grant_to
+                and saved_grant_to.casefold() != upload_grant_to.casefold()
+            ):
+                raise AccessError(
+                    "The evaluator access policy changed since init. Refresh the "
+                    "competition configuration and review the repository access "
+                    "list before uploading."
+                )
+            if upload_grant_to:
+                uploaded = all(
+                    state.get(key) for key in ("hf_repo_id", "hf_url", "hf_commit")
+                )
+                repo_id = (
+                    str(state["hf_repo_id"])
+                    if uploaded
+                    else build_repo_id(
+                        settings,
+                        str(state.get("hotkey_ss58") or settings.hotkey_ss58 or ""),
+                    )
+                )
+                prepare_gated_repository(
+                    repo_id=repo_id,
+                    grant_to=upload_grant_to,
+                    hf_token=settings.hf_token,
+                )
+        except (PrecheckFailed, AccessError) as exc:
+            fail(
+                "Upload access check failed; no content was uploaded or paid for.\n"
+                f"  {exc}"
+            )
+            return 1
+
     perform_upload(settings, competition_id, output_dir, state, reuse_existing=True)
 
     if state.get("burn_tx_hash"):
@@ -247,6 +291,16 @@ def run(args: argparse.Namespace) -> int:
         # reading them.
         try:
             verdict = resolve_competition(settings, snapshot, datetime.now(UTC))
+            if (
+                grant_to_of(verdict.live.params).casefold()
+                != (upload_grant_to or "").casefold()
+            ):
+                fail(
+                    "The evaluator access policy changed while uploading. "
+                    "Nothing was paid. Review the current competition and "
+                    "repository access list before retrying."
+                )
+                return 1
             if not contributor_is_bound(settings, state, verdict.live):
                 return 1
             if not layout_is_payable(settings, state, verdict.live):

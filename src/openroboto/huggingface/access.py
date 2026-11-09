@@ -50,8 +50,8 @@ address nobody reads -- the same failure the entry fee had when it was quoted
 in the docs.
 
 **A season that names no account is left completely alone**: no gating, no
-grant. That is what every simulation season does today, and turning one on
-later is an operations call on that row, not a release.
+grant. Turning gating on later is an operations call on that row, not a
+release; `submit` reads that live row before it uploads anything.
 """
 
 from __future__ import annotations
@@ -59,9 +59,9 @@ from __future__ import annotations
 from typing import Any
 
 from huggingface_hub import HfApi
-from huggingface_hub.utils import HfHubHTTPError
+from huggingface_hub.utils import HfHubHTTPError, RepositoryNotFoundError
 
-__all__ = ["AccessError", "grant_to_of", "lock_and_grant"]
+__all__ = ["AccessError", "grant_to_of", "lock_and_grant", "prepare_gated_repository"]
 
 
 class AccessError(Exception):
@@ -80,42 +80,92 @@ def grant_to_of(params: dict[str, Any] | None) -> str:
     return str(section.get("grant_to") or "")
 
 
+def _check_accepted_accounts(api: HfApi, repo_id: str, grant_to: str) -> set[str]:
+    """Refuse unexpected grants without changing anyone's existing permissions."""
+    allowed = {repo_id.split("/", 1)[0].casefold(), grant_to.casefold()}
+    accepted: set[str] = set()
+    try:
+        for request in api.list_accepted_access_requests(repo_id):
+            user = request.user
+            if not isinstance(user, str) or not user:
+                raise AccessError(
+                    "The repository access list contains an unreadable account."
+                )
+            accepted.add(user.casefold())
+    except HfHubHTTPError as exc:
+        raise AccessError(
+            f"Could not verify the accepted access list for {repo_id}: {exc}"
+        ) from exc
+    unexpected = accepted - allowed
+    if unexpected:
+        raise AccessError(
+            f"{repo_id} already grants access to other accounts: "
+            f"{', '.join(sorted(unexpected))}. "
+            "Review those approvals on Hugging Face before retrying. "
+            "The CLI did not revoke them; no content may be uploaded or paid for."
+        )
+    return accepted
+
+
 def lock_and_grant(*, repo_id: str, grant_to: str, hf_token: str) -> None:
-    """Make the repository gated and put `grant_to` on its access list.
+    """Require manual gating and only the named evaluator's explicit approval.
 
-    Both calls use the **miner's** token and run on the miner's machine.
-
-    Idempotent by construction: gating an already-gated repository is a no-op,
-    and Hugging Face answers "already has access" when the account is on the
-    list -- which is success, not a failure, because it is the state we asked
-    for. Any submit can therefore be re-run.
-
-    Raises:
-        AccessError: the repository could not be locked, or the account could
-            not be added. **The caller must not spend the fee** -- a submission
-            we cannot read is rejected at admission, and the fee is not
-            refunded.
+    The repository owner retains its inherent access. Existing unrelated grants
+    are reported, never revoked. Metadata remains public; gating cannot retract
+    any content already downloaded while a repository was public.
     """
     api = HfApi(token=hf_token)
     try:
-        # `gated="manual"` and not `"auto"`: with `auto`, anyone who clicks
-        # gets the weights after agreeing to the terms, which is not a lock at
-        # all -- it is a click-through. `manual` means the owner decides, and
-        # the call below is the owner deciding once, for us.
         api.update_repo_settings(repo_id=repo_id, gated="manual")
+        info = api.repo_info(repo_id=repo_id, repo_type="model")
+        if info.private or info.gated != "manual":
+            raise AccessError(
+                f"Hugging Face did not confirm manual gated access for {repo_id}."
+            )
     except HfHubHTTPError as exc:
         raise AccessError(
             f"could not set {repo_id} to gated: {exc}\n"
-            f"  The token in your config needs write access to that repository."
+            "  The token in your config needs write access to that repository."
         ) from exc
+    _check_accepted_accounts(api, repo_id, grant_to)
+    owner = repo_id.split("/", 1)[0]
+    if grant_to.casefold() != owner.casefold():
+        try:
+            api.grant_access(repo_id=repo_id, user=grant_to)
+        except HfHubHTTPError as exc:
+            if "already has access" not in str(exc):
+                raise AccessError(
+                    f"could not grant {grant_to} access to {repo_id}: {exc}"
+                ) from exc
+        accepted = _check_accepted_accounts(api, repo_id, grant_to)
+        if grant_to.casefold() not in accepted:
+            raise AccessError(
+                f"Hugging Face did not confirm {grant_to}'s access to {repo_id}."
+            )
 
+
+def prepare_gated_repository(*, repo_id: str, grant_to: str, hf_token: str) -> None:
+    """Create metadata if needed, then gate before any submitted file is uploaded.
+
+    A private repository is never made public by the CLI: HF's private visibility
+    cannot grant an external evaluator download access through the gated list.
+    """
+    api = HfApi(token=hf_token)
     try:
-        api.grant_access(repo_id=repo_id, user=grant_to)
+        try:
+            info = api.repo_info(repo_id=repo_id, repo_type="model")
+        except RepositoryNotFoundError:
+            api.create_repo(
+                repo_id=repo_id, repo_type="model", private=False, exist_ok=True
+            )
+            info = api.repo_info(repo_id=repo_id, repo_type="model")
+        if info.private:
+            raise AccessError(
+                f"{repo_id} is private. The CLI will not make it public. "
+                "Choose a repository whose gated access the official evaluator can use."
+            )
     except HfHubHTTPError as exc:
-        if "already has access" in str(exc):
-            return
         raise AccessError(
-            f"could not grant {grant_to} access to {repo_id}: {exc}\n"
-            f"  Without it the evaluator cannot download your weights, and the\n"
-            f"  submission is rejected after the fee is spent."
+            f"Could not prepare {repo_id} for a gated upload: {exc}"
         ) from exc
+    lock_and_grant(repo_id=repo_id, grant_to=grant_to, hf_token=hf_token)

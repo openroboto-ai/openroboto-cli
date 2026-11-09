@@ -4,7 +4,22 @@ Every entry answers one question before it lists anything: **does a miner have t
 change something, and what breaks if they do not?** A diff summary without "who
 has to act" is not usable by the people who installed this.
 
-## 1.7.0 (candidate)
+## 1.7.1 (candidate)
+
+Task authors submitting to a season with `params.hf.grant_to` must upgrade before
+uploading a new package. `submit` now reads the live access policy and confirms
+manual gating and the official account's approval before uploading any files.
+It creates only empty repository metadata before this check. Existing private
+repositories stay private; unexpected approvals stop the submission for manual
+review rather than being revoked. A failed access check uploads nothing and
+pays nothing. Repository names, metadata and model cards remain public on HF.
+
+The live policy and accepted accounts are checked again before payment. A
+changed target requires review and a retry. Seasons without a target retain
+their existing upload behavior; paid and announced recovery never pays again
+or blocks the remaining announcement on a new access check.
+
+## 1.7.0
 
 Task authors can create a restricted Panda tabletop definition, build its
 package in a separately installed simulator, record local reference actions,

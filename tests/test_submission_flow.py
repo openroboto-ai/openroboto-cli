@@ -781,7 +781,7 @@ def test_submit_checks_the_competition_even_when_check_was_skipped(
 
     args = argparse.Namespace(config="miner.yaml", output_dir="", force=False)
     assert submit_command.run(args) == 0
-    assert len(checked) == 1
+    assert len(checked) == 2
     # and the payment was handed this run's verdict, carrying the season's own
     # fee -- not a subnet-wide rate, and not a number left lying in the config
     assert paid == [0.25]
@@ -799,7 +799,7 @@ def test_force_does_not_skip_the_competition_check(
 
     args = argparse.Namespace(config="miner.yaml", output_dir="", force=True)
     assert submit_command.run(args) == 0
-    assert len(checked) == 1
+    assert len(checked) == 2
 
 
 def test_a_failed_check_spends_nothing(
@@ -1272,7 +1272,7 @@ def test_a_repository_the_rules_refuse_is_never_paid_for(
     assert paid == []
     # the season *was* resolved first -- that is where the rule book comes from
     # -- and the refusal still landed before the prompt and before the money
-    assert len(checked) == 1
+    assert len(checked) == 2
     printed = capsys.readouterr()
     assert "nothing was paid" in printed.err
     assert "bare_lora_adapter" in printed.out
@@ -1303,7 +1303,7 @@ def test_the_gate_judges_the_repository_not_this_round_s_directory(
 
     assert code == 1
     assert paid == []
-    assert len(checked) == 1
+    assert len(checked) == 2
     assert "leftover_upload_state" in capsys.readouterr().out
 
 
@@ -1330,7 +1330,7 @@ def test_a_nested_checkpoint_stops_the_run_and_names_the_directory(
 
     assert code == 1
     assert paid == []
-    assert len(checked) == 1
+    assert len(checked) == 2
     printed = capsys.readouterr()
     assert "nested_too_deep" in printed.out
     assert deep in printed.out  # copyable, not "your structure is invalid"
@@ -1360,7 +1360,7 @@ def test_a_listing_hf_would_not_serve_is_not_paid_through(
 
     assert code == 1
     assert paid == []
-    assert len(checked) == 1
+    assert len(checked) == 2
     printed = capsys.readouterr()
     assert "nothing was paid" in printed.err
     # named as infrastructure, not as a verdict on the model
@@ -2330,6 +2330,11 @@ def _granting(
 
     calls: list[tuple[str, str, str]] = []
     monkeypatch.setattr(submit_command, "lock_and_grant", _lock)
+    # These existing cases isolate the final payment gate. The upload privacy
+    # suite exercises the real pre-upload preparation separately.
+    monkeypatch.setattr(
+        submit_command, "prepare_gated_repository", lambda **kwargs: None
+    )
     return calls
 
 
@@ -2443,6 +2448,12 @@ def test_an_account_that_is_already_on_the_list_is_success(
 
         def update_repo_settings(self, *, repo_id: str, gated: str) -> None:
             locked.append((repo_id, gated))
+
+        def repo_info(self, **kwargs: Any) -> Any:
+            return SimpleNamespace(private=False, gated="manual")
+
+        def list_accepted_access_requests(self, repo_id: str) -> list[Any]:
+            return [SimpleNamespace(user=GRANT_TO)]
 
         def grant_access(self, *, repo_id: str, user: str) -> None:
             # Verbatim from HuggingFace, 2026-09-12.
