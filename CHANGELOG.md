@@ -2,6 +2,10 @@
 
 ## Unreleased — imported-scene CLI candidate (OPE-234)
 
+- Update the fixed authoring reference to runtime 0.3.6 with its exact new
+  environment/harness and authenticated observation policy scope. The wrapper
+  is unchanged; existing private proofs cannot be relabeled. Scope registration
+  grants no physical, server or reward result. Retain 0.3.5's blocked history.
 - Consume runtime 0.3.5's real nested instruction wrapper, including complete
   public audit fields. Bind original task bytes, exact environments and the
   authenticated policy/source identity; reject the earlier synthetic flat format.

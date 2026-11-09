@@ -429,7 +429,7 @@ requires the advertised `scene-render-instruction` capability. A runtime lacking
 that optional command returns structured unsupported; its existing record and
 self-test capabilities remain usable.
 
-The reviewed runtime 0.3.5 wrapper has `instruction=InstructionResult.to_dict()`.
+Runtime 0.3.5 and 0.3.6 share `instruction=InstructionResult.to_dict()`.
 The CLI reads that single nested format, binds `input_task_sha256` to the original
 task bytes, and compares installed/input environments with the selected runtime.
 The renderer/policy/source identities must match both describe and the exact
@@ -463,13 +463,28 @@ Protocol 0.18.0/profile 2.1 uses the registered 16384-code-point capacity and
 scene-instruction-admission/2; the renderer remains scene-program-text/1.
 The CLI never changes schema capacity. Previous 0.17.1/profile 2.0 and its
 1000-character policy remain historical candidates, with their original results.
-Runtime 0.3.5 supports this pure rendering path. It has not completed observation
-policy scope registration for profile 2.1: describe reports
-`observation_policy_scope_matches_profile=false`. Record/self-test return
-`scene_observation_policy_scope_unregistered` with `resource_unavailable`, before
-author code or physics is dispatched. Use a newly registered matching runtime
-when it is reviewed; do not downgrade, change E's identity or bypass the gate.
-Pure generation does not establish reference validity, admission or rewards.
+The current fixed authoring candidate is runtime **0.3.6**, validator commit
+`32de3755bfb0db7b6e431fd016cb54ad87cacfcd`. Its wheel SHA-256 is
+`39b53a3d4b6e01d5725aa71565bd1e6427af66c0c80e504224252c6526e76016`.
+Its exact environment is `ope231-scene-runtime-0.3.6-r1`, digest
+`a2932709e57e4532026778388dd8e433f0b46ac18ade0e67fa8ca839355bd2a9`,
+with harness `26e7a2e5d4b67e86c197f36cc79723b71f87bebc`. Select its matching
+runtime interpreter explicitly and author NEW E using its describe refs.
+Neither instruction preparation nor self-test upgrades old environment/agent
+refs or rebinds earlier P/proof.
+
+Its authenticated `scene-observation-admission/2` scope matches profile 2.1;
+describe reports `observation_policy_scope_matches_profile=true`. That only
+allows the remaining checks to proceed. It is not a physical reference,
+complete scene-family validation, server admission or reward result. Actual
+record/self-test still requires the separately registered local trial plan.
+The two formal worker callbacks and registered isolated execution gateway/dev
+integration remain pending; pure rendering does not close those gates.
+
+Historical runtime 0.3.5 supports rendering but reports scope=false. Its
+`scene_observation_policy_scope_unregistered/resource_unavailable` results remain
+valid under that older identity. The CLI continues to stop before dispatch for
+an explicitly false scope, without downgrading or bypassing the gate.
 
 The runtime bridge uses the reviewed `task_source.authoring` scene API, not the
 legacy v1 recorder. Start with materialized E at `./authored/execution` and choose
@@ -510,7 +525,9 @@ Patch 0.3.1 retains the same authoring interface and changes environment identit
 Runtime 0.3.4 retains the old protocol 0.17.1/profile 2.0 identity and its existing
 physical evidence; it cannot be relabeled as the new profile. Runtime 0.3.5 uses
 0.18.0/profile 2.1, exposes the optional renderer, and explicitly reports its
-unregistered observation scope. This bridge cannot make an unregistered
+historical unregistered observation scope. Current runtime 0.3.6 registers that
+scope and changes scene gripper command continuity with a new harness/environment;
+old P/agent bindings cannot be reused. This bridge cannot make a different
 environment supported or authorize an experiment.
 
 Recording invokes `scene-record-reference` with immutable E and NEW P/manifest;
