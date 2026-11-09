@@ -104,7 +104,7 @@ from openroboto_protocol.commitment import Track
 from openroboto_protocol.model_format import FormatIssueCode, FormatReport
 from openroboto_protocol.model_hash import model_hash_from_hf_tree
 from openroboto_protocol.schemas import Competition
-from openroboto_protocol.task_contract import execution_profile_ref
+from openroboto_protocol.task_profiles import checker_types_for_profile
 
 from openroboto.backend_api import (
     BackendError,
@@ -694,7 +694,7 @@ def task_package_is_payable(
         if isinstance(task_policy, Mapping)
         else None
     )
-    if expected_profile is not None and expected_profile != execution_profile_ref():
+    if expected_profile is not None and not checker_types_for_profile(expected_profile):
         fail(
             f"{live.label} requires an execution profile this CLI does not support. "
             "Nothing was paid or sent on chain. Update to the operator's declared "

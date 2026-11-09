@@ -299,6 +299,57 @@ required profile are rechecked before payment. Static validity or an example
 reference is not a promise of discrimination, author emissions or launch
 readiness.
 
+## 8. Composed tabletop development candidate
+
+The unpublished CLI 1.8.0, protocol 0.15.0 and CPU task runtime 0.2.0 must be
+installed from the same reviewed wheel set. Consumer index lockfiles cannot be
+regenerated against an unpublished protocol version. Do not deploy this checkout
+with a stale lockfile or present a source-path development run as a cold install.
+
+```bash
+openroboto task catalog --include-development --json
+openroboto task create composed.json --profile panda-tabletop-v2
+openroboto task build --definition composed.json --output composed-package \
+  --task-id local-composed --runtime-python /path/to/cpu-env/bin/python
+openroboto task record-reference composed-package --example \
+  --runtime-python /path/to/cpu-env/bin/python
+openroboto task self-test composed-package \
+  --runtime-python /path/to/cpu-env/bin/python
+```
+
+`--example` is only a local one-cube recording example. It has unresolved
+disturbance failures and is not a generally admitted solver. A failing self-test
+must remain visible; do not remove seeds or loosen tolerances to pass it.
+
+The generated definition names actual catalog assets and circular zones. Each
+zone declares accepted asset specifications and capacity. A stage combines
+`in_zone`, `pose`, `stable`, `released`, `supported_by`, `no_contact` and `matching`
+using `all`, `any` or `not`. Held stage goals and earlier-stage dependencies are
+explicit; `reject_early` rejects early satisfaction. Episode and active-stage
+invariants run at every 2 ms physics step, with violations latched until reset.
+Reference action order has no scoring meaning unless the authored stage program
+explicitly requires it. Zone capacity constrains the named objects assigned by
+`matching`; it is not a global occupancy invariant. Use explicit predicates and
+invariants when another object must stay outside a zone or retain its state. Whole-shape containment and real upward supporting
+contact replace fixed-cube approximations. Spherical pose targets are rejected
+as unobservable under geometric symmetry.
+
+`observation: "state"` exposes physical object truth. `"vision"` hides object
+coordinates, truth state, private judge traces and diagnostics; it requires real
+camera pixels and uses visual object/zone labels in instructions. The candidate
+freezes a 1280 by 720 vision image and a 320 by 180 state-mode image; camera
+calibration and dimensions are part of its digest. It does not
+claim visual recognition quality until per-object visibility is independently
+checked. Resource tiers bound development inputs and steps; they do not grant
+API calls or establish a supported object-count limit. Both compared agents must
+use the same frozen observation, tools, resource tier and execution contract.
+
+This candidate implements controlled rigid primitives and convex meshes on
+Panda. Full physical robustness, all supported combinations and remote dev
+submission are pending. Importing arbitrary author-owned scenes/assets, robot
+adapters or deformable simulation needs a separate validated capability path;
+renaming a primitive or loading a mesh does not establish that capability.
+
 ## Related documents
 
 - [CONTRIBUTOR.md](./CONTRIBUTOR.md) — the identity a task submission is paid to

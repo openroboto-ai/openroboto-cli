@@ -34,8 +34,19 @@ Task authors can inspect the allowed Panda tabletop robot and objects with
 explicit, separately installed task runtime; installing the CLI does not install
 MuJoCo. [Task package guide](docs/TASK_PACKAGES.md#7-create-a-task-using-the-restricted-tabletop-scheme)
 explains the ranges, local reference recording and optional public synopsis.
-Protocol 0.14.0 is published. CLI 1.7.0 and the separate task runtime remain
-review candidates; this does not announce a production authoring season.
+This checkout is the unpublished CLI 1.8.0 candidate. Its protocol dependency is
+the matching unpublished 0.15.0 candidate, and its separate CPU runtime is 0.2.0.
+Install their exact locally built wheels together; this does not announce a
+production authoring season or a published index release.
+
+For composed-task development, run `openroboto task catalog --include-development`
+and `openroboto task create definition.json --profile panda-tabletop-v2`.
+Build/reference/self-test keep their existing commands. The v2 example only moves
+one 40 mm cube; other geometries and mechanisms need an explicit author solver.
+Real physics reference success alone is not full admission: disturbance, nop,
+visibility, independent replay and resource checks still apply. Current research
+has unresolved disturbance failures. The default create command remains v1.
+Read [the candidate guide](docs/TASK_PACKAGES.md#8-composed-tabletop-development-candidate).
 
 ## Requirements
 
