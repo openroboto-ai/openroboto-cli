@@ -7,6 +7,7 @@ compilation, control, judging and reference replay belong to the worker runtime.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import pathlib
@@ -30,7 +31,7 @@ from openroboto_protocol.scene_schema import (
 from openroboto_protocol.tabletop_assets import canonical_digest
 from pydantic import ValidationError
 
-from openroboto.task_package import package_digest
+from openroboto.task_package import digest_of_files, package_digest
 
 
 class ScenePackageError(ValueError):
@@ -222,11 +223,64 @@ class SceneSubmission:
         }
 
 
+def contents_digest(files: dict[str, bytes]) -> str:
+    """Fold bounded snapshots with the protocol's unchanged path ordering/rule."""
+    return digest_of_files(
+        tuple(
+            (name, hashlib.sha256(files[name]).hexdigest())
+            for name in sorted(files, key=pathlib.PurePosixPath)
+        )
+    )
+
+
+def _bound_manifest(
+    task: SceneTask,
+    execution: dict[str, bytes],
+    private: dict[str, bytes],
+    document: bytes,
+) -> SubmissionManifest:
+    try:
+        manifest = SubmissionManifest.model_validate_json(document)
+        binding = PrivateReferenceBinding.model_validate_json(
+            private["reference-binding.json"]
+        )
+    except (KeyError, ValidationError) as exc:
+        raise ScenePackageError(
+            "binding_invalid", "submission", "Rebuild both roots and their binding."
+        ) from exc
+    _reference(private, binding)
+    issues = submission_issues(
+        manifest,
+        binding,
+        execution_package_digest=contents_digest(execution),
+        private_package_digest=contents_digest(private),
+        execution_contract=task.execution_contract,
+    )
+    if issues:
+        i = issues[0]
+        raise ScenePackageError(i.code, i.path, "Rebuild after changing either root.")
+    return manifest
+
+
+def load_bound_roots(
+    execution: pathlib.Path, private: pathlib.Path, manifest: pathlib.Path
+) -> tuple[SceneTask, SubmissionManifest]:
+    """Check explicitly separated E/P and detached manifest without copying E."""
+    task, files = execution_input(execution)
+    limit = profile_catalog()["resources"][task.task_definition.resource_profile][
+        "max_package_bytes"
+    ]
+    document = _read_regular(manifest, limit=limit)
+    remaining = limit - sum(map(len, files.values())) - len(document)
+    private_files = _tree(private, limit=remaining)
+    return task, _bound_manifest(task, files, private_files, document)
+
+
 def load_submission(root: str | pathlib.Path) -> SceneSubmission:
     directory = pathlib.Path(root).expanduser().absolute()
     if directory.is_symlink():
         raise ScenePackageError("root_invalid", "package", "Do not use a symlink root.")
-    task, _ = execution_input(directory / "execution")
+    task, execution = execution_input(directory / "execution")
     limit = profile_catalog()["resources"][task.task_definition.resource_profile][
         "max_package_bytes"
     ]
@@ -242,11 +296,8 @@ def load_submission(root: str | pathlib.Path) -> SceneSubmission:
             "Use execution/, private/ and submission.json.",
         )
     try:
-        manifest = SubmissionManifest.model_validate_json(files["submission.json"])
-        binding = PrivateReferenceBinding.model_validate_json(
-            files["private/reference-binding.json"]
-        )
-    except (KeyError, ValidationError) as exc:
+        document = files["submission.json"]
+    except KeyError as exc:
         raise ScenePackageError(
             "binding_invalid",
             "submission",
@@ -257,17 +308,7 @@ def load_submission(root: str | pathlib.Path) -> SceneSubmission:
         for p, b in files.items()
         if p.startswith("private/")
     }
-    _reference(private, binding)
-    issues = submission_issues(
-        manifest,
-        binding,
-        execution_package_digest=package_digest(directory / "execution"),
-        private_package_digest=package_digest(directory / "private"),
-        execution_contract=task.execution_contract,
-    )
-    if issues:
-        i = issues[0]
-        raise ScenePackageError(i.code, i.path, "Rebuild after changing either root.")
+    manifest = _bound_manifest(task, execution, private, document)
     return SceneSubmission(directory, task, manifest)
 
 

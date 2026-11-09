@@ -9,13 +9,13 @@ from __future__ import annotations
 
 import json
 import shutil
-import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 from openroboto_protocol.scene_contract import profile_ref
 
+from openroboto import scene_authoring
 from openroboto.cli import main
 from openroboto.commands import submit, task_scene
 from openroboto.config import Settings
@@ -230,21 +230,32 @@ def test_missing_scene_runtime_never_runs_author_code_or_claims_physics(
 
     def probe(argv, **kwargs):
         calls.append(argv)
-        return subprocess.CompletedProcess(
-            argv, 0, stdout=b"private-marker", stderr=b"private-marker"
-        )
+        return 0, {"private_marker": "private-marker"}
 
-    monkeypatch.setattr(task_scene.subprocess, "run", probe)
+    monkeypatch.setattr(
+        scene_authoring, "_invoke", lambda python, argv, **kw: probe(argv, **kw)
+    )
     output = tmp_path / "diagnostic.json"
-    argv = ["task", "scene", command, str(scene), "--output", str(output)]
+    argv = ["task", "scene", command, "--output", str(output)]
     if command == "record-reference":
-        argv += ["--script", str(script)]
+        argv += [
+            "--execution",
+            str(scene / "execution"),
+            "--private",
+            str(tmp_path / "new-p"),
+            "--manifest",
+            str(tmp_path / "new-manifest.json"),
+            "--script",
+            str(script),
+        ]
+    else:
+        argv += [str(scene)]
     assert main(argv) == 1
     report = read_output(capsys)
     assert report["local_physics"] == "not_run"
     assert report["capability"] == "resource_unavailable"
     assert "private-marker" not in output.read_text()
-    assert calls[0][-2:] == ["describe", "--include-development"]
+    assert any(argv[-2:] == ["describe", "--include-development"] for argv in calls)
     assert main(argv) == 1
     assert read_output(capsys)["issues"][0]["code"] == "report_path"
 

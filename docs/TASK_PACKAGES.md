@@ -408,24 +408,69 @@ paths, symlinks, resource overflow, invalid public metadata and stale bindings.
 Its JSON says `scope=structure_only`, `local_physics=not_run`,
 `server_admission=not_run`, `reward_status=not_evaluated`.
 
+The runtime bridge uses the reviewed `task_source.authoring` scene API, not the
+legacy v1 recorder. Start with materialized E at `./authored/execution` and choose
+an explicit **new** private root and detached manifest. They need not exist for
+recording. The CLI never derives private materials from a public summary, copies
+solver code into E, overwrites an existing P, or rewrites E for another runtime.
+
 ```bash
-openroboto task scene record-reference ./my-submission \
+openroboto task scene record-reference --execution ./authored/execution \
+  --private ./authored/private --manifest ./authored/submission.json \
   --script ./solve.py --runtime-python /path/to/runtime/bin/python \
-  --output ./record-diagnostic.json
-openroboto task scene self-test ./my-submission \
-  --runtime-python /path/to/runtime/bin/python --output ./self-test-diagnostic.json
+  --private-report ./private-diagnostics/record.json --output ./record-summary.json
+openroboto task scene check ./authored
+openroboto task scene self-test --execution ./authored/execution \
+  --private ./authored/private --manifest ./authored/submission.json \
+  --runtime-python /path/to/runtime/bin/python \
+  --private-report ./private-diagnostics/test.json --output ./self-test-summary.json
+# Equivalent self-test shorthand (existing complete bundle):
+# openroboto task scene self-test ./authored --runtime-python ... --output ...
 ```
 
-**Current limitation:** the fixed P01 importer `ed9dcc37` (following `05670d4c`)
-provides native scene
-import, not a schema-3 authoring/replay API with private reference output. These
-two commands perform a bounded runtime metadata probe and then return nonzero
-with `scene_authoring_unavailable`, `resource_unavailable` and all execution
-gates `not_run`. They do not execute `solve.py`, run physics, produce references,
-or call a model. Retain the report and install the future reviewed P02/P03 runtime
-and its matching CLI bridge before treating recording/self-test as available.
-Running the old v1 recorder on `execution/` would put private references in the
-wrong root and is not a workaround.
+`--output` receives only projected identities, fixed errors and check booleans.
+`--private-report` receives the runtime's full diagnostics; its adjacent
+`.evidence` directory may contain private trajectories, states and proof. Keep
+both reports/evidence outside E/P and the transport bundle. Omitting
+`--private-report` retains diagnostics in a new mode-0700 temporary directory;
+the projected report gives its path. Never publish that diagnostic file/directory.
+Raw child stdout/stderr and arbitrary error strings are not relayed to the CLI.
+Reports and outputs must be new. Failed artifacts remain available for diagnosis.
+
+The selected `--runtime-python` runs in isolated Python mode. Before dispatch the
+CLI verifies installed protocol and runtime distributions, schema 3/execution 3,
+exact profile, structured scene command capabilities, canonical registry identity,
+robot/control and the frozen agent binding. It verifies runtime identity again
+after execution. The 0.3.x scene API v1 runtime is an unpublished candidate; the initial d3821a5
+wheel pins protocol 0.17.0 and is incompatible with this CLI's 0.17.1 baseline.
+Patch 0.3.1 retains the same authoring interface and changes environment identity.
+Use the final reviewed 0.17.1 runtime identity supplied by OPE-231. This bridge
+cannot make an unregistered environment supported or authorize an experiment.
+
+Recording invokes `scene-record-reference` with immutable E and NEW P/manifest;
+all initial states must be recorded. The old candidate positional recording form
+returns `scene_argument_migration` with explicit replacement arguments before
+loading P or running a script. Self-test first validates E/P/joint and the
+normalized execution contract, then invokes `scene-self-test` with the exact
+`--expect-submission-digest`. An optional public flag of the same name also
+checks an independently retained digest. Self-test always uses the runtime's
+registered all-state reference/repeat/noise/nop/observation/tool-proof pipeline;
+it offers no seed subset, policy override or skipped-physics option.
+
+`--timeout-seconds` bounds the entire local command (default recording 900,
+self-test 180; maximum 900 seconds), including metadata probes. It never increases
+the task's execution budgets. Recording alone accepts `--max-reference-steps`,
+which may only lower the contract step cap. Child output is limited to 1 MiB and
+private report parsing to 8 MiB; malformed, nonfinite or duplicate-key JSON,
+timeouts and incomplete/mismatched receipts return nonzero safe diagnostics.
+E and existing P/manifest are checked again after execution. A completed rejected
+self-test remains `accepted=false`, nonzero and `local_physics=failed`; a static
+check or incomplete receipt cannot claim physical completion. Local recording
+or self-test never establishes server admission or reward eligibility.
+
+CLI subprocess fixtures are synthetic interface evidence. Real cold-installed
+CLI/runtime physics verification belongs to OPE-231's frozen trial plan and its
+remaining allowance; this client implementation alone adds no physical result.
 
 Once the operator has authorized a scene season and verified the exact server
 runtime route, the submission transport remains the existing chain/payment

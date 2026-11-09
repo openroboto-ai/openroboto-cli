@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import json
 import pathlib
-import subprocess
 import sys
 import tempfile
 from typing import Any
@@ -25,6 +24,7 @@ from openroboto.scene_api import (
     register_scene,
     registration_message,
 )
+from openroboto.scene_authoring import run_authoring
 from openroboto.scene_package import (
     ScenePackageError,
     build_submission,
@@ -57,23 +57,52 @@ def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) 
     check.set_defaults(handler=run_check)
     for name in ("record-reference", "self-test"):
         command = commands.add_parser(
-            name, help="check the installed scene author runtime"
+            name, help="run the exact installed scene runtime"
         )
-        command.add_argument("package")
+        command.add_argument(
+            "package",
+            nargs="?",
+            help="self-test shorthand; recording needs explicit E and NEW P/manifest",
+        )
+        command.add_argument("--execution", type=pathlib.Path)
+        command.add_argument(
+            "--private", type=pathlib.Path, help="NEW private root for recording"
+        )
+        command.add_argument(
+            "--manifest", type=pathlib.Path, help="detached JSON; NEW for recording"
+        )
         command.add_argument("--runtime-python", default=sys.executable)
+        command.add_argument(
+            "--timeout-seconds",
+            type=float,
+            default=900.0 if name == "record-reference" else 180.0,
+            help="total deadline up to 900 seconds; never raises contract budgets",
+        )
         command.add_argument(
             "--output",
             required=True,
             type=pathlib.Path,
-            help="new diagnostic report outside both package roots",
+            help="new projected public report outside E/P",
+        )
+        command.add_argument(
+            "--private-report",
+            type=pathlib.Path,
+            help="new private report; default: retained secure temporary directory",
         )
         if name == "record-reference":
             command.add_argument(
                 "--script",
                 required=True,
                 type=pathlib.Path,
-                help="local author script, kept outside both roots",
+                help="local author script outside E/P",
             )
+            command.add_argument(
+                "--max-reference-steps",
+                type=int,
+                help="optional LOWER local recording cap",
+            )
+        else:
+            command.add_argument("--expect-submission-digest", default="")
         command.set_defaults(handler=run_runtime)
     register = commands.add_parser(
         "register", help="bind an announced task to both roots"
@@ -184,80 +213,10 @@ def run_check(args: argparse.Namespace) -> int:
 
 
 def run_runtime(args: argparse.Namespace) -> int:
-    """Diagnose the missing P02/P03 bridge; never run a v1 solver on schema 3.
-
-    The fixed P01 exposes import/compile, not an isolated scene recording or
-    admission API. Describe is a bounded metadata probe, not a physics attempt.
-    Keep this gate closed until that runtime has a reviewed authoring API.
-    """
-    try:
-        package = pathlib.Path(args.package).expanduser().resolve()
-        load_submission(package)
-        output = args.output.expanduser().resolve()
-        if output.exists() or output.is_relative_to(package):
-            raise ScenePackageError(
-                "report_path",
-                "output",
-                "Choose a new report outside the submission tree.",
-            )
-        script = getattr(args, "script", None)
-        if script is not None:
-            script = script.expanduser().resolve()
-            if not script.is_file() or script.is_relative_to(package):
-                raise ScenePackageError(
-                    "script_path",
-                    "script",
-                    "Select an existing local script outside both roots.",
-                )
-        code = "scene_authoring_unavailable"
-        probe = "not_started"
-        try:
-            completed = subprocess.run(
-                [
-                    str(pathlib.Path(args.runtime_python).expanduser()),
-                    "-m",
-                    "task_source.authoring",
-                    "describe",
-                    "--include-development",
-                ],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                timeout=10,
-                check=False,
-            )
-            probe = (
-                "metadata_available"
-                if completed.returncode == 0
-                else "module_unavailable"
-            )
-        except (OSError, subprocess.TimeoutExpired):
-            probe = "runtime_unavailable"
-        report = {
-            "ok": False,
-            "capability": "resource_unavailable",
-            "issues": [
-                {
-                    "code": code,
-                    "path": "runtime",
-                    "message": "Install the reviewed schema-3 P02/P03 scene "
-                    "authoring runtime and "
-                    "matching CLI bridge. The v1 recorder cannot write private scene "
-                    "references.",
-                }
-            ],
-            "runtime_probe": probe,
-            "local_physics": "not_run",
-            "server_admission": "not_run",
-            "reward_status": "not_evaluated",
-        }
-        # Never relay raw runtime output: it can contain private diagnostics.
-        with output.open("x", encoding="utf-8") as stream:
-            json.dump(report, stream, sort_keys=True, indent=2)
-            stream.write("\n")
-        _emit(report)
-    except (ScenePackageError, OSError) as exc:
-        return _error(exc)
-    return 1
+    """Run only explicit scene commands after exact metadata and input binding."""
+    report = run_authoring(args)
+    _emit(report)
+    return 0 if report["ok"] else 1
 
 
 def _backend_error(exc: BackendError) -> int:

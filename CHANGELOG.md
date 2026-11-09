@@ -12,8 +12,12 @@
   chain, with local and fixed-commit checks of both roots and exact server routing.
 - Add author-signed scene registration and separate capability/admission/reward
   status. No private reference text is emitted in public summaries or diagnostics.
-- Diagnose the unavailable P02/P03 scene recording/self-test bridge with nonzero
-  structured results. No scene physical success is claimed.
+- Bridge scene recording and self-test to the reviewed installed runtime API.
+  Recording now requires explicit E and NEW P/manifest arguments; the candidate
+  positional recording form explains the migration. Existing v1 commands stay intact.
+- Verify exact runtime/schema/profile/environment/agent identities and E/P/joint
+  before execution, bound subprocess time/output, and project private diagnostics
+  into safe public reports. Physical acceptance and server/reward gates stay separate.
 - Pin candidate protocol 0.17.1 with linear frame-tree validation and unchanged
   schema/execution/profile identities. Its index release and formal lock
   integration remain release gates; local reviewed-wheel installs use normal resolution.
