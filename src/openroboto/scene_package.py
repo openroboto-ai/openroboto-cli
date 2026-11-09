@@ -8,6 +8,7 @@ compilation, control, judging and reference replay belong to the worker runtime.
 from __future__ import annotations
 
 import json
+import os
 import pathlib
 import stat
 from dataclasses import dataclass
@@ -40,18 +41,47 @@ class ScenePackageError(ValueError):
         super().__init__(f"[{code}] {path}: {message}")
 
 
+def _read_regular(path: pathlib.Path, *, limit: int) -> bytes:
+    """Bound actual file bytes and reject special files before any read.
+
+    Recheck the opened descriptor: a replacement after lstat must not turn a
+    validated regular file into a blocking FIFO, symlink or oversized input.
+    """
+
+    def check(info: os.stat_result) -> None:
+        if not stat.S_ISREG(info.st_mode):
+            raise ScenePackageError(
+                "path_unsafe",
+                "package",
+                "Use regular files, not links or special files.",
+            )
+        if info.st_size > limit:
+            raise ScenePackageError(
+                "resource_limit", "package", "Actual bytes exceed the resource profile."
+            )
+
+    check(path.lstat())
+    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(path, flags)
+    try:
+        check(os.fstat(descriptor))
+        with os.fdopen(descriptor, "rb", closefd=False) as stream:
+            data = stream.read(limit + 1)
+    finally:
+        os.close(descriptor)
+    if len(data) > limit:
+        raise ScenePackageError(
+            "resource_limit", "package", "Actual bytes exceed the resource profile."
+        )
+    return data
+
+
 def _json(path: pathlib.Path) -> Any:
     try:
         limit = max(
             p["max_package_bytes"] for p in profile_catalog()["resources"].values()
         )
-        with path.open("rb") as stream:
-            data = stream.read(limit + 1)
-        if len(data) > limit:
-            raise ScenePackageError(
-                "resource_limit", "task.json", "Reduce the actual package bytes."
-            )
-        return json.loads(data)
+        return json.loads(_read_regular(path, limit=limit))
     except ScenePackageError:
         raise
     except (OSError, ValueError) as exc:
@@ -88,13 +118,8 @@ def _tree(root: pathlib.Path, *, limit: int) -> dict[str, bytes]:
             raise ScenePackageError(
                 "public_card_forbidden", "package", "Remove README.md before uploading."
             )
-        with path.open("rb") as stream:
-            data = stream.read(limit - total + 1)
+        data = _read_regular(path, limit=limit - total)
         total += len(data)
-        if total > limit:
-            raise ScenePackageError(
-                "resource_limit", "package", "Actual bytes exceed the resource profile."
-            )
         files[relative] = data
     return files
 
@@ -282,12 +307,7 @@ def build_submission(
             raise ScenePackageError(
                 "reference_missing", "private", "Select a regular reference JSON."
             )
-        with reference.open("rb") as stream:
-            data = stream.read(limit + 1)
-        if len(data) > limit:
-            raise ScenePackageError(
-                "resource_limit", "private", "Reduce reference bytes."
-            )
+        data = _read_regular(reference, limit=limit)
         private_files = {"reference.json": data}
         names = ["reference.json"]
     output = output.resolve()

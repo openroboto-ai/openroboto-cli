@@ -2,6 +2,10 @@
 
 ## Unreleased — imported-scene CLI candidate (OPE-234)
 
+- Reject special/oversized scene inputs before opening JSON. Recheck opened
+  descriptors and bound reads so replacing an input with a FIFO cannot hang.
+- Look up scene registrations across authenticated author pages, with a bounded
+  scan and `--lookup-offset` continuation; retain exact task and repo/commit binding.
 - Add explicit `task scene build/check` for schema-3 dual-root inputs, complete
   dependency checks and detached protocol identities. Keep v1 defaults intact.
 - Add `submit --scene-package` using the existing gated upload/payment/retry

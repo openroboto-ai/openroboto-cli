@@ -453,7 +453,17 @@ the task through the wallet-signed author endpoint, downloads its exact
 `repo@commit` and signs the backend's canonical registration message binding that
 transport and all three digests. A MINER key is still required. Pending ingestion,
 storage errors or registration retries never require another payment. Keep the
-original local submission for this step. The backend distributes roles: author,
+original local submission for this step.
+
+Lookup scans authenticated author pages (100 rows per request, at most 100 pages
+per invocation), matching only the explicit backend task id. An empty or final
+page ends lookup. If the scan reaches its page cap, `task_lookup_limit` reports a
+continuation `--lookup-offset N`; retry the same registration with that offset
+without paying again. A changing listing or a genuinely missing id can be
+retried from offset 0. The located row's exact repo/commit and both root digests
+are still checked before registration; no id is inferred from the submission name.
+
+The backend distributes roles: author,
 assigned admission worker and reviewer can access both roots; assigned evaluation
 workers receive only execution files; model/tool processes and public visitors
 receive neither root. The CLI does not grant worker roles or claim process

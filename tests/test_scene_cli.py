@@ -356,7 +356,12 @@ def test_registration_signs_transport_and_roots_without_inferring_reward(
         task_id="backend-task", package_repo="author/scene", package_commit="a" * 40
     )
     monkeypatch.setattr(
-        task_scene, "fetch_my_tasks", lambda *a, **k: SimpleNamespace(data=[row])
+        task_scene,
+        "fetch_my_tasks",
+        lambda *a, **k: SimpleNamespace(
+            data=[row],
+            meta=SimpleNamespace(page=SimpleNamespace(offset=0, has_more=False)),
+        ),
     )
     monkeypatch.setattr(task_scene, "fetch_package", lambda *a, **k: scene)
     messages = []

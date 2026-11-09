@@ -233,7 +233,7 @@ testpaths = ["tests"]
 # ~100% covered by construction, so it reports about 12 points higher — 82.38 rather
 # than 70.26. That number was briefly committed here and CI rejected the very commit
 # that introduced it. The gate is not the place to find out you measured differently.
-# 82.66 measured for the schema-3 CLI candidate (671 tests, 2026-11-09).
-fail_under = 82.66
+# 82.94 measured after scene I/O and pagination regression fixes (693 tests).
+fail_under = 82.94
 precision = 2
 show_missing = true

@@ -12,6 +12,7 @@ from typing import Any
 
 from openroboto.backend_api import (
     BackendError,
+    PrivateTask,
     fetch_my_tasks,
     fetch_task_access_message,
     miner_key,
@@ -30,6 +31,9 @@ from openroboto.scene_package import (
     load_submission,
 )
 from openroboto.task_package import PackageFetchError, fetch_package
+
+REGISTRATION_PAGE_SIZE = 100
+REGISTRATION_MAX_PAGES = 100
 
 
 def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
@@ -77,6 +81,13 @@ def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) 
     register.add_argument("task_id", help="backend task id from task status")
     register.add_argument("--package", required=True)
     register.add_argument("--config", default="miner.yaml")
+    register.add_argument(
+        "--lookup-offset",
+        type=int,
+        default=0,
+        help="resume author lookup at this offset; "
+        "each invocation reads at most 100 pages",
+    )
     register.set_defaults(handler=run_register)
     status = commands.add_parser(
         "status", help="read server capability/admission/reward separately"
@@ -277,21 +288,14 @@ def run_register(args: argparse.Namespace) -> int:
             )
         key = miner_key(settings)
         message = fetch_task_access_message(settings.backend_url, hotkey)
-        tasks = fetch_my_tasks(
-            settings.backend_url,
+        row = _find_submitted(
+            settings,
+            task_id=args.task_id,
             hotkey=hotkey,
             signature=hotkey_signature(wallet, message.encode()),
-            miner_key=key,
-            limit=100,
+            key=key,
+            offset=getattr(args, "lookup_offset", 0),
         )
-        row = next((r for r in tasks.data if r.task_id == args.task_id), None)
-        if row is None:
-            raise ScenePackageError(
-                "task_not_found",
-                "task_id",
-                "Wait for chain ingestion, run task status with this wallet, then "
-                "register the matching backend task id. Do not pay again.",
-            )
         with tempfile.TemporaryDirectory(prefix="openroboto-scene-register-") as cache:
             root = fetch_package(
                 row.package_repo,
@@ -331,6 +335,63 @@ def run_register(args: argparse.Namespace) -> int:
     except (ScenePackageError, OSError) as exc:
         return _error(exc)
     return 0
+
+
+def _find_submitted(
+    settings: Settings,
+    *,
+    task_id: str,
+    hotkey: str,
+    signature: str,
+    key: str,
+    offset: int = 0,
+) -> PrivateTask:
+    """Find an exact backend id across a bounded, authenticated author listing.
+
+    Reuse the row's immutable repo@commit; names and list positions never supply
+    an identity. An empty/last page ends lookup, while a page cap is resumable.
+    """
+    if offset < 0:
+        raise ScenePackageError(
+            "lookup_offset_invalid",
+            "lookup_offset",
+            "Use an offset of zero or greater.",
+        )
+    for _ in range(REGISTRATION_MAX_PAGES):
+        page = fetch_my_tasks(
+            settings.backend_url,
+            hotkey=hotkey,
+            signature=signature,
+            miner_key=key,
+            limit=REGISTRATION_PAGE_SIZE,
+            offset=offset,
+        )
+        if page.meta.page.offset != offset or len(page.data) > REGISTRATION_PAGE_SIZE:
+            raise BackendError(
+                "The author listing returned inconsistent pagination; retry lookup.",
+                code="TASK_LOOKUP_PAGE_MISMATCH",
+                retryable=True,
+            )
+        for row in page.data:
+            if row.task_id == task_id:
+                return row
+        if not page.data or not page.meta.page.has_more:
+            break
+        offset += len(page.data)
+    else:
+        raise ScenePackageError(
+            "task_lookup_limit",
+            "lookup_offset",
+            f"Lookup reached {REGISTRATION_MAX_PAGES} pages. Retry the same "
+            f"registration with --lookup-offset {offset}; do not pay again.",
+        )
+    raise ScenePackageError(
+        "task_not_found",
+        "task_id",
+        "No matching backend task id in the searched author pages. Wait for chain "
+        "ingestion, verify the wallet and backend task id, then retry from offset 0. "
+        "Do not pay again.",
+    )
 
 
 def run_status(args: argparse.Namespace) -> int:
