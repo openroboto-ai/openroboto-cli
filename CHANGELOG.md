@@ -4,6 +4,16 @@ Every entry answers one question before it lists anything: **does a miner have t
 change something, and what breaks if they do not?** A diff summary without "who
 has to act" is not usable by the people who installed this.
 
+## 1.8.0 (unpublished candidate)
+
+Existing v1 authors keep the same defaults and commands. Composed v2 authoring
+requires explicit `task create --profile panda-tabletop-v2`, protocol 0.15.0 and
+the matching separately installed runtime 0.2.0. The catalog exposes development
+entries only with `--include-development`. Exact profile/checker dispatch rejects
+mismatched package data before submission; no fees or model calls are authorized
+by selecting a development resource tier. Full physical and remote admission is
+still pending; do not treat this candidate as a production release.
+
 ## 1.7.2 (candidate)
 
 Miners using a season with gated submissions must upgrade from 1.7.1. Its access

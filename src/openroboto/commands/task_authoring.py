@@ -15,9 +15,8 @@ import sys
 from collections.abc import Mapping
 from typing import Any
 
-from openroboto_protocol.task_contract import (
-    TaskContractError,
-    execution_profile_ref,
+from openroboto_protocol.task_contract import TaskContractError, execution_profile_ref
+from openroboto_protocol.task_profiles import (
     parse_public_summary,
     task_profile_catalog,
     validate_task_document,
@@ -34,6 +33,11 @@ def add_authoring_parsers(
         "catalog", help="show supported robots, objects and authoring ranges"
     )
     catalog.add_argument("--json", action="store_true")
+    catalog.add_argument(
+        "--include-development",
+        action="store_true",
+        help="include explicitly unverified candidate profiles",
+    )
     catalog.set_defaults(handler=run_catalog)
 
     create = subparsers.add_parser(
@@ -41,6 +45,11 @@ def add_authoring_parsers(
     )
     create.add_argument(
         "definition", help="new JSON file; existing files are never overwritten"
+    )
+    create.add_argument(
+        "--profile",
+        choices=["panda-tabletop-v1", "panda-tabletop-v2"],
+        default="panda-tabletop-v1",
     )
     create.add_argument(
         "--public-summary",
@@ -72,7 +81,7 @@ def add_authoring_parsers(
     reference_source.add_argument(
         "--example",
         action="store_true",
-        help="use the runtime's verified one-cube example; not a general solver",
+        help="local one-cube example; not a general solver or admission proof",
     )
     _runtime_option(reference)
     reference.set_defaults(handler=run_reference)
@@ -101,7 +110,9 @@ def _runtime_option(parser: argparse.ArgumentParser) -> None:
 
 def run_catalog(args: argparse.Namespace) -> int:
     """Expose normative options without contacting the backend or a model."""
-    profiles = task_profile_catalog()
+    profiles = task_profile_catalog(
+        include_development=getattr(args, "include_development", False)
+    )
     if args.json:
         say(json.dumps({"profiles": profiles}, ensure_ascii=False, sort_keys=True))
     else:
@@ -186,10 +197,18 @@ def run_create(args: argparse.Namespace) -> int:
         },
     }
     try:
+        if getattr(args, "profile", "panda-tabletop-v1") == "panda-tabletop-v2":
+            from openroboto_protocol.tabletop_v2 import example_definition, profile_ref
+
+            document = {
+                "schema_version": 1,
+                "execution_profile": profile_ref(),
+                "task_definition": example_definition(),
+            }
         if args.public_summary:
             document["public_summary"] = parse_public_summary(
                 _read_json(args.public_summary),
-                expected_profile=execution_profile_ref(),
+                expected_profile=document["execution_profile"],
             )
         issues = validate_task_document(document, require_profile=True)
         if issues:
@@ -252,7 +271,7 @@ def _runtime(args: argparse.Namespace, arguments: list[str]) -> int:
 def run_build(args: argparse.Namespace) -> int:
     """Reject unsupported definitions before invoking physical package construction."""
     try:
-        _definition(args.definition)
+        document = _definition(args.definition)
         if pathlib.Path(args.output).expanduser().exists():
             raise ValueError(
                 "Choose a new output directory; task packages are not overwritten."
@@ -260,7 +279,7 @@ def run_build(args: argparse.Namespace) -> int:
         if args.public_summary:
             parse_public_summary(
                 _read_json(args.public_summary),
-                expected_profile=execution_profile_ref(),
+                expected_profile=document["execution_profile"],
             )
     except (OSError, ValueError) as exc:
         fail(str(exc))

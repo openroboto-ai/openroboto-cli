@@ -66,9 +66,12 @@ from dataclasses import dataclass
 from typing import Any, Final
 
 from openroboto_protocol.task_contract import (
-    checker_types_for_profile,
     reference_contract_issues,
-    task_profile_catalog,
+)
+from openroboto_protocol.task_profiles import (
+    checker_types_for_profile,
+    is_v2,
+    profile_document,
     validate_task_document,
 )
 
@@ -449,6 +452,9 @@ def checker_types_in(config: Any) -> set[str]:
         if isinstance(node, Mapping):
             if isinstance(node.get("type"), str):
                 found.add(node["type"])
+                if node["type"] == "TabletopProgramChecker":
+                    # Program predicates are validated by their own closed schema.
+                    return
             for value in node.values():
                 visit(value)
         elif isinstance(node, list):
@@ -615,26 +621,41 @@ def _validate_axis(package: TaskPackage) -> list[Issue]:
             else:
                 variants = [item for item in raw_variants if isinstance(item, Mapping)]
 
-    if not 1 <= len(variants) <= 20:
+    max_instances = 64 if is_v2(task.get("execution_profile")) else 20
+    if not 1 <= len(variants) <= max_instances:
         issues.append(
             Issue(
                 "axis.instance_count",
-                f"instance count must be between 1 and 20, got {len(variants)}",
+                f"instance count must be between 1 and {max_instances}, "
+                f"got {len(variants)}",
             )
         )
 
     if profile_types:
-        profile = task_profile_catalog()[0]
+        profile = profile_document(task["execution_profile"])
+        expected_limit = profile["limits"].get("max_control_steps_per_trial")
+        if is_v2(task["execution_profile"]):
+            from openroboto_protocol.tabletop_v2 import resource_catalog
+
+            definition = task.get("task_definition")
+            resource = (
+                definition.get("resource_profile")
+                if isinstance(definition, Mapping)
+                else None
+            )
+            selected = (
+                resource_catalog().get(resource, {})
+                if isinstance(resource, str)
+                else {}
+            )
+            expected_limit = selected.get("max_control_steps_per_trial")
         protocol = benchmark.get("protocol") if isinstance(benchmark, Mapping) else None
         limit = (
             protocol.get("max_control_steps_per_trial")
             if isinstance(protocol, Mapping)
             else None
         )
-        if (
-            type(limit) is not int
-            or limit != profile["limits"]["max_control_steps_per_trial"]
-        ):
+        if type(limit) is not int or limit != expected_limit:
             issues.append(
                 Issue(
                     "axis.profile_step_budget",
