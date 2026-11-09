@@ -57,6 +57,10 @@ CHECK_NAMES = frozenset(
     }
 )
 ERROR_MESSAGES = {
+    "scene_observation_policy_scope_unregistered": (
+        "Observation policy scope is not registered for this profile. "
+        "Use a newly registered matching runtime; retain E/P unchanged."
+    ),
     "runtime.timeout": "The local deadline expired; inspect private diagnostics.",
     "scene_runtime_unavailable": "Install the matching reviewed CPU runtime.",
     "reference_step_budget": "The reference exceeded its lower local step cap.",
@@ -507,6 +511,17 @@ def run_authoring(args: argparse.Namespace) -> dict[str, Any]:
             _fail("runtime_unavailable", "Choose an installed --runtime-python.")
         deadline = time.monotonic() + args.timeout_seconds
         identity = _probe(python, task, deadline)
+        description = identity["description"]
+        if "observation_policy_scope_matches_profile" in description:
+            scope = description["observation_policy_scope_matches_profile"]
+            if type(scope) is not bool:
+                _fail(
+                    "runtime_identity_mismatch",
+                    "Expected an explicit boolean policy scope.",
+                )
+            if not scope:
+                scope_code = "scene_observation_policy_scope_unregistered"
+                _fail(scope_code, ERROR_MESSAGES[scope_code])
         argv = [
             "-m",
             "task_source.authoring",

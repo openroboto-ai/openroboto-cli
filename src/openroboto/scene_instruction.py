@@ -30,6 +30,31 @@ from openroboto.scene_package import (
     execution_input,
 )
 
+INSTRUCTION_MESSAGES = {
+    "scene_instruction_rendered": "Full canonical instruction rendered.",
+    "scene_instruction_length_unsupported": (
+        "Full text exceeds the registered capacity; do not truncate it."
+    ),
+    "scene_instruction_vision_unsupported": (
+        "This policy does not support canonical visual instructions."
+    ),
+    "scene_instruction_missing_binding": (
+        "The renderer lacks a required public scene binding."
+    ),
+    "scene_instruction_semantics_unsupported": (
+        "The renderer cannot fully express this program's semantics."
+    ),
+    "scene_instruction_profile_unsupported": (
+        "Use the runtime's exact registered scene profile."
+    ),
+    "scene_instruction_policy_unsupported": (
+        "Install the reviewed registered instruction policy."
+    ),
+    "scene_instruction_renderer_unsupported": (
+        "Install the reviewed registered renderer."
+    ),
+}
+
 
 def instruction_bytes(source: bytes, instruction: str) -> bytes:
     """Replace only the top-level JSON string token, preserving all other bytes.
@@ -146,42 +171,95 @@ def prepare_execution(
 
 
 def _public_rendering(
-    body: dict[str, Any], task: SceneTask, digest: str
+    body: dict[str, Any],
+    task: SceneTask,
+    digest: str,
+    identity: dict[str, Any],
+    task_bytes: bytes,
 ) -> dict[str, Any]:
-    """Project the producer's public render result; do not reproduce its renderer."""
+    """Consume the fixed runtime wrapper, never a second renderer/wire format."""
     from openroboto_protocol.scene_contract import profile_ref
-    from openroboto_protocol.scene_schema import SceneTask
 
     try:
-        accepted, text = body["accepted"], body["text"]
+        finding = body["instruction"]
+        if not isinstance(finding, dict):
+            raise ValueError("instruction object required")
+        policy = identity["description"]["instruction_admission_policy"]
+        configuration = policy["configuration"]
+        accepted, text = finding["accepted"], finding["text"]
         if not (
-            type(accepted) is bool
+            isinstance(policy, dict)
+            and isinstance(configuration, dict)
+            and canonical_digest(policy)
+            == canonical_digest(
+                identity["description"]["registry"]["runtime"][
+                    "instruction_admission_policy"
+                ]
+            )
+            and policy["digest"] == canonical_digest(configuration)
+            and configuration["execution_profile"] == profile_ref()
+            and configuration["policy_version"] == policy["version"]
+            and configuration["renderer"] == policy["renderer_version"]
+            and configuration["max_instruction_characters"]
+            == identity["metadata"]["profile"]["instruction"]["max_characters"]
+            and type(body["schema_version"]) is int
+            and body["schema_version"] == 1
+            and body["command"] == "scene-render-instruction"
+            and type(accepted) is bool
+            and body["ok"] is accepted
+            and body["capability"]
+            == ("instruction_render" if accepted else "unsupported")
+            and body["runtime_version"] == identity["metadata"]["runtime_version"]
             and body["execution_profile"] == profile_ref()
-            and body["environment"] == task.environment.model_dump()
-            and body["execution_package_digest"] == digest
-            and body["program_digest"]
+            and body["installed_environment"] == task.environment.model_dump()
+            and body["input_environment"] == task.environment.model_dump()
+            and body["environment_matches_installation"] is True
+            and body["input_task_sha256"] == hashlib.sha256(task_bytes).hexdigest()
+            and body["package_validated"] is False
+            and body["private_reference_created"] is False
+            and body["server_admission"] == "not_run"
+            and type(body["business_model_calls"]) is int
+            and body["business_model_calls"] == 0
+            and finding["schema_valid"] is True
+            and isinstance(finding["code"], str)
+            and (not accepted or finding["code"] == "scene_instruction_rendered")
+            and type(finding["max_characters"]) is int
+            and finding["max_characters"] == configuration["max_instruction_characters"]
+            and finding["program_digest"]
             == canonical_digest(task.task_definition.model_dump(mode="json"))
-            and body["renderer_version"] == "scene-program-text/1"
-            and re.fullmatch(
-                r"scene-instruction-admission/[1-9][0-9]*", body["policy_version"]
-            )
+            and re.fullmatch("[0-9a-f]{64}", finding["render_input_digest"])
+            and finding["policy_version"] == policy["version"]
+            and finding["policy_digest"] == policy["digest"]
+            and finding["renderer_version"] == policy["renderer_version"]
+            and finding["renderer_implementation_digest"]
+            == policy["renderer_implementation_digest"]
             and all(
-                re.fullmatch("[0-9a-f]{64}", body[key])
-                for key in ("policy_digest", "renderer_implementation_digest")
+                re.fullmatch("[0-9a-f]{64}", policy[key])
+                for key in (
+                    "renderer_implementation_digest",
+                    "installation_manifest_digest",
+                )
             )
+            # This is generation, not source consistency or actual model delivery.
+            and finding["actual_instruction_digest"] is None
+            and finding["delivered_instruction_digest"] is None
+            and finding["delivery_checked"] is False
         ):
             raise ValueError("instruction identity")
         if text is not None:
             if not (
                 isinstance(text, str)
-                and type(body["character_count"]) is int
-                and body["character_count"] == len(text)
-                and body["expected_instruction_digest"]
+                and type(finding["character_count"]) is int
+                and finding["character_count"] == len(text)
+                and finding["expected_instruction_digest"]
                 == hashlib.sha256(text.encode("utf-8")).hexdigest()
-                and re.fullmatch("[0-9a-f]{64}", body["render_input_digest"])
             ):
                 raise ValueError("full text identity")
-        elif accepted:
+        elif (
+            accepted
+            or finding["character_count"] is not None
+            or finding["expected_instruction_digest"] is not None
+        ):
             raise ValueError("missing full text")
         if accepted:
             document = task.model_dump(mode="json")
@@ -189,20 +267,49 @@ def _public_rendering(
             SceneTask.model_validate(document)
         keys = (
             "accepted",
+            "schema_valid",
+            "text",
             "character_count",
+            "max_characters",
             "program_digest",
             "render_input_digest",
             "expected_instruction_digest",
+            "actual_instruction_digest",
+            "delivered_instruction_digest",
+            "delivery_checked",
             "policy_version",
             "policy_digest",
             "renderer_version",
             "renderer_implementation_digest",
-            "execution_profile",
-            "environment",
-            "execution_package_digest",
         )
-        result = {key: body.get(key) for key in keys}
-        result["instruction"] = text
+        result = {key: finding[key] for key in keys}
+        result["code"] = (
+            finding["code"]
+            if finding["code"] in INSTRUCTION_MESSAGES or accepted
+            else "instruction_unsupported"
+        )
+        for key in (
+            "schema_version",
+            "command",
+            "runtime_version",
+            "execution_profile",
+            "installed_environment",
+            "input_environment",
+            "environment_matches_installation",
+            "input_task_sha256",
+            "package_validated",
+            "private_reference_created",
+            "server_admission",
+            "business_model_calls",
+        ):
+            result[key] = body[key]
+        # Retain the CLI's earlier text alias; only the native nested wrapper is read.
+        result.update(
+            instruction=text,
+            environment=body["input_environment"],
+            execution_package_digest=digest,
+            installation_manifest_digest=policy["installation_manifest_digest"],
+        )
         return result
     except ValidationError as exc:
         raise ScenePackageError(
@@ -215,7 +322,8 @@ def _public_rendering(
         raise ScenePackageError(
             "instruction_result_invalid",
             "runtime",
-            "Expected complete text and its exact public program/runtime identities.",
+            "Expected the registered runtime wrapper, complete public text "
+            "and exact input/policy/source identities.",
         ) from exc
 
 
@@ -260,6 +368,7 @@ def run_instruction(args: argparse.Namespace) -> dict[str, Any]:
         task, files = execution_input(source)
         digest = contents_digest(files)
         report["source_execution_package_digest"] = digest
+        report["source_structure_checked"] = True
         if (
             not math.isfinite(args.timeout_seconds)
             or not 0 < args.timeout_seconds <= 60
@@ -322,32 +431,15 @@ def run_instruction(args: argparse.Namespace) -> dict[str, Any]:
                 runtime._fail(
                     "execution_drift", "Source E changed during the final probe."
                 )
-            rendered = _public_rendering(body, task, digest)
+            rendered = _public_rendering(
+                body, task, digest, identity, files["task.json"]
+            )
             report["rendering"] = rendered
             if rendered["accepted"] is not True:
-                messages = {
-                    "scene_instruction_length_unsupported": (
-                        "Full text exceeds the registered capacity; do not truncate it."
-                    ),
-                    "scene_instruction_vision_unsupported": (
-                        "This policy does not support canonical visual instructions."
-                    ),
-                    "scene_instruction_coverage_unsupported": (
-                        "The renderer cannot fully express these bindings/conditions."
-                    ),
-                    "scene_instruction_missing_binding": (
-                        "The renderer lacks a required public scene binding."
-                    ),
-                    "scene_instruction_semantics_unsupported": (
-                        "The renderer cannot fully express this program's semantics."
-                    ),
-                }
-                code = body.get("code")
-                if not isinstance(code, str) or code not in messages:
-                    code = "instruction_unsupported"
+                code = rendered["code"]
                 runtime._fail(
                     code,
-                    messages.get(
+                    INSTRUCTION_MESSAGES.get(
                         code,
                         "The renderer does not support this complete program; "
                         "no model fallback.",

@@ -854,3 +854,49 @@ def test_receipt_manifest_schema_version_has_exact_json_type(
     report = json.loads(capsys.readouterr().out)
     assert report["issues"][0]["code"] == "runtime_report_invalid"
     assert case["private_report"].exists()
+
+
+@pytest.mark.parametrize("name", ["record-reference", "self-test"])
+def test_unregistered_observation_scope_stops_before_any_author_or_physics_dispatch(
+    runtime_case, capsys, name
+):
+    case = runtime_case
+    case["description"]["scene_authoring"][
+        "observation_policy_scope_matches_profile"
+    ] = False
+    if name == "self-test":
+        case["private"] = case["root"] / "private"
+        case["manifest"] = case["root"] / "submission.json"
+    assert main(command(case, name)) == 1
+    report = json.loads(capsys.readouterr().out)
+    assert report["issues"][0]["code"] == "scene_observation_policy_scope_unregistered"
+    assert report["capability"] == "resource_unavailable"
+    assert report["local_physics"] == "not_run"
+    assert not any(
+        "scene-record-reference" in argv or "scene-self-test" in argv
+        for _, argv, _ in case["calls"]
+    )
+    assert not case["private_report"].exists()
+
+
+@pytest.mark.parametrize("scope", [0, 1, None, "false", []])
+def test_observation_scope_descriptor_must_be_an_explicit_boolean(
+    runtime_case, capsys, scope
+):
+    case = runtime_case
+    case["description"]["scene_authoring"][
+        "observation_policy_scope_matches_profile"
+    ] = scope
+    assert main(command(case)) == 1
+    report = json.loads(capsys.readouterr().out)
+    assert report["issues"][0]["code"] == "runtime_identity_mismatch"
+    assert not case["private"].exists()
+
+
+def test_registered_scope_keeps_existing_authoring_semantics(runtime_case, capsys):
+    case = runtime_case
+    case["description"]["scene_authoring"][
+        "observation_policy_scope_matches_profile"
+    ] = True
+    assert main(command(case)) == 0
+    assert json.loads(capsys.readouterr().out)["reference_ready"] is True

@@ -235,6 +235,6 @@ testpaths = ["tests"]
 # than 70.26. That number was briefly committed here and CI rejected the very commit
 # that introduced it. The gate is not the place to find out you measured differently.
 # 82.94 measured after scene I/O and pagination regression fixes (693 tests).
-fail_under = 83.91
+fail_under = 83.95
 precision = 2
 show_missing = true

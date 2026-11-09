@@ -21,7 +21,6 @@ from openroboto.cli import main
 from openroboto.scene_instruction import instruction_bytes, prepare_execution
 from openroboto.scene_package import (
     ScenePackageError,
-    contents_digest,
     execution_input,
 )
 from tests.test_scene_authoring_bridge import command as authoring_command
@@ -49,12 +48,35 @@ def instruction_case(runtime_case, monkeypatch):
     case["description"]["scene_authoring"]["commands"].append(
         "scene-render-instruction"
     )
+    # Synthetic values in the fixed ea43315d wrapper shape, not renderer output.
+    configuration = {
+        "policy_version": "scene-instruction-admission/2",
+        "renderer": "scene-program-text/1",
+        "execution_profile": profile_ref(),
+        "max_instruction_characters": MAX_SCENE_INSTRUCTION_CHARACTERS,
+    }
+    policy = {
+        "version": configuration["policy_version"],
+        "digest": canonical_digest(configuration),
+        "renderer_version": configuration["renderer"],
+        "renderer_implementation_digest": "c" * 64,
+        "installation_manifest_digest": "d" * 64,
+        "configuration": configuration,
+    }
+    description = case["description"]["scene_authoring"]
+    description["instruction_admission_policy"] = policy
+    description["registry"]["runtime"]["instruction_admission_policy"] = policy
+    task["environment"]["digest"] = canonical_digest(description["registry"])
+    (case["execution"] / "task.json").write_text(json.dumps(task))
     typed, files = execution_input(case["execution"])
     text = 'Synthetic public text: exact "quotes", α and 0.6800000000000001.'
-    case["render_body"] = {
+    finding = {
         "accepted": True,
+        "code": "scene_instruction_rendered",
+        "schema_valid": True,
         "text": text,
         "character_count": len(text),
+        "max_characters": MAX_SCENE_INSTRUCTION_CHARACTERS,
         "expected_instruction_digest": hashlib.sha256(text.encode()).hexdigest(),
         "program_digest": canonical_digest(
             typed.task_definition.model_dump(mode="json")
@@ -63,10 +85,29 @@ def instruction_case(runtime_case, monkeypatch):
         "renderer_version": "scene-program-text/1",
         "renderer_implementation_digest": "c" * 64,
         "policy_version": "scene-instruction-admission/2",
-        "policy_digest": "d" * 64,
+        "policy_digest": policy["digest"],
+        "actual_instruction_digest": None,
+        "delivered_instruction_digest": None,
+        "delivery_checked": False,
+        "private_marker": "NEVER_PUBLISH",
+    }
+    case["finding"] = finding
+    case["render_body"] = {
+        "schema_version": 1,
+        "command": "scene-render-instruction",
+        "ok": True,
+        "capability": "instruction_render",
+        "instruction": finding,
+        "runtime_version": case["metadata"]["runtime_version"],
         "execution_profile": profile_ref(),
-        "environment": task["environment"],
-        "execution_package_digest": contents_digest(files),
+        "installed_environment": task["environment"],
+        "input_environment": task["environment"],
+        "environment_matches_installation": True,
+        "input_task_sha256": hashlib.sha256(files["task.json"]).hexdigest(),
+        "package_validated": False,
+        "private_reference_created": False,
+        "server_admission": "not_run",
+        "business_model_calls": 0,
         "private_marker": "NEVER_PUBLISH",
     }
     case["prepared"] = case["output"].parent / "NEW-E"
@@ -116,7 +157,16 @@ def test_formal_instruction_command_uses_same_runtime_and_public_text(
     }
     assert main(instruction_command(case, prepare=prepare)) == 0
     report = json.loads(capsys.readouterr().out)
-    assert report["rendering"]["instruction"] == case["render_body"]["text"]
+    assert report["rendering"]["instruction"] == case["finding"]["text"]
+    for key in (
+        "schema_valid",
+        "max_characters",
+        "actual_instruction_digest",
+        "delivered_instruction_digest",
+        "delivery_checked",
+    ):
+        assert report["rendering"][key] == case["finding"][key]
+    assert report["rendering"]["package_validated"] is False
     assert report["local_physics"] == report["server_admission"] == "not_run"
     assert report["reward_status"] == "not_evaluated"
     assert "NEVER_PUBLISH" not in json.dumps(report) + case["output"].read_text()
@@ -129,7 +179,7 @@ def test_formal_instruction_command_uses_same_runtime_and_public_text(
         assert report["reference_re_record_required"] is True
         assert (
             json.loads((case["prepared"] / "task.json").read_text())["instruction"]
-            == case["render_body"]["text"]
+            == case["finding"]["text"]
         )
         assert not (case["prepared"] / "private").exists()
     else:
@@ -175,18 +225,22 @@ def test_new_optional_command_does_not_reject_existing_authoring(
         ("program_digest", "0" * 64),
         ("render_input_digest", "invalid"),
         ("expected_instruction_digest", "0" * 64),
-        ("execution_package_digest", "0" * 64),
-        ("execution_profile", {}),
-        ("environment", {}),
         ("renderer_implementation_digest", "wrong"),
         ("policy_version", "wrong"),
+        ("policy_digest", "e" * 64),
+        ("code", "scene_instruction_consistent"),
+        ("schema_valid", False),
+        ("max_characters", True),
+        ("delivery_checked", True),
+        ("actual_instruction_digest", "a" * 64),
+        ("delivered_instruction_digest", "b" * 64),
     ],
 )
 def test_rendered_text_needs_complete_bound_identities(
     instruction_case, capsys, field, value
 ):
     case = instruction_case
-    case["render_body"][field] = value
+    case["finding"][field] = value
     assert main(instruction_command(case)) == 1
     result = json.loads(capsys.readouterr().out)
     assert result["issues"][0]["code"] == "instruction_result_invalid"
@@ -199,7 +253,8 @@ def test_renderer_errors_never_create_new_E_or_claim_physics(
 ):
     case = instruction_case
     if kind == "unsupported":
-        case["render_body"].update(
+        case["render_body"].update(ok=False, capability="unsupported")
+        case["finding"].update(
             accepted=False,
             code="scene_instruction_coverage_unsupported",
             error="NEVER_PUBLISH",
@@ -207,9 +262,9 @@ def test_renderer_errors_never_create_new_E_or_claim_physics(
         case["render_rc"] = 1
     elif kind == "long":
         length = MAX_SCENE_INSTRUCTION_CHARACTERS + 1
-        case["render_body"]["text"] = "x" * length
-        case["render_body"]["character_count"] = length
-        case["render_body"]["expected_instruction_digest"] = hashlib.sha256(
+        case["finding"]["text"] = "x" * length
+        case["finding"]["character_count"] = length
+        case["finding"]["expected_instruction_digest"] = hashlib.sha256(
             b"x" * length
         ).hexdigest()
     elif kind == "exit":
@@ -234,7 +289,8 @@ def test_public_unsupported_receipts_retain_full_text_without_truncation(
     instruction_case, capsys, kind
 ):
     case = instruction_case
-    body = case["render_body"]
+    body = case["finding"]
+    case["render_body"].update(ok=False, capability="unsupported")
     body["accepted"] = False
     case["render_rc"] = 1
     if kind == "length":
@@ -250,9 +306,8 @@ def test_public_unsupported_receipts_retain_full_text_without_truncation(
     else:
         body.update(
             text=None,
-            character_count=0,
+            character_count=None,
             expected_instruction_digest=None,
-            render_input_digest=None,
             code="NEVER_PUBLISH"
             if kind == "unknown"
             else "scene_instruction_missing_binding"
@@ -430,7 +485,7 @@ def test_new_capacity_uses_the_installed_schema_without_truncation(
 ):
     case = instruction_case
     text = "α" * length
-    case["render_body"].update(
+    case["finding"].update(
         text=text,
         character_count=length,
         expected_instruction_digest=hashlib.sha256(text.encode()).hexdigest(),
@@ -442,3 +497,57 @@ def test_new_capacity_uses_the_installed_schema_without_truncation(
         json.loads((case["prepared"] / "task.json").read_bytes())["instruction"] == text
     )
     assert report["reference_re_record_required"] is True
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("schema_version", True),
+        ("command", "scene-self-test"),
+        ("ok", False),
+        ("capability", "local_physics"),
+        ("runtime_version", "wrong"),
+        ("execution_profile", {}),
+        ("installed_environment", {}),
+        ("input_environment", {}),
+        ("environment_matches_installation", False),
+        ("input_task_sha256", "0" * 64),
+        ("package_validated", True),
+        ("private_reference_created", True),
+        ("business_model_calls", True),
+        ("server_admission", "passed"),
+        ("instruction", "NEVER_PUBLISH"),
+    ],
+)
+def test_fixed_wrapper_needs_exact_public_input_and_runtime_bindings(
+    instruction_case, capsys, field, value
+):
+    case = instruction_case
+    case["render_body"][field] = value
+    assert main(instruction_command(case)) == 1
+    result = json.loads(capsys.readouterr().out)
+    assert result["issues"][0]["code"] == "instruction_result_invalid"
+    assert not case["prepared"].exists()
+    assert "NEVER_PUBLISH" not in case["output"].read_text()
+
+
+def test_old_synthetic_flat_wrapper_is_not_a_second_protocol(instruction_case, capsys):
+    case = instruction_case
+    case["render_body"] = copy.deepcopy(case["finding"])
+    assert main(instruction_command(case)) == 1
+    result = json.loads(capsys.readouterr().out)
+    assert result["issues"][0]["code"] == "instruction_result_invalid"
+    assert not case["prepared"].exists()
+
+
+def test_render_policy_must_match_both_describe_and_registry(instruction_case, capsys):
+    case = instruction_case
+    policy = copy.deepcopy(
+        case["description"]["scene_authoring"]["instruction_admission_policy"]
+    )
+    policy["digest"] = "e" * 64
+    case["description"]["scene_authoring"]["instruction_admission_policy"] = policy
+    assert main(instruction_command(case)) == 1
+    report = json.loads(capsys.readouterr().out)
+    assert report["issues"][0]["code"] == "instruction_result_invalid"
+    assert not case["prepared"].exists()

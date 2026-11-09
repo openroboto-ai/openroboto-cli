@@ -2,6 +2,11 @@
 
 ## Unreleased — imported-scene CLI candidate (OPE-234)
 
+- Consume runtime 0.3.5's real nested instruction wrapper, including complete
+  public audit fields. Bind original task bytes, exact environments and the
+  authenticated policy/source identity; reject the earlier synthetic flat format.
+  Stop recording/self-test before dispatch when the advertised observation scope
+  is unregistered. Pure rendering grants no physics, server or reward status.
 - Add `task scene instruction` through the same runtime's optional pure renderer.
   Authors can explicitly prepare NEW E with only its instruction token changed;
   existing private roots/proofs are never copied or rebound. Fresh recording and
