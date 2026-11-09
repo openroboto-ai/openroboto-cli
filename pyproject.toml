@@ -44,10 +44,10 @@ dependencies = [
     # override is removed and the install really comes from PyPI — which is
     # release time. `tests/test_packaging.py` compares this against the version
     # actually resolved into the environment.
-    # Candidate 0.15.0 adds composed authoring; install matching local wheels for
+    # Candidate 0.17.0 adds schema-3 scenes; install the reviewed local wheel for
     # development. Its index release and regenerated lockfile are prerequisites
     # for deployment. Never invent registry URLs or bypass the exact dependency.
-    "openroboto-protocol==0.15.0",
+    "openroboto-protocol==0.17.0",
     "pyyaml>=6.0",
     # Production miner machines run 10.5.0 (the old requirements.txt pinned that
     # version). The two APIs used are private surface of the SDK:
@@ -233,6 +233,7 @@ testpaths = ["tests"]
 # ~100% covered by construction, so it reports about 12 points higher — 82.38 rather
 # than 70.26. That number was briefly committed here and CI rejected the very commit
 # that introduced it. The gate is not the place to find out you measured differently.
-fail_under = 80.04
+# 82.66 measured for the schema-3 CLI candidate (671 tests, 2026-11-09).
+fail_under = 82.66
 precision = 2
 show_missing = true

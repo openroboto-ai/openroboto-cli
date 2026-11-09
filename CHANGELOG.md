@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased — imported-scene CLI candidate (OPE-234)
+
+- Add explicit `task scene build/check` for schema-3 dual-root inputs, complete
+  dependency checks and detached protocol identities. Keep v1 defaults intact.
+- Add `submit --scene-package` using the existing gated upload/payment/retry
+  chain, with local and fixed-commit checks of both roots and exact server routing.
+- Add author-signed scene registration and separate capability/admission/reward
+  status. No private reference text is emitted in public summaries or diagnostics.
+- Diagnose the unavailable P02/P03 scene recording/self-test bridge with nonzero
+  structured results. No scene physical success is claimed.
+- Pin candidate protocol 0.17.0. Its index release and formal lock integration
+  remain release gates; local reviewed-wheel installs use normal resolution.
+
 Every entry answers one question before it lists anything: **does a miner have to
 change something, and what breaks if they do not?** A diff summary without "who
 has to act" is not usable by the people who installed this.

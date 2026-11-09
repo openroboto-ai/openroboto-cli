@@ -25,6 +25,7 @@ the install shape; it does not make the version pip-installable from PyPI.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import pathlib
 import re
@@ -168,6 +169,9 @@ def main() -> int:
     parser.add_argument("--protocol-wheel", required=True)
     parser.add_argument("--package", default="", help="task package for `task check`")
     parser.add_argument(
+        "--scene-package", default="", help="dual-root input for scene build/check"
+    )
+    parser.add_argument(
         "--config", default="", help="miner.yaml for `task status --probe`"
     )
     parser.add_argument(
@@ -251,7 +255,46 @@ def main() -> int:
             "pin_in_temp_copy": new_pin,
             "capabilities": caps,
             "cli_version": version_line,
+            "protocol_wheel_sha256": hashlib.sha256(
+                protocol_wheel.read_bytes()
+            ).hexdigest(),
+            "cli_wheel_sha256": hashlib.sha256(cli_wheels[0].read_bytes()).hexdigest(),
         }
+
+        if args.scene_package:
+            source = pathlib.Path(args.scene_package).resolve()
+            built = temp / "scene-submission"
+            summary["scene_build"] = json.loads(
+                run(
+                    [
+                        str(cli),
+                        "task",
+                        "scene",
+                        "build",
+                        "--execution",
+                        str(source / "execution"),
+                        "--private",
+                        str(source / "private"),
+                        "--output",
+                        str(built),
+                    ]
+                )
+            )
+            checked = json.loads(run([str(cli), "task", "scene", "check", str(built)]))
+            summary["scene_check"] = checked
+            if not checked["ok"] or checked["scope"] != "structure_only":
+                raise SystemExit(
+                    "Scene check did not establish structure-only validity"
+                )
+            for name, field in (
+                ("execution", "execution_package_digest"),
+                ("private", "private_package_digest"),
+            ):
+                actual = shared_digest(
+                    python, str(built / name), args.shared_module, args.shared_function
+                )
+                if actual != checked["submission"][field]:
+                    raise SystemExit(f"Scene {name} digest disagrees with the protocol")
 
         if args.package:
             check_raw = run([str(cli), "task", "check", args.package, "--json"])

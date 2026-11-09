@@ -301,8 +301,9 @@ readiness.
 
 ## 8. Composed tabletop development candidate
 
-The unpublished CLI 1.8.0, protocol 0.15.0 and CPU task runtime 0.2.0 must be
-installed from the same reviewed wheel set. Consumer index lockfiles cannot be
+The unpublished CLI 1.8.0 now consumes protocol 0.17.0, which retains the
+controlled-v2 contract introduced in 0.15.0. Use the matching reviewed CPU task
+runtime for v1/v2 authoring. Consumer index lockfiles cannot be
 regenerated against an unpublished protocol version. Do not deploy this checkout
 with a stale lockfile or present a source-path development run as a cold install.
 
@@ -349,6 +350,120 @@ Panda. Full physical robustness, all supported combinations and remote dev
 submission are pending. Importing arbitrary author-owned scenes/assets, robot
 adapters or deformable simulation needs a separate validated capability path;
 renaming a primitive or loading a mesh does not establish that capability.
+
+## 9. Author-owned scenes (schema 3)
+
+This is an unpublished development path. The protocol input is commit
+`aea37aa1f22683acedb8656decb3096229ea001b`, version `0.17.0`, task schema 3,
+execution contract 3 and `panda-open-scene-v1@2.0.0` with profile digest
+`052ede59310a10eecdaefb43584f06340bc3ad461dbca8579cdb23b8ec4ad3d5`.
+The reviewed final protocol wheel SHA-256 is
+`c1b249e59cda539f175e7feb21b4057dc0da2d68138b01e74a7d3a94f68a3a33`.
+Install that wheel and this CLI wheel together using normal resolution. The
+registry lock is still the released baseline; an index-only install and
+`uv sync --locked` are blocked until the authorized protocol release and lock
+integration. Do not use a source-path override or `--no-deps` as install evidence.
+
+Prepare a materialized execution directory containing the complete schema-3
+`task.json`, root-relative MJCF, meshes, textures and includes. Use the protocol's
+exported schema and imported-scene specification. Every transitive dependency
+needs its actual size, SHA-256, direct `requires` edges, source, fixed source
+revision and license. No dependency is downloaded by the CLI. Source URLs are
+provenance, never runtime fetches. Object/part/joint/frame, robot/control,
+environment, observation, resource, initial-state and checker bindings must all
+be explicit. A primitive renamed as an imported object is not physical support.
+
+Author `public_summary` explicitly in `task.json`. Do not put references, solver
+text, raw checker diagnostics or credentials there. The CLI never derives it
+from the private root or instruction. Keep local solver scripts and reports
+outside both roots. Gated HF repositories still expose filenames, sizes and
+hashes; choose neutral filenames. The CLI refuses `README.md` in scene inputs
+because model-card content may bypass HF gating.
+
+```bash
+# These commands require only the lightweight CLI, not MuJoCo.
+openroboto task catalog --include-development --json
+openroboto task scene build --execution ./my-execution \
+  --reference ./my-private-reference.json --output ./my-submission
+openroboto task scene check ./my-submission
+```
+
+Alternatively pass `--private ./my-private-tree` instead of `--reference` to
+retain multiple private materials. That input needs a protocol
+`reference-binding.json` naming its schema-1 reference JSON files. Build copies
+all files and rebinds the private reference to the measured execution bytes and
+normalized execution-contract digest. It writes `submission.json` outside the
+two roots, refuses existing output and retains failed builds. Build is
+materialization and structural validation; native compilation belongs to the
+same separately installed worker runtime used for execution.
+
+Every regular file within each root, including stray files, counts in its
+unchanged protocol `package_digest`. The detached `submission_digest` binds
+execution digest E and private digest P. It never replaces the historical
+meaning of `package_digest`. Edit either root only by rebuilding a new submission.
+The check rejects missing/changed dependencies, undeclared XML resources, unsafe
+paths, symlinks, resource overflow, invalid public metadata and stale bindings.
+Its JSON says `scope=structure_only`, `local_physics=not_run`,
+`server_admission=not_run`, `reward_status=not_evaluated`.
+
+```bash
+openroboto task scene record-reference ./my-submission \
+  --script ./solve.py --runtime-python /path/to/runtime/bin/python \
+  --output ./record-diagnostic.json
+openroboto task scene self-test ./my-submission \
+  --runtime-python /path/to/runtime/bin/python --output ./self-test-diagnostic.json
+```
+
+**Current limitation:** the fixed P01 importer `ed9dcc37` (following `05670d4c`)
+provides native scene
+import, not a schema-3 authoring/replay API with private reference output. These
+two commands perform a bounded runtime metadata probe and then return nonzero
+with `scene_authoring_unavailable`, `resource_unavailable` and all execution
+gates `not_run`. They do not execute `solve.py`, run physics, produce references,
+or call a model. Retain the report and install the future reviewed P02/P03 runtime
+and its matching CLI bridge before treating recording/self-test as available.
+Running the old v1 recorder on `execution/` would put private references in the
+wrong root and is not a workaround.
+
+Once the operator has authorized a scene season and verified the exact server
+runtime route, the submission transport remains the existing chain/payment
+pipeline:
+
+```bash
+openroboto submit --config miner.yaml --scene-package ./my-submission
+openroboto task status --config miner.yaml
+# Use the backend task id above, not task.json's author-defined task id.
+openroboto task scene register BACKEND_TASK_ID --package ./my-submission \
+  --config miner.yaml
+openroboto task scene status BACKEND_TASK_ID --config miner.yaml
+```
+
+Before upload the CLI checks both local roots, the exact scene season, the
+server's verified environment/robot/control/observation/resource route, and the
+season's `params.hf.grant_to`. The existing manual gated access checks run before
+any content is uploaded. Before payment it downloads the full immutable HF
+commit, verifies both roots against the original identity, checks the live route
+again and uses the existing contributor binding, deduplication, access, fee
+confirmation and burn-window rules. Failed infrastructure checks do not become
+author/physical rejection. Retry `submit` in the same workspace; uploaded content
+and a paid checkpoint are reused. `--force` still pays again: it is not a retry.
+
+Chain ingestion and scene registration are separate steps. Registration finds
+the task through the wallet-signed author endpoint, downloads its exact
+`repo@commit` and signs the backend's canonical registration message binding that
+transport and all three digests. A MINER key is still required. Pending ingestion,
+storage errors or registration retries never require another payment. Keep the
+original local submission for this step. The backend distributes roles: author,
+assigned admission worker and reviewer can access both roots; assigned evaluation
+workers receive only execution files; model/tool processes and public visitors
+receive neither root. The CLI does not grant worker roles or claim process
+isolation was verified locally.
+
+Status reports the server's `current_capability`, physical `result.admission` and
+`result.reward_status` separately. A local static check, successful upload,
+registration, `supported` route, or `admitted` result is not itself reward
+eligibility. Review and server evidence remain required. This candidate has no
+new real scene physical success, server admission or eligible task evidence.
 
 ## Related documents
 

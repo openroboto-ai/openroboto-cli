@@ -2454,10 +2454,10 @@ def test_an_account_that_is_already_on_the_list_is_success(
             return SimpleNamespace(private=False, gated="manual")
 
         def list_accepted_access_requests(self, repo_id: str) -> list[Any]:
-            from huggingface_hub.hf_api import AccessRequest
+            from tests.hf_access_requests import access_request
 
             return [
-                AccessRequest(
+                access_request(
                     username=GRANT_TO,
                     fullname="Test account",
                     email=None,

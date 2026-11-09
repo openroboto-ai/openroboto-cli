@@ -15,10 +15,10 @@ import sys
 from collections.abc import Mapping
 from typing import Any
 
+from openroboto_protocol.scene_contract import task_profile_catalog
 from openroboto_protocol.task_contract import TaskContractError, execution_profile_ref
 from openroboto_protocol.task_profiles import (
     parse_public_summary,
-    task_profile_catalog,
     validate_task_document,
 )
 
@@ -118,6 +118,15 @@ def run_catalog(args: argparse.Namespace) -> int:
     else:
         for profile in profiles:
             ref = profile["execution_profile"]
+            if ref["id"] == "panda-open-scene-v1":
+                say(f"Imported scenes ({ref['id']} @ {ref['version']})")
+                say("Development contract only; server support is not established.")
+                say(
+                    f"Robot: {profile['robot']}; "
+                    f"action dimensions: {profile['action_dimensions']}"
+                )
+                say(f"Profile digest: {ref['digest']}")
+                continue
             say(f"{profile['title']} ({ref['id']} @ {ref['version']})")
             say(profile["description"])
             say(f"Robot: {profile['robot']}")
@@ -140,6 +149,11 @@ def _read_json(path: str) -> Any:
 
 def _definition(path: str) -> dict[str, Any]:
     value = _read_json(path)
+    if isinstance(value, Mapping) and value.get("schema_version") == 3:
+        raise ValueError(
+            "Use `openroboto task scene build --execution <directory> "
+            "--private <directory> --output <new-directory>` for schema-3 scenes."
+        )
     if (
         not isinstance(value, Mapping)
         or type(value.get("schema_version")) is not int
@@ -323,6 +337,7 @@ def run_reference(args: argparse.Namespace) -> int:
         package = pathlib.Path(args.package).expanduser().resolve()
         if not package.is_dir():
             raise ValueError("Select an existing task package directory.")
+        _legacy_package_only(package, "record-reference")
         command = ["record-reference", str(package)]
         if args.example:
             command.append("--example")
@@ -345,6 +360,7 @@ def run_self_test(args: argparse.Namespace) -> int:
         package = pathlib.Path(args.package).expanduser().resolve()
         if not package.is_dir():
             raise ValueError("Select an existing task package directory.")
+        _legacy_package_only(package, "self-test")
         command = ["self-test", str(package)]
         if args.output:
             output = _external_file(args.output, package, must_exist=False)
@@ -357,3 +373,19 @@ def run_self_test(args: argparse.Namespace) -> int:
         fail(str(exc))
         return 1
     return _runtime(args, command)
+
+
+def _legacy_package_only(package: pathlib.Path, command: str) -> None:
+    """Never send a scene execution root to a recorder that writes v1 references."""
+    scene = (package / "execution/task.json").is_file()
+    if (package / "task.json").is_file():
+        document = _read_json(str(package / "task.json"))
+        scene = scene or (
+            isinstance(document, Mapping) and document.get("schema_version") == 3
+        )
+    if scene:
+        raise ValueError(
+            f"Use `openroboto task scene {command} <dual-root-package> "
+            "--output <external-report>` for schema-3 references. "
+            "The legacy recorder must not write references into execution/."
+        )

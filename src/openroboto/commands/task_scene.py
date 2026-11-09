@@ -1,0 +1,343 @@
+"""Explicit scene authoring and registration, preserving existing task defaults."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import pathlib
+import subprocess
+import sys
+import tempfile
+from typing import Any
+
+from openroboto.backend_api import (
+    BackendError,
+    fetch_my_tasks,
+    fetch_task_access_message,
+    miner_key,
+)
+from openroboto.chain import hotkey_signature, open_wallet
+from openroboto.config import Settings
+from openroboto.console import say
+from openroboto.scene_api import (
+    fetch_scene_progress,
+    register_scene,
+    registration_message,
+)
+from openroboto.scene_package import (
+    ScenePackageError,
+    build_submission,
+    load_submission,
+)
+from openroboto.task_package import PackageFetchError, fetch_package
+
+
+def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    parser = subparsers.add_parser("scene", help="opt-in schema-3 scene submissions")
+    commands = parser.add_subparsers(dest="scene_command", required=True)
+    build = commands.add_parser(
+        "build", help="materialize and bind both roots (structure only)"
+    )
+    build.add_argument("--execution", required=True, type=pathlib.Path)
+    build.add_argument("--output", required=True, type=pathlib.Path)
+    private = build.add_mutually_exclusive_group(required=True)
+    private.add_argument("--reference", type=pathlib.Path)
+    private.add_argument("--private", type=pathlib.Path)
+    build.set_defaults(handler=run_build)
+    check = commands.add_parser("check", help="check dependencies and joint identity")
+    check.add_argument("package", nargs="?", default=".")
+    check.add_argument("--repo", default="")
+    check.add_argument("--commit", default="")
+    check.add_argument("--config", default="miner.yaml")
+    check.add_argument("--expect-submission-digest", default="")
+    check.set_defaults(handler=run_check)
+    for name in ("record-reference", "self-test"):
+        command = commands.add_parser(
+            name, help="check the installed scene author runtime"
+        )
+        command.add_argument("package")
+        command.add_argument("--runtime-python", default=sys.executable)
+        command.add_argument(
+            "--output",
+            required=True,
+            type=pathlib.Path,
+            help="new diagnostic report outside both package roots",
+        )
+        if name == "record-reference":
+            command.add_argument(
+                "--script",
+                required=True,
+                type=pathlib.Path,
+                help="local author script, kept outside both roots",
+            )
+        command.set_defaults(handler=run_runtime)
+    register = commands.add_parser(
+        "register", help="bind an announced task to both roots"
+    )
+    register.add_argument("task_id", help="backend task id from task status")
+    register.add_argument("--package", required=True)
+    register.add_argument("--config", default="miner.yaml")
+    register.set_defaults(handler=run_register)
+    status = commands.add_parser(
+        "status", help="read server capability/admission/reward separately"
+    )
+    status.add_argument("task_id")
+    status.add_argument("--config", default="miner.yaml")
+    status.set_defaults(handler=run_status)
+
+
+def _emit(value: dict[str, Any]) -> None:
+    say(json.dumps(value, sort_keys=True, indent=2, allow_nan=False))
+
+
+def _error(exc: Exception) -> int:
+    finding = (
+        exc.finding
+        if isinstance(exc, ScenePackageError)
+        else {
+            "code": "scene_io_error",
+            "path": "package",
+            "message": "Check file permissions and available disk space; retain failed "
+            "inputs.",
+        }
+    )
+    _emit(
+        {
+            "ok": False,
+            "scope": "structure_only",
+            "issues": [finding],
+            "local_physics": "not_run",
+            "server_admission": "not_run",
+            "reward_status": "not_evaluated",
+        }
+    )
+    return 1
+
+
+def run_build(args: argparse.Namespace) -> int:
+    try:
+        result = build_submission(
+            args.execution.expanduser(),
+            args.output.expanduser(),
+            reference=args.reference.expanduser() if args.reference else None,
+            private=args.private.expanduser() if args.private else None,
+        )
+    except (ScenePackageError, OSError) as exc:
+        return _error(exc)
+    _emit(result.report())
+    return 0
+
+
+def run_check(args: argparse.Namespace) -> int:
+    try:
+        if bool(args.repo) != bool(args.commit):
+            raise ScenePackageError(
+                "locator_incomplete", "repo", "Supply --repo and --commit together."
+            )
+        with tempfile.TemporaryDirectory(prefix="openroboto-scene-check-") as cache:
+            root = args.package
+            if args.repo:
+                settings = (
+                    Settings.load(args.config)
+                    if pathlib.Path(args.config).is_file()
+                    else Settings()
+                )
+                root = str(
+                    fetch_package(
+                        args.repo, args.commit, token=settings.hf_token, cache_dir=cache
+                    )
+                )
+            result = load_submission(root)
+            if (
+                args.expect_submission_digest
+                and args.expect_submission_digest != result.manifest.submission_digest
+            ):
+                raise ScenePackageError(
+                    "submission_drift",
+                    "submission_digest",
+                    "Compare both roots with the expected identity.",
+                )
+            _emit(result.report())
+    except PackageFetchError:
+        return _error(
+            ScenePackageError(
+                "storage_unavailable",
+                "repo",
+                "Check repository permissions, token and fixed 40-character commit;"
+                " retry without paying.",
+            )
+        )
+    except (ScenePackageError, OSError) as exc:
+        return _error(exc)
+    return 0
+
+
+def run_runtime(args: argparse.Namespace) -> int:
+    """Diagnose the missing P02/P03 bridge; never run a v1 solver on schema 3.
+
+    The fixed P01 exposes import/compile, not an isolated scene recording or
+    admission API. Describe is a bounded metadata probe, not a physics attempt.
+    Keep this gate closed until that runtime has a reviewed authoring API.
+    """
+    try:
+        package = pathlib.Path(args.package).expanduser().resolve()
+        load_submission(package)
+        output = args.output.expanduser().resolve()
+        if output.exists() or output.is_relative_to(package):
+            raise ScenePackageError(
+                "report_path",
+                "output",
+                "Choose a new report outside the submission tree.",
+            )
+        script = getattr(args, "script", None)
+        if script is not None:
+            script = script.expanduser().resolve()
+            if not script.is_file() or script.is_relative_to(package):
+                raise ScenePackageError(
+                    "script_path",
+                    "script",
+                    "Select an existing local script outside both roots.",
+                )
+        code = "scene_authoring_unavailable"
+        probe = "not_started"
+        try:
+            completed = subprocess.run(
+                [
+                    str(pathlib.Path(args.runtime_python).expanduser()),
+                    "-m",
+                    "task_source.authoring",
+                    "describe",
+                    "--include-development",
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=10,
+                check=False,
+            )
+            probe = (
+                "metadata_available"
+                if completed.returncode == 0
+                else "module_unavailable"
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            probe = "runtime_unavailable"
+        report = {
+            "ok": False,
+            "capability": "resource_unavailable",
+            "issues": [
+                {
+                    "code": code,
+                    "path": "runtime",
+                    "message": "Install the reviewed schema-3 P02/P03 scene "
+                    "authoring runtime and "
+                    "matching CLI bridge. The v1 recorder cannot write private scene "
+                    "references.",
+                }
+            ],
+            "runtime_probe": probe,
+            "local_physics": "not_run",
+            "server_admission": "not_run",
+            "reward_status": "not_evaluated",
+        }
+        # Never relay raw runtime output: it can contain private diagnostics.
+        with output.open("x", encoding="utf-8") as stream:
+            json.dump(report, stream, sort_keys=True, indent=2)
+            stream.write("\n")
+        _emit(report)
+    except (ScenePackageError, OSError) as exc:
+        return _error(exc)
+    return 1
+
+
+def _backend_error(exc: BackendError) -> int:
+    _emit(
+        {
+            "ok": False,
+            "code": exc.code or "BACKEND_UNAVAILABLE",
+            "retryable": exc.retryable,
+            "message": "Check scene routes, the MINER key and the author wallet. Retry "
+            "this command without paying again.",
+        }
+    )
+    return 1
+
+
+def run_register(args: argparse.Namespace) -> int:
+    try:
+        local = load_submission(args.package)
+        settings = Settings.load(args.config)
+        wallet = open_wallet(settings)
+        hotkey = str(wallet.hotkey.ss58_address)
+        if settings.hotkey_ss58 and settings.hotkey_ss58 != hotkey:
+            raise ScenePackageError(
+                "wallet_mismatch",
+                "config",
+                "Use the wallet holding subnet.hotkey_ss58, then retry "
+                "registration without paying again.",
+            )
+        key = miner_key(settings)
+        message = fetch_task_access_message(settings.backend_url, hotkey)
+        tasks = fetch_my_tasks(
+            settings.backend_url,
+            hotkey=hotkey,
+            signature=hotkey_signature(wallet, message.encode()),
+            miner_key=key,
+            limit=100,
+        )
+        row = next((r for r in tasks.data if r.task_id == args.task_id), None)
+        if row is None:
+            raise ScenePackageError(
+                "task_not_found",
+                "task_id",
+                "Wait for chain ingestion, run task status with this wallet, then "
+                "register the matching backend task id. Do not pay again.",
+            )
+        with tempfile.TemporaryDirectory(prefix="openroboto-scene-register-") as cache:
+            root = fetch_package(
+                row.package_repo,
+                row.package_commit,
+                token=settings.hf_token,
+                cache_dir=cache,
+            )
+            remote = load_submission(root)
+        if remote.manifest != local.manifest:
+            raise ScenePackageError(
+                "submission_drift",
+                "submission",
+                "The announced repo@commit differs from this local submission. "
+                "Select its original unchanged bytes; do not pay again.",
+            )
+        signature = hotkey_signature(
+            wallet,
+            registration_message(
+                row.task_id, row.package_repo, row.package_commit, local.manifest
+            ),
+        )
+        result = register_scene(
+            settings.backend_url, row.task_id, local.manifest, signature, key
+        )
+        _emit(result.model_dump(mode="json"))
+    except BackendError as exc:
+        return _backend_error(exc)
+    except PackageFetchError:
+        return _error(
+            ScenePackageError(
+                "storage_unavailable",
+                "repo",
+                "Restore access to the announced fixed revision and retry "
+                "registration without paying again.",
+            )
+        )
+    except (ScenePackageError, OSError) as exc:
+        return _error(exc)
+    return 0
+
+
+def run_status(args: argparse.Namespace) -> int:
+    try:
+        settings = Settings.load(args.config)
+        result = fetch_scene_progress(settings.backend_url, args.task_id)
+        _emit(result.model_dump(mode="json"))
+    except BackendError as exc:
+        return _backend_error(exc)
+    return 0
