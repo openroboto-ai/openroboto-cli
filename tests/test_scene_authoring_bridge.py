@@ -893,10 +893,20 @@ def test_observation_scope_descriptor_must_be_an_explicit_boolean(
     assert not case["private"].exists()
 
 
-def test_registered_scope_keeps_existing_authoring_semantics(runtime_case, capsys):
+@pytest.mark.parametrize("name", ["record-reference", "self-test"])
+def test_registered_scope_keeps_existing_authoring_semantics(
+    runtime_case, capsys, name
+):
     case = runtime_case
     case["description"]["scene_authoring"][
         "observation_policy_scope_matches_profile"
     ] = True
-    assert main(command(case)) == 0
-    assert json.loads(capsys.readouterr().out)["reference_ready"] is True
+    if name == "self-test":
+        case["private"] = case["root"] / "private"
+        case["manifest"] = case["root"] / "submission.json"
+    assert main(command(case, name)) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert (
+        result["reference_ready" if name == "record-reference" else "accepted"] is True
+    )
+    assert any("scene-" + name in argv for _, argv, _ in case["calls"])
