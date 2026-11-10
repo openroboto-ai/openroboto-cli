@@ -44,10 +44,10 @@ dependencies = [
     # override is removed and the install really comes from PyPI — which is
     # release time. `tests/test_packaging.py` compares this against the version
     # actually resolved into the environment.
-    # Candidate 0.18.0 binds scene instruction capacity to profile 2.1.0;
-    # install the reviewed local wheel for development. Its index release and
-    # regenerated lockfile are prerequisites for deployment. Never invent
-    # registry URLs or bypass the exact dependency.
+    # 0.18.0 binds scene instruction capacity to profile 2.1.0. A protocol tag
+    # alone is not index availability. Regenerate the consumer lock through
+    # normal resolution after its actual release; local-wheel development is
+    # separate evidence. Never invent registry URLs or bypass this exact pin.
     "openroboto-protocol==0.18.0",
     "pyyaml>=6.0",
     # Production miner machines run 10.5.0 (the old requirements.txt pinned that

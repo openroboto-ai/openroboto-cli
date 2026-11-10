@@ -193,18 +193,51 @@ requires Isaac Sim 5.1 and an A100.
 
 ## 5. Requirement on the protocol release
 
-Protocol 0.13.0 is the published baseline for task commitments and shared
-package digests. The new restricted authoring commands require protocol 0.14.0.
-Protocol 0.14.0 is published on PyPI and this checkout has a real registry lock.
-CLI 1.7.0 and the separate simulator runtime remain review candidates. Installing
-the CLI candidate wheel resolves the exact published protocol normally. No local
-protocol copy, invented registry entry or editable dependency override is used.
+This checkout declares CLI **1.8.0** and exactly **openroboto-protocol==0.18.0**.
+The normal consumer path must resolve that release from the official index. A
+protocol merge, tag or successful build does not establish index availability.
+The consumer lock must name CLI 1.8.0, protocol 0.18.0 and the same exact metadata
+requirement, with actual published URLs and hashes. A retained 1.7.2/0.14.0 lock
+cannot be used to release this checkout.
+
+Once protocol 0.18.0 is actually available, regenerate the lock with the normal
+resolver, then verify locked sync, CI and a clean wheel installation. Until that
+gate passes, index-only installation is blocked. Do not edit lock entries by hand,
+override the dependency, skip dependency resolution or substitute a local wheel
+for formal index evidence. CLI merge/tag/publication needs separate authorization.
+
+Historical baseline: CLI 1.7.0 used published protocol 0.14.0 and its registry lock;
+protocol 0.13.0 introduced task commitments/shared package digests. These statements
+describe the earlier release evidence, not this checkout's consumer requirements.
 
 ## 6. Normal-install verification
 
-A `PYTHONPATH` splice is component verification, not proof that a miner can
-`pip install` and use the task commands. Once a candidate protocol wheel exists,
-verify the real install shape in a clean venv:
+A `PYTHONPATH` splice does not establish that a miner can install this release.
+After the index gate in section 5, verify the actual consumer through normal
+resolution, using the repository's existing CI commands:
+
+```bash
+uv lock
+uv sync --locked
+bash scripts/lint.sh
+uv run coverage run --source=src -m pytest -q --junitxml=pytest-report.xml
+uv run coverage report
+uv build
+# Use a new, unused environment; install the built wheel with all dependencies.
+uv venv /tmp/openroboto-consumer-new --python 3.11
+uv pip install --python /tmp/openroboto-consumer-new/bin/python dist/openroboto-1.8.0-py3-none-any.whl
+uv pip check --python /tmp/openroboto-consumer-new/bin/python
+/tmp/openroboto-consumer-new/bin/openroboto --version
+/tmp/openroboto-consumer-new/bin/openroboto task scene --help
+```
+
+CI also audits skips and wheel contents. Retain raw results and published protocol
+artifact hashes; the release build's actual bytes need not equal a local candidate
+wheel. The CLI environment does not install a simulator runtime. Installed S0
+checks may use registry/describe/pure render/NEW E only; actual record/self-test
+requires an independently approved trial plan and the final joint runtime tuple.
+
+Historical explicit-wheel development verification used the following helper:
 
 ```bash
 python scripts/verify_task_cli_install.py \
@@ -216,11 +249,12 @@ python scripts/verify_task_cli_install.py \
   --run-id <operator-run-id>
 ```
 
-The script copies the working tree to a temporary directory, rewrites the
+That historical helper copies the working tree to a temporary directory, rewrites the
 protocol pin **only in that copy** to the candidate wheel's version, builds the
 CLI wheel, creates a fresh venv, installs both wheels with normal dependency
 resolution, and runs the installed `openroboto` binary without `PYTHONPATH`.
-It checks `Track.TASK`, `AXIS_LAYOUT`, the package digest, the live `/healthz`
+It is not the formal index/lock verification above. It checks `Track.TASK`,
+`AXIS_LAYOUT`, the package digest, the live `/healthz`
 + `/readyz` probe, and (with `--status-config`) a signed `tasks/mine` read.
 
 `--shared-module` / `--shared-function` (default
@@ -301,11 +335,11 @@ readiness.
 
 ## 8. Composed tabletop development candidate
 
-The unpublished CLI 1.8.0 now consumes protocol 0.18.0, which retains the
-controlled-v2 contract introduced in 0.15.0. Use the matching reviewed CPU task
-runtime for v1/v2 authoring. Consumer index lockfiles cannot be
-regenerated against an unpublished protocol version. Do not deploy this checkout
-with a stale lockfile or present a source-path development run as a cold install.
+CLI 1.8.0 requires protocol 0.18.0, which retains the controlled-v2 contract
+introduced in 0.15.0. Use the matching reviewed CPU task runtime for v1/v2
+authoring. Section 5 describes the current consumer release gate; regenerate the
+index lock only after the exact protocol release is available. Do not deploy a
+stale lockfile or present a source-path development run as a cold install.
 
 ```bash
 openroboto task catalog --include-development --json
@@ -353,11 +387,11 @@ renaming a primitive or loading a mesh does not establish that capability.
 
 ## 9. Author-owned scenes (schema 3)
 
-This is an unpublished development path. The protocol input is commit
+This scene capability remains a development path. The reviewed protocol input is commit
 `ea476625c7f84e4ce8fbd9fed4e56ac001c01109`, version `0.18.0`, task schema 3,
 execution contract 3 and `panda-open-scene-v1@2.1.0` with profile digest
 `9badf61d742ed5787e7af4ad19adc90b616147ee4c62159915bddeff53f9a1a2`.
-The reviewed final protocol wheel SHA-256 is
+The reviewed local protocol candidate wheel SHA-256 is
 `f2b59b83c3ac561b41bcd6b3ddf359406dd74cae9fb37198b84be75931ce63b8`.
 This candidate gives SceneTask.instruction its own 16384 Unicode code point
 capacity, bound into the new profile. Other text fields retain their old limits;
@@ -366,10 +400,11 @@ Previous unpublished scene profile 2.0 packages remain reproducible with their
 original 0.17.1 wheel. They are explicitly rejected by this reader, even below
 1000 characters. There is no alias or in-place migration: a new profile/runtime
 requires deliberately authored NEW E and fresh P/manifest/proof.
-Install that wheel and this CLI wheel together using normal resolution. The
-registry lock is still the released baseline; an index-only install and
-`uv sync --locked` are blocked until the authorized protocol release and lock
-integration. Do not use a source-path override or `--no-deps` as install evidence.
+That candidate wheel retains its original evidence. Formal consumers use the
+actual index release and regenerated lock from sections 5–6; a tag or local wheel
+does not close that gate. Do not use source-path overrides or skipped dependencies
+as install evidence. Keep the protocol release artifact hash separate from this
+local candidate hash.
 
 Prepare a materialized execution directory containing the complete schema-3
 `task.json`, root-relative MJCF, meshes, textures and includes. Use the protocol's
@@ -463,13 +498,15 @@ Protocol 0.18.0/profile 2.1 uses the registered 16384-code-point capacity and
 scene-instruction-admission/2; the renderer remains scene-program-text/1.
 The CLI never changes schema capacity. Previous 0.17.1/profile 2.0 and its
 1000-character policy remain historical candidates, with their original results.
-The current fixed authoring candidate is runtime **0.3.6**, validator commit
+The installed S0 rendering evidence uses runtime **0.3.6**, validator commit
 `32de3755bfb0db7b6e431fd016cb54ad87cacfcd`. Its wheel SHA-256 is
 `39b53a3d4b6e01d5725aa71565bd1e6427af66c0c80e504224252c6526e76016`.
 Its exact environment is `ope231-scene-runtime-0.3.6-r1`, digest
 `a2932709e57e4532026778388dd8e433f0b46ac18ade0e67fa8ca839355bd2a9`,
-with harness `26e7a2e5d4b67e86c197f36cc79723b71f87bebc`. Select its matching
-runtime interpreter explicitly and author NEW E using its describe refs.
+with harness `26e7a2e5d4b67e86c197f36cc79723b71f87bebc`. That tuple is retained
+for its own S0 evidence; it is not the final jointly frozen authoring runtime.
+Select a matching runtime interpreter explicitly and author NEW E using its
+describe refs.
 Neither instruction preparation nor self-test upgrades old environment/agent
 refs or rebinds earlier P/proof.
 
@@ -478,8 +515,18 @@ describe reports `observation_policy_scope_matches_profile=true`. That only
 allows the remaining checks to proceed. It is not a physical reference,
 complete scene-family validation, server admission or reward result. Actual
 record/self-test still requires the separately registered local trial plan.
-The two formal worker callbacks and registered isolated execution gateway/dev
-integration remain pending; pure rendering does not close those gates.
+The final P02/P03/P08 runtime/environment/authority tuple and registered isolation
+gateway/dev integration remain pending. Pure rendering does not close those gates.
+
+The later runtime **0.3.7** / validator
+`f808a9d1aa8b4ec504386acc08dd10f2a060f4c0` is a source/API checkpoint only. Its
+environment is `ope231-scene-runtime-0.3.7-r1`, digest
+`baa9477eb47f6261f885e8da2d23ba9e0117eaf2e1e33c55b92967c86a203fd3`.
+It adds admission policy discovery and a typed `run_scene_admission` requiring
+registered context and verified private reference. It still advertises
+`server_admission=unregistered`; execution remains unavailable without the
+reviewed A gateway/authority. No new physical CLI result or final joint freeze is
+claimed for it. Do not relabel earlier E/P/proofs or select it as a final runtime.
 
 Historical runtime 0.3.5 supports rendering but reports scope=false. Its
 `scene_observation_policy_scope_unregistered/resource_unavailable` results remain

@@ -2,10 +2,11 @@
 
 ## Unreleased — imported-scene CLI candidate (OPE-234)
 
-- Update the fixed authoring reference to runtime 0.3.6 with its exact new
-  environment/harness and authenticated observation policy scope. The wrapper
-  is unchanged; existing private proofs cannot be relabeled. Scope registration
-  grants no physical, server or reward result. Retain 0.3.5's blocked history.
+- Retain runtime 0.3.6 as the verified S0 rendering reference, with its exact
+  environment/harness and authenticated observation policy scope. Runtime 0.3.7
+  is a source/API checkpoint, not the final joint runtime freeze. Neither version
+  grants physical, server or reward acceptance; existing private proofs cannot
+  be relabeled. Final authoring validation must use the separately frozen tuple.
 - Consume runtime 0.3.5's real nested instruction wrapper, including complete
   public audit fields. Bind original task bytes, exact environments and the
   authenticated policy/source identity; reject the earlier synthetic flat format.
@@ -34,11 +35,12 @@
 - Verify exact runtime/schema/profile/environment/agent identities and E/P/joint
   before execution, bound subprocess time/output, and project private diagnostics
   into safe public reports. Physical acceptance and server/reward gates stay separate.
-- Pin candidate protocol 0.18.0/profile 2.1 with a separately bound 16384-code-point
+- Require protocol 0.18.0/profile 2.1 with a separately bound 16384-code-point
   scene instruction capacity. Previous unpublished scene profile 2.0 packages
   require their original 0.17.1 reader; they are rejected without relabeling here.
-  V1/v2 interfaces remain unchanged. Its index release and formal lock
-  integration remain release gates; local reviewed-wheel installs use normal resolution.
+  V1/v2 interfaces remain unchanged. A pushed protocol tag is not index availability:
+  normal index resolution, a regenerated consumer lock and installed-package CI
+  remain CLI release gates. Reviewed local-wheel evidence retains its own identity.
 
 Every entry answers one question before it lists anything: **does a miner have to
 change something, and what breaks if they do not?** A diff summary without "who
@@ -46,13 +48,26 @@ has to act" is not usable by the people who installed this.
 
 ## 1.8.0 (unpublished candidate)
 
-Existing v1 authors keep the same defaults and commands. Composed v2 authoring
-requires explicit `task create --profile panda-tabletop-v2`, protocol 0.15.0 and
-the matching separately installed runtime 0.2.0. The catalog exposes development
-entries only with `--include-development`. Exact profile/checker dispatch rejects
-mismatched package data before submission; no fees or model calls are authorized
-by selecting a development resource tier. Full physical and remote admission is
-still pending; do not treat this candidate as a production release.
+Consumers of this candidate require Python 3.11 and exactly protocol 0.18.0.
+Existing v1 authors keep the same defaults and commands; composed v2 remains
+explicitly selected with `task create --profile panda-tabletop-v2`. Imported scenes
+use schema 3, execution contract 3 and `panda-open-scene-v1@2.1.0`, through the
+explicit `task scene` commands. The simulator runtime is a separate installation,
+verified against the exact package environment/profile/agent; it is not a mandatory
+CLI dependency. See `docs/TASK_PACKAGES.md` for the S0 evidence and pending final
+joint runtime freeze. A CLI structure check, pure instruction render or local
+self-test does not grant server admission or reward eligibility.
+
+Before release, regenerate `uv.lock` through normal resolution only after protocol
+0.18.0 is actually available from the official index, and run locked sync, CI and
+normal wheel installation. A stale 1.7.2/0.14.0 lock or a local candidate wheel is
+not that evidence. CLI merge/tag/PyPI publication requires its own authorization.
+
+Historical development requirement: the first composed-v2 checkpoint used protocol
+0.15.0 and runtime 0.2.0. Those versions describe that earlier checkpoint only;
+they are not the requirements of this 1.8.0 consumer candidate. Full physical and
+remote admission remain pending; selecting a development entry authorizes no fees
+or model requests.
 
 ## 1.7.2 (candidate)
 
