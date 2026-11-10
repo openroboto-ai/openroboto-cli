@@ -6,9 +6,14 @@
   consumer lock for CLI 1.8.0, including the exact published artifact hashes.
   Normal locked installation no longer depends on an unpublished protocol wheel.
   This does not publish the CLI or freeze a simulator/runtime deployment.
-- Retain runtime 0.3.6 as the verified S0 rendering reference, with its exact
+- Select the normally installed runtime 0.3.11 local software candidate as the
+  current authoring reference. Bind its new environment, harness and joint source
+  checkpoints; pure CLI instruction/NEW_E succeeds and an older E is rejected by
+  the exact version gate. Existing E/P/proofs are not relabeled. Active deployment,
+  new physical references, server admission and rewards remain unverified.
+- Retain runtime 0.3.6 as a historical verified S0 rendering reference, with its exact
   environment/harness and authenticated observation policy scope. Runtime 0.3.7
-  is a source/API checkpoint, not the final joint runtime freeze. Neither version
+  is a historical source/API checkpoint, not the final joint runtime freeze. Neither version
   grants physical, server or reward acceptance; existing private proofs cannot
   be relabeled. Final authoring validation must use the separately frozen tuple.
 - Consume runtime 0.3.5's real nested instruction wrapper, including complete

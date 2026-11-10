@@ -468,7 +468,8 @@ requires the advertised `scene-render-instruction` capability. A runtime lacking
 that optional command returns structured unsupported; its existing record and
 self-test capabilities remain usable.
 
-Runtime 0.3.5 and 0.3.6 share `instruction=InstructionResult.to_dict()`.
+The current runtime 0.3.11 and historical 0.3.5/0.3.6/0.3.7 producers share
+`instruction=InstructionResult.to_dict()`.
 The CLI reads that single nested format, binds `input_task_sha256` to the original
 task bytes, and compares installed/input environments with the selected runtime.
 The renderer/policy/source identities must match both describe and the exact
@@ -502,7 +503,33 @@ Protocol 0.18.0/profile 2.1 uses the registered 16384-code-point capacity and
 scene-instruction-admission/2; the renderer remains scene-program-text/1.
 The CLI never changes schema capacity. Previous 0.17.1/profile 2.0 and its
 1000-character policy remain historical candidates, with their original results.
-The installed S0 rendering evidence uses runtime **0.3.6**, validator commit
+The current normally installed local software candidate is runtime **0.3.11**,
+validator source `f11a5833a6a8febffd52b1812aeb6e702432abe5` (the later
+`068ac724257d75c8c336917600eed42746c30b37` adds only its delivery README).
+Its runtime wheel SHA-256 is
+`d739d545f36ee59c124d56b7dd3b380b955e071277e7783fd23eb0d75e6d25f5`,
+with environment `ope231-scene-runtime-0.3.11-r1`, digest
+`f1b02ec87af9d59bd2a1b49a2d8c86712e5e97f46c7dd776af9eb88d6c075a20`.
+It uses published protocol 0.18.0, profile 2.1.0 and harness
+`71c038ebabb77411ca306a14e72eb41a0b412710`. Its registered-source factory identity
+is `scene-a-gateway@4`, digest
+`d78e6940d844999e39bd2bac24586905590861f1651b1199f28490b35a627813`.
+These identities describe the reviewed local payload, not active operator trust.
+
+Select that candidate's actual installed Python with `--runtime-python` and use E
+authored for those exact refs. The CLI reads installed distribution/registry values;
+it does not force a runtime dependency into the lightweight CLI or rewrite older
+E/P for compatibility. With this new runtime selected, an older environment or
+agent returns `runtime_identity_mismatch`. Keep its original runtime and proof, or
+deliberately author NEW E and obtain new reference evidence under an approved plan.
+
+This candidate has normal macOS arm64 installation and pure instruction/NEW_E
+software evidence. Its 38-wheel dependency lock is not a Linux native lock.
+Active deployment/registration, complete physical record/self-test, server admission
+and reward eligibility remain separate unmet gates. No physical run or model call
+is authorized by selecting it, by scope=true, or by a successful pure render.
+
+Historical installed S0 rendering evidence uses runtime **0.3.6**, validator commit
 `32de3755bfb0db7b6e431fd016cb54ad87cacfcd`. Its wheel SHA-256 is
 `39b53a3d4b6e01d5725aa71565bd1e6427af66c0c80e504224252c6526e76016`.
 Its exact environment is `ope231-scene-runtime-0.3.6-r1`, digest
@@ -519,10 +546,11 @@ describe reports `observation_policy_scope_matches_profile=true`. That only
 allows the remaining checks to proceed. It is not a physical reference,
 complete scene-family validation, server admission or reward result. Actual
 record/self-test still requires the separately registered local trial plan.
-The final P02/P03/P08 runtime/environment/authority tuple and registered isolation
-gateway/dev integration remain pending. Pure rendering does not close those gates.
+The later 0.3.11 candidate integrates the reviewed P02/P03/P07/P08 source payloads.
+Final operational runtime/environment/authority registration and deployed isolation
+gateway/dev acceptance remain pending. Pure rendering does not close those gates.
 
-The later runtime **0.3.7** / validator
+Historical runtime **0.3.7** / validator
 `f808a9d1aa8b4ec504386acc08dd10f2a060f4c0` is a source/API checkpoint only. Its
 environment is `ope231-scene-runtime-0.3.7-r1`, digest
 `baa9477eb47f6261f885e8da2d23ba9e0117eaf2e1e33c55b92967c86a203fd3`.
@@ -530,7 +558,8 @@ It adds admission policy discovery and a typed `run_scene_admission` requiring
 registered context and verified private reference. It still advertises
 `server_admission=unregistered`; execution remains unavailable without the
 reviewed A gateway/authority. No new physical CLI result or final joint freeze is
-claimed for it. Do not relabel earlier E/P/proofs or select it as a final runtime.
+claimed for it. The subsequent 0.3.9 records also remain source-only checkpoints.
+Do not relabel those E/P/proofs or present them as the installed 0.3.11 candidate.
 
 Historical runtime 0.3.5 supports rendering but reports scope=false. Its
 `scene_observation_policy_scope_unregistered/resource_unavailable` results remain
