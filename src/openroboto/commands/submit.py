@@ -104,7 +104,7 @@ from openroboto_protocol.commitment import Track
 from openroboto_protocol.model_format import FormatIssueCode, FormatReport
 from openroboto_protocol.model_hash import model_hash_from_hf_tree
 from openroboto_protocol.schemas import Competition
-from openroboto_protocol.task_contract import execution_profile_ref
+from openroboto_protocol.task_profiles import checker_types_for_profile
 
 from openroboto.backend_api import (
     BackendError,
@@ -146,6 +146,7 @@ from openroboto.huggingface.access import (
     lock_and_grant,
     prepare_gated_repository,
 )
+from openroboto.scene_api import fetch_scene_profiles
 from openroboto.task_package import (
     PackageFetchError,
     TaskPackageError,
@@ -181,6 +182,12 @@ def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) 
     parser.add_argument("--config", default="miner.yaml")
     parser.add_argument("--output-dir", default="")
     parser.add_argument(
+        "--scene-package",
+        default="",
+        help="explicit schema-3 dual-root submission directory; uses the same "
+        "gated upload, payment window and announcement checkpoint",
+    )
+    parser.add_argument(
         "--force",
         action="store_true",
         help="re-announce a submission that is already done, paying the entry fee a "
@@ -203,9 +210,51 @@ def run(args: argparse.Namespace) -> int:
     output_dir = args.output_dir or resolve_output_dir(competition_id)
     state = load_state(competition_id)
 
+    scene_path = str(getattr(args, "scene_package", "") or "")
+    if scene_path:
+        if (
+            args.output_dir
+            and pathlib.Path(args.output_dir).resolve()
+            != pathlib.Path(scene_path).resolve()
+        ):
+            fail(
+                "Use --scene-package by itself, or the same directory for --output-dir."
+            )
+            return 1
+        output_dir = scene_path
+    elif state.get("scene_submission"):
+        output_dir = str(state.get("scene_local_path") or output_dir)
+    elif (pathlib.Path(output_dir) / "submission.json").exists() or (
+        pathlib.Path(output_dir) / "execution/task.json"
+    ).exists():
+        fail(
+            "This is a dual-root scene. Use --scene-package <directory> so both"
+            " roots are checked before upload."
+        )
+        return 1
+
+    if (scene_path or state.get("scene_submission")) and (
+        not state.get("burn_tx_hash") or args.force
+    ):
+        if str(snapshot.track) != TASK_TRACK:
+            fail(
+                "--scene-package requires a task-authoring season; nothing was "
+                "uploaded or paid."
+            )
+            return 1
+        if not _prepare_scene_submission(output_dir, snapshot.params, state):
+            return 1
+
     say(f"🦞 submit | {snapshot.label} ({snapshot.name})")
 
     if state.get("step") == "announce" and not args.force:
+        if state.get("scene_submission"):
+            say(
+                "This scene is already announced. Continue registration "
+                "without paying again."
+            )
+            _scene_registration_hint()
+            return 0
         say(
             "⏭️  this submission is already announced. Pass --force to redo it "
             "(that pays the entry fee again)"
@@ -229,6 +278,22 @@ def run(args: argparse.Namespace) -> int:
         try:
             upload_verdict = resolve_competition(settings, snapshot, datetime.now(UTC))
             upload_grant_to = grant_to_of(upload_verdict.live.params)
+            if state.get("scene_submission") and not upload_grant_to:
+                fail(
+                    "The scene season must name params.hf.grant_to before any private "
+                    "material is uploaded. Ask the operator to configure a verified "
+                    "account; nothing was uploaded or paid."
+                )
+                return 1
+            if state.get("scene_submission"):
+                from openroboto.scene_package import load_submission
+
+                if not _prepare_scene_submission(
+                    output_dir, upload_verdict.live.params, state
+                ):
+                    return 1
+                if not _server_scene_ready(settings, load_submission(output_dir).task):
+                    return 1
             saved_grant_to = grant_to_of(dict(snapshot.params))
             if (
                 saved_grant_to
@@ -347,7 +412,61 @@ def run(args: argparse.Namespace) -> int:
         return 1
 
     say("✅ submitted. Run `openroboto status` to see whether the backend accepted it")
+    if state.get("scene_submission"):
+        _scene_registration_hint()
     return 0
+
+
+def _scene_registration_hint() -> None:
+    say(
+        "Scene identity registration is still required. Run `openroboto "
+        "task status`, then `openroboto task scene register "
+        "<backend-task-id> --package <original-directory> --config "
+        "<miner.yaml>`. Retry registration without paying again. Server "
+        "admission and rewards remain separate."
+    )
+
+
+def _prepare_scene_submission(
+    output_dir: str, params: Mapping[str, Any], state: dict[str, Any]
+) -> bool:
+    """Validate all local scene bytes before granting access or uploading."""
+    from openroboto_protocol.scene_contract import profile_ref
+
+    from openroboto.scene_package import ScenePackageError, load_submission
+
+    policy = params.get("task")
+    if (
+        not isinstance(policy, Mapping)
+        or policy.get("execution_profile") != profile_ref()
+        or policy.get("source") != "axis"
+    ):
+        fail(
+            "This season does not explicitly select the installed scene profile"
+            " and axis source. Refresh the season or ask its operator; nothing "
+            "was uploaded or paid."
+        )
+        return False
+    try:
+        scene = load_submission(output_dir)
+    except (ScenePackageError, OSError):
+        fail(
+            "The scene submission is incomplete or its bytes drifted. Run "
+            "`openroboto task scene check <directory>` for a safe field "
+            "diagnostic, then rebuild both roots. Nothing was uploaded or paid."
+        )
+        return False
+    manifest = scene.manifest.model_dump(mode="json")
+    if state.get("scene_submission") and state["scene_submission"] != manifest:
+        fail(
+            "This checkpoint belongs to different scene bytes. Resume it with "
+            "its original package; use a separate workspace for a new "
+            "submission. Nothing was uploaded or paid."
+        )
+        return False
+    state["scene_submission"] = manifest
+    state["scene_local_path"] = str(scene.root)
+    return True
 
 
 def _no_season(config_path: str) -> None:
@@ -670,6 +789,8 @@ def task_package_is_payable(
     those are runtime admission. It answers the two things a static check can:
     is this a well-formed package, and is it the same bytes the miner checked.
     """
+    if state.get("scene_submission"):
+        return _scene_is_payable(settings, state, live)
     repo_id = str(state.get("hf_repo_id", ""))
     commit = announced_commit(state)
     where = f"{repo_id}@{commit[:8]}"
@@ -694,7 +815,7 @@ def task_package_is_payable(
         if isinstance(task_policy, Mapping)
         else None
     )
-    if expected_profile is not None and expected_profile != execution_profile_ref():
+    if expected_profile is not None and not checker_types_for_profile(expected_profile):
         fail(
             f"{live.label} requires an execution profile this CLI does not support. "
             "Nothing was paid or sent on chain. Update to the operator's declared "
@@ -803,6 +924,23 @@ def task_package_upload_is_unchanged(state: dict[str, Any], output_dir: str) -> 
     from an earlier run on another machine, and the repository is still the
     authoritative package. Say so rather than invent a verdict.
     """
+    if state.get("scene_submission"):
+        from openroboto.scene_package import ScenePackageError, load_submission
+
+        try:
+            local_scene = load_submission(output_dir)
+            if (
+                local_scene.manifest.model_dump(mode="json")
+                == state["scene_submission"]
+            ):
+                return True
+        except (ScenePackageError, OSError):
+            pass
+        fail(
+            "Local scene bytes changed after upload. Restore the original "
+            "dual-root package and retry; nothing was paid."
+        )
+        return False
     remote = str(state.get("package_digest") or "")
     if not remote:
         return True
@@ -832,6 +970,107 @@ def task_package_upload_is_unchanged(state: dict[str, Any], output_dir: str) -> 
         f"digest; the task uploader itself does not add one.\n"
         f"   → run `openroboto task check --repo <repo> --commit <commit>` to "
         f"see the per-file difference, remove the extra file, and submit again"
+    )
+    return False
+
+
+def _scene_is_payable(
+    settings: Settings, state: dict[str, Any], live: Competition
+) -> bool:
+    """Compare remote execution AND private bytes with the pre-upload identity."""
+    from openroboto_protocol.scene_contract import profile_ref
+
+    from openroboto.scene_package import ScenePackageError, load_submission
+
+    policy = live.params.get("task")
+    if (
+        not isinstance(policy, Mapping)
+        or policy.get("source") != "axis"
+        or policy.get("execution_profile") != profile_ref()
+    ):
+        fail(
+            "The live season no longer selects this exact scene profile. "
+            "Nothing was paid; refresh the configuration and contact its "
+            "operator."
+        )
+        return False
+    try:
+        with tempfile.TemporaryDirectory(prefix="openroboto-scene-submit-") as cache:
+            root = fetch_package(
+                str(state.get("hf_repo_id") or ""),
+                announced_commit(state),
+                token=settings.hf_token,
+                cache_dir=cache,
+            )
+            scene = load_submission(root)
+        if scene.manifest.model_dump(mode="json") != state["scene_submission"]:
+            fail(
+                "The fixed HF revision differs from the checked scene submission. "
+                "Restore both original roots, upload again in a new workspace, and "
+                "verify its commit. Nothing was paid."
+            )
+            return False
+    except (ScenePackageError, PackageFetchError, OSError):
+        fail(
+            "Cannot verify both scene roots at the fixed HF commit. Run "
+            "`openroboto task scene check --repo <repo> --commit <full-commit> "
+            "--config <miner.yaml>`. Restore access or repair the package and "
+            "retry; nothing was paid."
+        )
+        return False
+    if not _server_scene_ready(settings, scene.task):
+        return False
+    # Historical package_digest still means execution identity E on this path.
+    state["package_digest"] = scene.manifest.execution_package_digest
+    state["package_source"] = "axis"
+    state["package_task_id"] = scene.task.task_id
+    say(
+        "✅ scene structure and both root digests match | submission_digest "
+        f"{scene.manifest.submission_digest}"
+    )
+    say(
+        "   Local physics, server admission, review and reward eligibility "
+        "are separate and have not been established by this check."
+    )
+    return True
+
+
+def _server_scene_ready(settings: Settings, task: Any) -> bool:
+    """Require P04's current exact verified route before upload and payment.
+
+    This is a capability declaration from the server, never an admission result
+    for the author's task and never a grant of reward eligibility.
+    """
+    expected = {
+        "execution_profile": task.execution_profile.model_dump(),
+        "environment": task.environment.model_dump(),
+        "robot": task.robot.artifact.model_dump(),
+        "control_mapping": task.robot.control_mapping.model_dump(),
+        "resource_profile": task.task_definition.resource_profile,
+        "observation_contract": task.task_definition.observation,
+    }
+    try:
+        profiles = fetch_scene_profiles(settings.backend_url)
+    except BackendError:
+        fail(
+            "Cannot read the server's scene capability catalog. Ask its operator "
+            "to enable the reviewed scene routes and retry; nothing was paid."
+        )
+        return False
+    for profile in profiles:
+        routes = profile.get("verified_routes")
+        if (
+            profile.get("execution_profile") == expected["execution_profile"]
+            and profile.get("capability_status") == "supported"
+            and profile.get("available_for_submission") is True
+            and isinstance(routes, list)
+            and expected in routes
+        ):
+            return True
+    fail(
+        "The server has no verified submission route for this exact scene, "
+        "robot, control, observation and resource identity. Contact its operator; "
+        "structure validity is not server support. Nothing was paid."
     )
     return False
 

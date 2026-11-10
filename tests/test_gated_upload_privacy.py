@@ -7,12 +7,12 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from huggingface_hub.hf_api import AccessRequest
 from huggingface_hub.utils import HfHubHTTPError, RepositoryNotFoundError
 
 from openroboto.commands import submit as command
 from openroboto.competition_state import save_state
 from openroboto.huggingface import access
+from tests.hf_access_requests import access_request
 from tests.test_submission_flow import (
     GRANT_TO,
     SEASON_ID,
@@ -71,7 +71,7 @@ class Hub:
         if self.fail_at == "acl":
             raise Refused()
         return [
-            AccessRequest(
+            access_request(
                 username=user,
                 fullname="Test account",
                 email=None,
@@ -270,7 +270,7 @@ def test_acl_with_unreadable_account_refuses_access(monkeypatch: Any) -> None:
         hub,
         "list_accepted_access_requests",
         lambda repo_id: [
-            AccessRequest(
+            access_request(
                 username="",
                 fullname="Test account",
                 email=None,

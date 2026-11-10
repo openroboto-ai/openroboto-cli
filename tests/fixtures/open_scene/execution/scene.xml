@@ -1,0 +1,1 @@
+<mujoco><asset><mesh name="part" file="assets/part.obj"/></asset><worldbody><body name="door"><joint name="hinge" type="hinge" axis="0 0 1" range="0 90"/><geom name="door_panel" type="mesh" mesh="part" mass="1"/><geom name="door_handle" type="capsule" size=".006 .02" pos=".03 0 .02"/></body></worldbody></mujoco>

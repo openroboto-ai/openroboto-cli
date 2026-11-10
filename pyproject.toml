@@ -1,6 +1,6 @@
 [project]
 name = "openroboto"
-version = "1.7.2"
+version = "1.8.0"
 description = "OpenRoboto subnet (Bittensor netuid 80) CLI — everything a miner or external validator types."
 readme = "README.md"
 license = "MIT"
@@ -44,10 +44,10 @@ dependencies = [
     # override is removed and the install really comes from PyPI — which is
     # release time. `tests/test_packaging.py` compares this against the version
     # actually resolved into the environment.
-    # Release 0.14.0 supplies shared restricted task and reference validation.
-    # Resolve the published release normally; never invent registry lock entries
-    # or bypass this exact pin with --no-deps or editable/path overrides.
-    "openroboto-protocol==0.14.0",
+    # Published 0.18.0 binds scene instruction capacity to profile 2.1.0.
+    # uv.lock records its official PyPI artifact hashes. Local-wheel development
+    # remains separate evidence; never bypass this exact consumer pin.
+    "openroboto-protocol==0.18.0",
     "pyyaml>=6.0",
     # Production miner machines run 10.5.0 (the old requirements.txt pinned that
     # version). The two APIs used are private surface of the SDK:
@@ -233,6 +233,7 @@ testpaths = ["tests"]
 # ~100% covered by construction, so it reports about 12 points higher — 82.38 rather
 # than 70.26. That number was briefly committed here and CI rejected the very commit
 # that introduced it. The gate is not the place to find out you measured differently.
-fail_under = 80.04
+# 82.94 measured after scene I/O and pagination regression fixes (693 tests).
+fail_under = 83.95
 precision = 2
 show_missing = true

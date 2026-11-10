@@ -17,15 +17,11 @@ name: Release
 #   · environment restricts the deployment source: `pypi` only accepts `v*` tags,
 #     `testpypi` only accepts main
 #
-# 🔴 **One gate is missing: there is no human approval.** required reviewers need a
-# paid plan on a private repo, and openroboto-ai is currently on free (measured
-# 2026-08-19, the API returns 422). That means **`git push origin v0.1.0a1` goes all
-# the way to PyPI with no second pair of eyes in between**, while an upload is
-# irreversible and a version number cannot be reused.
-# Ways to close it: make the repo public (required reviewers are free on public repos,
-# and this repo is going public at launch anyway), or upgrade to Team. Until then, the
-# act of pushing the tag is itself the last gate — please double-check the version
-# number yourself before pushing.
+# Historical check (2026-08-19): the then-private/free repository could not enable
+# required reviewers. That result does not establish today's environment rules.
+# Before an authorized CLI release, the release owner must independently verify
+# pypi reviewers, tag restrictions, Trusted Publisher and version availability.
+# Protocol merge/tag approval does not authorize a CLI tag or upload.
 #
 # Beta versions and stable versions both go to **real PyPI**, distinguished by the
 # version number (`v0.1.0a1` vs `v0.1.0`): pip will not pick a pre-release when a
@@ -156,7 +152,7 @@ jobs:
     # 🔴 A manual trigger can **never** reach real PyPI. Without this line,
     # `workflow_dispatch` would light up both publish jobs, and this one is
     # irreversible.
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
 
     # environment now serves two purposes:
     #   1. it restricts the deployment source to `v*` tags — even if someone breaks the
@@ -166,10 +162,8 @@ jobs:
     #      does not match, OIDC is rejected outright. Renaming it requires changing that
     #      record on pypi.org at the same time.
     #
-    # 🔴 It **cannot yet** serve a third purpose — human approval. See the block at the
-    # top of this file: required reviewers cannot be configured for a private repo on
-    # the free plan. Once the repo is public or upgraded to Team, come here and change
-    # this comment.
+    # Human-review settings and Trusted Publisher are external configuration. The
+    # release owner must verify them; this file does not prove they are enabled.
     environment:
       name: pypi
       url: https://pypi.org/p/openroboto

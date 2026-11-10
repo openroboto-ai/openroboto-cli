@@ -1,8 +1,78 @@
 # Changelog
 
+## Unreleased — imported-scene CLI candidate (OPE-234)
+
+- Resolve the published protocol 0.18.0 from official PyPI and regenerate the
+  consumer lock for CLI 1.8.0, including the exact published artifact hashes.
+  Normal locked installation no longer depends on an unpublished protocol wheel.
+  This does not publish the CLI or freeze a simulator/runtime deployment.
+- Retain runtime 0.3.6 as the verified S0 rendering reference, with its exact
+  environment/harness and authenticated observation policy scope. Runtime 0.3.7
+  is a source/API checkpoint, not the final joint runtime freeze. Neither version
+  grants physical, server or reward acceptance; existing private proofs cannot
+  be relabeled. Final authoring validation must use the separately frozen tuple.
+- Consume runtime 0.3.5's real nested instruction wrapper, including complete
+  public audit fields. Bind original task bytes, exact environments and the
+  authenticated policy/source identity; reject the earlier synthetic flat format.
+  Stop recording/self-test before dispatch when the advertised observation scope
+  is unregistered. Pure rendering grants no physics, server or reward status.
+- Add `task scene instruction` through the same runtime's optional pure renderer.
+  Authors can explicitly prepare NEW E with only its instruction token changed;
+  existing private roots/proofs are never copied or rebound. Fresh recording and
+  self-test remain required. Missing capability and unsupported text stay nonzero.
+- Recheck E/P/manifest/contract after the final runtime probe, preserving the
+  identity actually tested. Reject malformed nested receipts and overflowing
+  JSON numbers with bounded public errors, retaining private evidence.
+- Reject special/oversized scene inputs before opening JSON. Recheck opened
+  descriptors and bound reads so replacing an input with a FIFO cannot hang.
+- Look up scene registrations across authenticated author pages, with a bounded
+  scan and `--lookup-offset` continuation; retain exact task and repo/commit binding.
+- Add explicit `task scene build/check` for schema-3 dual-root inputs, complete
+  dependency checks and detached protocol identities. Keep v1 defaults intact.
+- Add `submit --scene-package` using the existing gated upload/payment/retry
+  chain, with local and fixed-commit checks of both roots and exact server routing.
+- Add author-signed scene registration and separate capability/admission/reward
+  status. No private reference text is emitted in public summaries or diagnostics.
+- Bridge scene recording and self-test to the reviewed installed runtime API.
+  Recording now requires explicit E and NEW P/manifest arguments; the candidate
+  positional recording form explains the migration. Existing v1 commands stay intact.
+- Verify exact runtime/schema/profile/environment/agent identities and E/P/joint
+  before execution, bound subprocess time/output, and project private diagnostics
+  into safe public reports. Physical acceptance and server/reward gates stay separate.
+- Require protocol 0.18.0/profile 2.1 with a separately bound 16384-code-point
+  scene instruction capacity. Previous unpublished scene profile 2.0 packages
+  require their original 0.17.1 reader; they are rejected without relabeling here.
+  V1/v2 interfaces remain unchanged. A pushed protocol tag is not index availability:
+  normal index resolution, a regenerated consumer lock and installed-package CI
+  remain CLI release gates. Reviewed local-wheel evidence retains its own identity.
+
 Every entry answers one question before it lists anything: **does a miner have to
 change something, and what breaks if they do not?** A diff summary without "who
 has to act" is not usable by the people who installed this.
+
+## 1.8.0 (unpublished candidate)
+
+Consumers of this candidate require Python 3.11 and exactly protocol 0.18.0.
+Existing v1 authors keep the same defaults and commands; composed v2 remains
+explicitly selected with `task create --profile panda-tabletop-v2`. Imported scenes
+use schema 3, execution contract 3 and `panda-open-scene-v1@2.1.0`, through the
+explicit `task scene` commands. The simulator runtime is a separate installation,
+verified against the exact package environment/profile/agent; it is not a mandatory
+CLI dependency. See `docs/TASK_PACKAGES.md` for the S0 evidence and pending final
+joint runtime freeze. A CLI structure check, pure instruction render or local
+self-test does not grant server admission or reward eligibility.
+
+The registry lock now names CLI 1.8.0 and published protocol 0.18.0, with real
+PyPI URLs and hashes. Use `uv sync --locked` and the existing CI/normal wheel
+installation gates. Earlier 1.7.2/0.14.0 locks and local candidate wheels retain
+their original historical evidence; they are not this index-resolved install.
+CLI merge/tag/PyPI publication requires its own authorization.
+
+Historical development requirement: the first composed-v2 checkpoint used protocol
+0.15.0 and runtime 0.2.0. Those versions describe that earlier checkpoint only;
+they are not the requirements of this 1.8.0 consumer candidate. Full physical and
+remote admission remain pending; selecting a development entry authorizes no fees
+or model requests.
 
 ## 1.7.2 (candidate)
 

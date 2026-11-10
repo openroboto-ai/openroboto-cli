@@ -193,18 +193,56 @@ requires Isaac Sim 5.1 and an A100.
 
 ## 5. Requirement on the protocol release
 
-Protocol 0.13.0 is the published baseline for task commitments and shared
-package digests. The new restricted authoring commands require protocol 0.14.0.
-Protocol 0.14.0 is published on PyPI and this checkout has a real registry lock.
-CLI 1.7.0 and the separate simulator runtime remain review candidates. Installing
-the CLI candidate wheel resolves the exact published protocol normally. No local
-protocol copy, invented registry entry or editable dependency override is used.
+This checkout declares CLI **1.8.0** and exactly **openroboto-protocol==0.18.0**.
+Protocol 0.18.0 is published on official PyPI. The normally generated `uv.lock`
+names CLI 1.8.0, protocol 0.18.0 and the same exact metadata requirement, with the
+actual published URLs and hashes. The older 1.7.2/0.14.0 lock is historical evidence.
+
+The official protocol wheel SHA-256 is
+`bcddd6aa202352d0b83f4f023b395d6cef99128e419c49efa1a52a661229f3bf`;
+the sdist SHA-256 is
+`b721d1594bb1cd7d1e3935af97f3a865aa7458b1557d35018a126a3deab71c43`.
+These belong to release `v0.18.0`, source
+`73175b4a20476717a436695853b53b722baea3ed`. They are distinct from the earlier
+local candidate wheel in section 9, even though its package files are identical.
+
+Verify locked sync, CI and a clean wheel installation. Do not edit lock entries by
+hand, override dependencies, skip dependency resolution or substitute a local wheel
+for formal index evidence. CLI merge/tag/publication needs separate authorization;
+publishing the protocol does not freeze or admit a runtime environment.
+
+Historical baseline: CLI 1.7.0 used published protocol 0.14.0 and its registry lock;
+protocol 0.13.0 introduced task commitments/shared package digests. These statements
+describe the earlier release evidence, not this checkout's consumer requirements.
 
 ## 6. Normal-install verification
 
-A `PYTHONPATH` splice is component verification, not proof that a miner can
-`pip install` and use the task commands. Once a candidate protocol wheel exists,
-verify the real install shape in a clean venv:
+A `PYTHONPATH` splice does not establish that a miner can install this release.
+Verify the actual consumer through normal locked resolution, using the repository's
+existing CI commands. Maintainers regenerate the lock with `uv lock` only when
+intentionally updating dependencies; ordinary verification keeps it unchanged:
+
+```bash
+uv sync --locked
+bash scripts/lint.sh
+uv run coverage run --source=src -m pytest -q --junitxml=pytest-report.xml
+uv run coverage report
+uv build
+# Use a new, unused environment; install the built wheel with all dependencies.
+uv venv /tmp/openroboto-consumer-new --python 3.11
+uv pip install --python /tmp/openroboto-consumer-new/bin/python dist/openroboto-1.8.0-py3-none-any.whl
+uv pip check --python /tmp/openroboto-consumer-new/bin/python
+/tmp/openroboto-consumer-new/bin/openroboto --version
+/tmp/openroboto-consumer-new/bin/openroboto task scene --help
+```
+
+CI also audits skips and wheel contents. Retain raw results and published protocol
+artifact hashes; the release build's actual bytes need not equal a local candidate
+wheel. The CLI environment does not install a simulator runtime. Installed S0
+checks may use registry/describe/pure render/NEW E only; actual record/self-test
+requires an independently approved trial plan and the final joint runtime tuple.
+
+Historical explicit-wheel development verification used the following helper:
 
 ```bash
 python scripts/verify_task_cli_install.py \
@@ -216,11 +254,12 @@ python scripts/verify_task_cli_install.py \
   --run-id <operator-run-id>
 ```
 
-The script copies the working tree to a temporary directory, rewrites the
+That historical helper copies the working tree to a temporary directory, rewrites the
 protocol pin **only in that copy** to the candidate wheel's version, builds the
 CLI wheel, creates a fresh venv, installs both wheels with normal dependency
 resolution, and runs the installed `openroboto` binary without `PYTHONPATH`.
-It checks `Track.TASK`, `AXIS_LAYOUT`, the package digest, the live `/healthz`
+It is not the formal index/lock verification above. It checks `Track.TASK`,
+`AXIS_LAYOUT`, the package digest, the live `/healthz`
 + `/readyz` probe, and (with `--status-config`) a signed `tasks/mine` read.
 
 `--shared-module` / `--shared-function` (default
@@ -298,6 +337,324 @@ Hugging Face upload and `openroboto submit` flow. The live season's fee and
 required profile are rechecked before payment. Static validity or an example
 reference is not a promise of discrimination, author emissions or launch
 readiness.
+
+## 8. Composed tabletop development candidate
+
+CLI 1.8.0 requires protocol 0.18.0, which retains the controlled-v2 contract
+introduced in 0.15.0. Use the matching reviewed CPU task runtime for v1/v2
+authoring. The index-resolved consumer lock is described in section 5. Do not
+deploy a stale lockfile or present a source-path development run as a cold install.
+
+```bash
+openroboto task catalog --include-development --json
+openroboto task create composed.json --profile panda-tabletop-v2
+openroboto task build --definition composed.json --output composed-package \
+  --task-id local-composed --runtime-python /path/to/cpu-env/bin/python
+openroboto task record-reference composed-package --example \
+  --runtime-python /path/to/cpu-env/bin/python
+openroboto task self-test composed-package \
+  --runtime-python /path/to/cpu-env/bin/python
+```
+
+`--example` is only a local one-cube recording example. It has unresolved
+disturbance failures and is not a generally admitted solver. A failing self-test
+must remain visible; do not remove seeds or loosen tolerances to pass it.
+
+The generated definition names actual catalog assets and circular zones. Each
+zone declares accepted asset specifications and capacity. A stage combines
+`in_zone`, `pose`, `stable`, `released`, `supported_by`, `no_contact` and `matching`
+using `all`, `any` or `not`. Held stage goals and earlier-stage dependencies are
+explicit; `reject_early` rejects early satisfaction. Episode and active-stage
+invariants run at every 2 ms physics step, with violations latched until reset.
+Reference action order has no scoring meaning unless the authored stage program
+explicitly requires it. Zone capacity constrains the named objects assigned by
+`matching`; it is not a global occupancy invariant. Use explicit predicates and
+invariants when another object must stay outside a zone or retain its state. Whole-shape containment and real upward supporting
+contact replace fixed-cube approximations. Spherical pose targets are rejected
+as unobservable under geometric symmetry.
+
+`observation: "state"` exposes physical object truth. `"vision"` hides object
+coordinates, truth state, private judge traces and diagnostics; it requires real
+camera pixels and uses visual object/zone labels in instructions. The candidate
+freezes a 1280 by 720 vision image and a 320 by 180 state-mode image; camera
+calibration and dimensions are part of its digest. It does not
+claim visual recognition quality until per-object visibility is independently
+checked. Resource tiers bound development inputs and steps; they do not grant
+API calls or establish a supported object-count limit. Both compared agents must
+use the same frozen observation, tools, resource tier and execution contract.
+
+This candidate implements controlled rigid primitives and convex meshes on
+Panda. Full physical robustness, all supported combinations and remote dev
+submission are pending. Importing arbitrary author-owned scenes/assets, robot
+adapters or deformable simulation needs a separate validated capability path;
+renaming a primitive or loading a mesh does not establish that capability.
+
+## 9. Author-owned scenes (schema 3)
+
+This scene capability remains a development path. The reviewed protocol input is commit
+`ea476625c7f84e4ce8fbd9fed4e56ac001c01109`, version `0.18.0`, task schema 3,
+execution contract 3 and `panda-open-scene-v1@2.1.0` with profile digest
+`9badf61d742ed5787e7af4ad19adc90b616147ee4c62159915bddeff53f9a1a2`.
+The reviewed local protocol candidate wheel SHA-256 is
+`f2b59b83c3ac561b41bcd6b3ddf359406dd74cae9fb37198b84be75931ce63b8`.
+This candidate gives SceneTask.instruction its own 16384 Unicode code point
+capacity, bound into the new profile. Other text fields retain their old limits;
+v1/v2, physics, tools, budgets and linear frame validation are unchanged.
+Previous unpublished scene profile 2.0 packages remain reproducible with their
+original 0.17.1 wheel. They are explicitly rejected by this reader, even below
+1000 characters. There is no alias or in-place migration: a new profile/runtime
+requires deliberately authored NEW E and fresh P/manifest/proof.
+That candidate wheel retains its original evidence. Formal consumers use the
+actual index release and regenerated lock from sections 5–6; a tag or local wheel
+does not close that gate. Do not use source-path overrides or skipped dependencies
+as install evidence. Keep the protocol release artifact hash separate from this
+local candidate hash.
+
+Prepare a materialized execution directory containing the complete schema-3
+`task.json`, root-relative MJCF, meshes, textures and includes. Use the protocol's
+exported schema and imported-scene specification. Every transitive dependency
+needs its actual size, SHA-256, direct `requires` edges, source, fixed source
+revision and license. No dependency is downloaded by the CLI. Source URLs are
+provenance, never runtime fetches. Object/part/joint/frame, robot/control,
+environment, observation, resource, initial-state and checker bindings must all
+be explicit. A primitive renamed as an imported object is not physical support.
+
+Author `public_summary` explicitly in `task.json`. Do not put references, solver
+text, raw checker diagnostics or credentials there. The CLI never derives it
+from the private root or instruction. Keep local solver scripts and reports
+outside both roots. Gated HF repositories still expose filenames, sizes and
+hashes; choose neutral filenames. The CLI refuses `README.md` in scene inputs
+because model-card content may bypass HF gating.
+
+```bash
+# These commands require only the lightweight CLI, not MuJoCo.
+openroboto task catalog --include-development --json
+openroboto task scene build --execution ./my-execution \
+  --reference ./my-private-reference.json --output ./my-submission
+openroboto task scene check ./my-submission
+```
+
+Alternatively pass `--private ./my-private-tree` instead of `--reference` to
+retain multiple private materials. That input needs a protocol
+`reference-binding.json` naming its schema-1 reference JSON files. Build copies
+all files and rebinds the private reference to the measured execution bytes and
+normalized execution-contract digest. It writes `submission.json` outside the
+two roots, refuses existing output and retains failed builds. Build is
+materialization and structural validation; native compilation belongs to the
+same separately installed worker runtime used for execution.
+
+Every regular file within each root, including stray files, counts in its
+unchanged protocol `package_digest`. The detached `submission_digest` binds
+execution digest E and private digest P. It never replaces the historical
+meaning of `package_digest`. Edit either root only by rebuilding a new submission.
+The check rejects missing/changed dependencies, undeclared XML resources, unsafe
+paths, symlinks, resource overflow, invalid public metadata and stale bindings.
+Its JSON says `scope=structure_only`, `local_physics=not_run`,
+`server_admission=not_run`, `reward_status=not_evaluated`.
+
+Canonical instruction generation uses an optional capability in the same runtime:
+
+```bash
+openroboto task scene instruction --execution ./source/execution \
+  --runtime-python /path/to/runtime/bin/python \
+  --output ./instruction-public.json --prepared-execution ./prepared/execution
+```
+
+The runtime's single pure `task_source.scene_instruction` renderer supplies the
+complete text and program/render-input/renderer/policy identities. The CLI does
+not render predicates, infer intent from keywords, shorten text or fall back to
+a model. It checks the exact installed protocol/profile/environment/agent and
+requires the advertised `scene-render-instruction` capability. A runtime lacking
+that optional command returns structured unsupported; its existing record and
+self-test capabilities remain usable.
+
+Runtime 0.3.5 and 0.3.6 share `instruction=InstructionResult.to_dict()`.
+The CLI reads that single nested format, binds `input_task_sha256` to the original
+task bytes, and compares installed/input environments with the selected runtime.
+The renderer/policy/source identities must match both describe and the exact
+registry. The CLI independently measures the entire E digest and checks its
+structure; runtime rendering itself reports `package_validated=false`.
+The public `rendering.text` contains the full text (`rendering.instruction` remains
+its earlier CLI alias). Schema/capacity, source, program/render-input and delivery
+audit fields are retained. Generation leaves `delivery_checked=false` and the
+actual/delivered text digests null; it does not claim a model received that text.
+
+`--prepared-execution` must name a NEW directory outside retained input bundles.
+Only E is copied. Only the top-level `task.json.instruction` string token changes;
+other JSON tokens (including numeric precision, escaped keys and public summary)
+and every other file stay byte-identical. Source E, existing P, manifest and proof
+are untouched. No private root is copied, created or rebound. Omitting this flag
+only produces the public report; rerun with a NEW E target to avoid manual text
+escaping or numeric formatting. Keep public output outside the retained bundle.
+
+New E requires fresh recording and self-test, within the operator's existing
+registered trial plan. No physical experiment or model request is authorized by
+rendering or preparation. Continue with `--execution ./prepared/execution`,
+`--private ./prepared/private` and `--manifest ./prepared/submission.json` for
+recording; never silently reuse an old private proof after changing E.
+
+Generation uses a bounded isolated subprocess (default 30 seconds, maximum 60),
+the shared output/JSON byte limits, and the unchanged installed SceneTask schema.
+Unsupported length, vision or incomplete coverage returns nonzero and creates
+no prepared E. Complete public text, when returned with an unsupported length
+result, is retained in full rather than truncated or replaced by a digest.
+Protocol 0.18.0/profile 2.1 uses the registered 16384-code-point capacity and
+scene-instruction-admission/2; the renderer remains scene-program-text/1.
+The CLI never changes schema capacity. Previous 0.17.1/profile 2.0 and its
+1000-character policy remain historical candidates, with their original results.
+The installed S0 rendering evidence uses runtime **0.3.6**, validator commit
+`32de3755bfb0db7b6e431fd016cb54ad87cacfcd`. Its wheel SHA-256 is
+`39b53a3d4b6e01d5725aa71565bd1e6427af66c0c80e504224252c6526e76016`.
+Its exact environment is `ope231-scene-runtime-0.3.6-r1`, digest
+`a2932709e57e4532026778388dd8e433f0b46ac18ade0e67fa8ca839355bd2a9`,
+with harness `26e7a2e5d4b67e86c197f36cc79723b71f87bebc`. That tuple is retained
+for its own S0 evidence; it is not the final jointly frozen authoring runtime.
+Select a matching runtime interpreter explicitly and author NEW E using its
+describe refs.
+Neither instruction preparation nor self-test upgrades old environment/agent
+refs or rebinds earlier P/proof.
+
+Its authenticated `scene-observation-admission/2` scope matches profile 2.1;
+describe reports `observation_policy_scope_matches_profile=true`. That only
+allows the remaining checks to proceed. It is not a physical reference,
+complete scene-family validation, server admission or reward result. Actual
+record/self-test still requires the separately registered local trial plan.
+The final P02/P03/P08 runtime/environment/authority tuple and registered isolation
+gateway/dev integration remain pending. Pure rendering does not close those gates.
+
+The later runtime **0.3.7** / validator
+`f808a9d1aa8b4ec504386acc08dd10f2a060f4c0` is a source/API checkpoint only. Its
+environment is `ope231-scene-runtime-0.3.7-r1`, digest
+`baa9477eb47f6261f885e8da2d23ba9e0117eaf2e1e33c55b92967c86a203fd3`.
+It adds admission policy discovery and a typed `run_scene_admission` requiring
+registered context and verified private reference. It still advertises
+`server_admission=unregistered`; execution remains unavailable without the
+reviewed A gateway/authority. No new physical CLI result or final joint freeze is
+claimed for it. Do not relabel earlier E/P/proofs or select it as a final runtime.
+
+Historical runtime 0.3.5 supports rendering but reports scope=false. Its
+`scene_observation_policy_scope_unregistered/resource_unavailable` results remain
+valid under that older identity. The CLI continues to stop before dispatch for
+an explicitly false scope, without downgrading or bypassing the gate.
+
+The runtime bridge uses the reviewed `task_source.authoring` scene API, not the
+legacy v1 recorder. Start with materialized E at `./authored/execution` and choose
+an explicit **new** private root and detached manifest. They need not exist for
+recording. The CLI never derives private materials from a public summary, copies
+solver code into E, overwrites an existing P, or rewrites E for another runtime.
+
+```bash
+openroboto task scene record-reference --execution ./authored/execution \
+  --private ./authored/private --manifest ./authored/submission.json \
+  --script ./solve.py --runtime-python /path/to/runtime/bin/python \
+  --private-report ./private-diagnostics/record.json --output ./record-summary.json
+openroboto task scene check ./authored
+openroboto task scene self-test --execution ./authored/execution \
+  --private ./authored/private --manifest ./authored/submission.json \
+  --runtime-python /path/to/runtime/bin/python \
+  --private-report ./private-diagnostics/test.json --output ./self-test-summary.json
+# Equivalent self-test shorthand (existing complete bundle):
+# openroboto task scene self-test ./authored --runtime-python ... --output ...
+```
+
+`--output` receives only projected identities, fixed errors and check booleans.
+`--private-report` receives the runtime's full diagnostics; its adjacent
+`.evidence` directory may contain private trajectories, states and proof. Keep
+both reports/evidence outside E/P and the transport bundle. Omitting
+`--private-report` retains diagnostics in a new mode-0700 temporary directory;
+the projected report gives its path. Never publish that diagnostic file/directory.
+Raw child stdout/stderr and arbitrary error strings are not relayed to the CLI.
+Reports and outputs must be new. Failed artifacts remain available for diagnosis.
+
+The selected `--runtime-python` runs in isolated Python mode. Before dispatch the
+CLI verifies installed protocol and runtime distributions, schema 3/execution 3,
+exact profile, structured scene command capabilities, canonical registry identity,
+robot/control and the frozen agent binding. It verifies runtime identity again
+after execution. The 0.3.x scene API v1 runtime is an unpublished candidate; the initial d3821a5
+wheel pins protocol 0.17.0 and is incompatible with this CLI's 0.18.0 baseline.
+Patch 0.3.1 retains the same authoring interface and changes environment identity.
+Runtime 0.3.4 retains the old protocol 0.17.1/profile 2.0 identity and its existing
+physical evidence; it cannot be relabeled as the new profile. Runtime 0.3.5 uses
+0.18.0/profile 2.1, exposes the optional renderer, and explicitly reports its
+historical unregistered observation scope. Current runtime 0.3.6 registers that
+scope and changes scene gripper command continuity with a new harness/environment;
+old P/agent bindings cannot be reused. This bridge cannot make a different
+environment supported or authorize an experiment.
+
+Recording invokes `scene-record-reference` with immutable E and NEW P/manifest;
+all initial states must be recorded. The old candidate positional recording form
+returns `scene_argument_migration` with explicit replacement arguments before
+loading P or running a script. Self-test first validates E/P/joint and the
+normalized execution contract, then invokes `scene-self-test` with the exact
+`--expect-submission-digest`. An optional public flag of the same name also
+checks an independently retained digest. Self-test always uses the runtime's
+registered all-state reference/repeat/noise/nop/observation/tool-proof pipeline;
+it offers no seed subset, policy override or skipped-physics option.
+
+`--timeout-seconds` bounds the entire local command (default recording 900,
+self-test 180; maximum 900 seconds), including metadata probes. It never increases
+the task's execution budgets. Recording alone accepts `--max-reference-steps`,
+which may only lower the contract step cap. Child output is limited to 1 MiB and
+private report parsing to 8 MiB; malformed, nonfinite or duplicate-key JSON,
+timeouts and incomplete/mismatched receipts return nonzero safe diagnostics.
+E and existing P/manifest are checked again after execution. A completed rejected
+self-test remains `accepted=false`, nonzero and `local_physics=failed`; a static
+check or incomplete receipt cannot claim physical completion. Local recording
+or self-test never establishes server admission or reward eligibility.
+
+CLI subprocess fixtures are synthetic interface evidence. Real cold-installed
+CLI/runtime physics verification belongs to OPE-231's frozen trial plan and its
+remaining allowance; this client implementation alone adds no physical result.
+
+Once the operator has authorized a scene season and verified the exact server
+runtime route, the submission transport remains the existing chain/payment
+pipeline:
+
+```bash
+openroboto submit --config miner.yaml --scene-package ./my-submission
+openroboto task status --config miner.yaml
+# Use the backend task id above, not task.json's author-defined task id.
+openroboto task scene register BACKEND_TASK_ID --package ./my-submission \
+  --config miner.yaml
+openroboto task scene status BACKEND_TASK_ID --config miner.yaml
+```
+
+Before upload the CLI checks both local roots, the exact scene season, the
+server's verified environment/robot/control/observation/resource route, and the
+season's `params.hf.grant_to`. The existing manual gated access checks run before
+any content is uploaded. Before payment it downloads the full immutable HF
+commit, verifies both roots against the original identity, checks the live route
+again and uses the existing contributor binding, deduplication, access, fee
+confirmation and burn-window rules. Failed infrastructure checks do not become
+author/physical rejection. Retry `submit` in the same workspace; uploaded content
+and a paid checkpoint are reused. `--force` still pays again: it is not a retry.
+
+Chain ingestion and scene registration are separate steps. Registration finds
+the task through the wallet-signed author endpoint, downloads its exact
+`repo@commit` and signs the backend's canonical registration message binding that
+transport and all three digests. A MINER key is still required. Pending ingestion,
+storage errors or registration retries never require another payment. Keep the
+original local submission for this step.
+
+Lookup scans authenticated author pages (100 rows per request, at most 100 pages
+per invocation), matching only the explicit backend task id. An empty or final
+page ends lookup. If the scan reaches its page cap, `task_lookup_limit` reports a
+continuation `--lookup-offset N`; retry the same registration with that offset
+without paying again. A changing listing or a genuinely missing id can be
+retried from offset 0. The located row's exact repo/commit and both root digests
+are still checked before registration; no id is inferred from the submission name.
+
+The backend distributes roles: author,
+assigned admission worker and reviewer can access both roots; assigned evaluation
+workers receive only execution files; model/tool processes and public visitors
+receive neither root. The CLI does not grant worker roles or claim process
+isolation was verified locally.
+
+Status reports the server's `current_capability`, physical `result.admission` and
+`result.reward_status` separately. A local static check, successful upload,
+registration, `supported` route, or `admitted` result is not itself reward
+eligibility. Review and server evidence remain required. This candidate has no
+new real scene physical success, server admission or eligible task evidence.
 
 ## Related documents
 
