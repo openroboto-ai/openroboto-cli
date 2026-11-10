@@ -21,6 +21,7 @@ from typing import Any
 FORBIDDEN_ROOTS = frozenset(
     {"mujoco", "glfw", "opengl", "torch", "tensorflow", "transformers", "jax"}
 )
+_INSTALLED = False
 
 
 class S0Violation(RuntimeError):
@@ -130,6 +131,10 @@ def _event(config: dict[str, Any], event: str, **fields: Any) -> None:
 
 def install() -> None:
     """Install before the reviewed -m/-c body; startup errors terminate Python."""
+    global _INSTALLED
+    # Some framework/venv site initializations visit the same .pth twice.
+    if _INSTALLED:
+        return
     config: dict[str, Any] = {}
     try:
         config = json.loads(pathlib.Path(__file__).with_suffix(".json").read_bytes())
@@ -161,6 +166,7 @@ def install() -> None:
         sys.addaudithook(audit)
         atexit.register(finish)
         _event(config, "start", classification=kind)
+        _INSTALLED = True
     except BaseException:
         # Raising from .pth alone is insufficient: site.py catches that error.
         try:

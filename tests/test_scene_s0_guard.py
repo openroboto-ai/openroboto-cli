@@ -161,3 +161,13 @@ def test_s0_guard_startup_failure_terminates_instead_of_site_continuing(
     assert error.value.code == 97
     assert events == ["startup_rejected"]
     assert sys.meta_path == original_finders
+
+
+def test_s0_guard_is_idempotent_when_site_revisits_the_same_pth(monkeypatch):
+    monkeypatch.setattr(guard, "_INSTALLED", True)
+
+    def unexpected_read(path):
+        raise AssertionError("installed guard must not initialize twice")
+
+    monkeypatch.setattr(guard.pathlib.Path, "read_bytes", unexpected_read)
+    guard.install()
