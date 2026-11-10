@@ -2,6 +2,10 @@
 
 ## Unreleased — imported-scene CLI candidate (OPE-234)
 
+- Resolve the published protocol 0.18.0 from official PyPI and regenerate the
+  consumer lock for CLI 1.8.0, including the exact published artifact hashes.
+  Normal locked installation no longer depends on an unpublished protocol wheel.
+  This does not publish the CLI or freeze a simulator/runtime deployment.
 - Retain runtime 0.3.6 as the verified S0 rendering reference, with its exact
   environment/harness and authenticated observation policy scope. Runtime 0.3.7
   is a source/API checkpoint, not the final joint runtime freeze. Neither version
@@ -58,10 +62,11 @@ CLI dependency. See `docs/TASK_PACKAGES.md` for the S0 evidence and pending fina
 joint runtime freeze. A CLI structure check, pure instruction render or local
 self-test does not grant server admission or reward eligibility.
 
-Before release, regenerate `uv.lock` through normal resolution only after protocol
-0.18.0 is actually available from the official index, and run locked sync, CI and
-normal wheel installation. A stale 1.7.2/0.14.0 lock or a local candidate wheel is
-not that evidence. CLI merge/tag/PyPI publication requires its own authorization.
+The registry lock now names CLI 1.8.0 and published protocol 0.18.0, with real
+PyPI URLs and hashes. Use `uv sync --locked` and the existing CI/normal wheel
+installation gates. Earlier 1.7.2/0.14.0 locks and local candidate wheels retain
+their original historical evidence; they are not this index-resolved install.
+CLI merge/tag/PyPI publication requires its own authorization.
 
 Historical development requirement: the first composed-v2 checkpoint used protocol
 0.15.0 and runtime 0.2.0. Those versions describe that earlier checkpoint only;

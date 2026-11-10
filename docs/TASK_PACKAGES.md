@@ -194,17 +194,22 @@ requires Isaac Sim 5.1 and an A100.
 ## 5. Requirement on the protocol release
 
 This checkout declares CLI **1.8.0** and exactly **openroboto-protocol==0.18.0**.
-The normal consumer path must resolve that release from the official index. A
-protocol merge, tag or successful build does not establish index availability.
-The consumer lock must name CLI 1.8.0, protocol 0.18.0 and the same exact metadata
-requirement, with actual published URLs and hashes. A retained 1.7.2/0.14.0 lock
-cannot be used to release this checkout.
+Protocol 0.18.0 is published on official PyPI. The normally generated `uv.lock`
+names CLI 1.8.0, protocol 0.18.0 and the same exact metadata requirement, with the
+actual published URLs and hashes. The older 1.7.2/0.14.0 lock is historical evidence.
 
-Once protocol 0.18.0 is actually available, regenerate the lock with the normal
-resolver, then verify locked sync, CI and a clean wheel installation. Until that
-gate passes, index-only installation is blocked. Do not edit lock entries by hand,
-override the dependency, skip dependency resolution or substitute a local wheel
-for formal index evidence. CLI merge/tag/publication needs separate authorization.
+The official protocol wheel SHA-256 is
+`bcddd6aa202352d0b83f4f023b395d6cef99128e419c49efa1a52a661229f3bf`;
+the sdist SHA-256 is
+`b721d1594bb1cd7d1e3935af97f3a865aa7458b1557d35018a126a3deab71c43`.
+These belong to release `v0.18.0`, source
+`73175b4a20476717a436695853b53b722baea3ed`. They are distinct from the earlier
+local candidate wheel in section 9, even though its package files are identical.
+
+Verify locked sync, CI and a clean wheel installation. Do not edit lock entries by
+hand, override dependencies, skip dependency resolution or substitute a local wheel
+for formal index evidence. CLI merge/tag/publication needs separate authorization;
+publishing the protocol does not freeze or admit a runtime environment.
 
 Historical baseline: CLI 1.7.0 used published protocol 0.14.0 and its registry lock;
 protocol 0.13.0 introduced task commitments/shared package digests. These statements
@@ -213,11 +218,11 @@ describe the earlier release evidence, not this checkout's consumer requirements
 ## 6. Normal-install verification
 
 A `PYTHONPATH` splice does not establish that a miner can install this release.
-After the index gate in section 5, verify the actual consumer through normal
-resolution, using the repository's existing CI commands:
+Verify the actual consumer through normal locked resolution, using the repository's
+existing CI commands. Maintainers regenerate the lock with `uv lock` only when
+intentionally updating dependencies; ordinary verification keeps it unchanged:
 
 ```bash
-uv lock
 uv sync --locked
 bash scripts/lint.sh
 uv run coverage run --source=src -m pytest -q --junitxml=pytest-report.xml
@@ -337,9 +342,8 @@ readiness.
 
 CLI 1.8.0 requires protocol 0.18.0, which retains the controlled-v2 contract
 introduced in 0.15.0. Use the matching reviewed CPU task runtime for v1/v2
-authoring. Section 5 describes the current consumer release gate; regenerate the
-index lock only after the exact protocol release is available. Do not deploy a
-stale lockfile or present a source-path development run as a cold install.
+authoring. The index-resolved consumer lock is described in section 5. Do not
+deploy a stale lockfile or present a source-path development run as a cold install.
 
 ```bash
 openroboto task catalog --include-development --json
