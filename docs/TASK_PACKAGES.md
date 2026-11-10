@@ -648,6 +648,12 @@ openroboto task scene register BACKEND_TASK_ID --package ./my-submission \
 openroboto task scene status BACKEND_TASK_ID --config miner.yaml
 ```
 
+If the contributor identity uses a nondefault key, add `--key-file /path/to/author.key`
+to `submit`, using the same path as `identity show`. Repeat it on each retry;
+`--config` alone does not select that key. The default path remains
+`~/.openroboto/contributor.key`. Scene registration uses the wallet hotkey and
+does not need the contributor key.
+
 Before upload the CLI checks both local roots, the exact scene season, the
 server's verified environment/robot/control/observation/resource route, and the
 season's `params.hf.grant_to`. The existing manual gated access checks run before

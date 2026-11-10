@@ -48,6 +48,19 @@ hotkey's private key can produce the second signature.
 identity elsewhere. `--force` replaces an existing file and **abandons the
 identity it belongs to**; that is why it is not the default.
 
+If an existing registered identity uses another key file, select it explicitly
+for both the identity check and submission:
+
+```bash
+openroboto identity show --config miner.yaml --key-file /path/to/author.key
+openroboto submit --config miner.yaml --key-file /path/to/author.key
+```
+
+`--config` does not select a contributor key. Without `--key-file`, both commands
+still use `~/.openroboto/contributor.key`. Repeat the selected `--key-file` when
+retrying `submit` in the same workspace; the uploaded commit and payment checkpoint
+are reused. There is no need to replace the default key or register another identity.
+
 > ⚠️ **Back the file up.** If it is lost, that identity can no longer sign
 > anything. Its earnings can only be moved through an operator-arbitrated
 > migration (`POST /api/v1/admin/contributors/<id>/migrate`). There is no

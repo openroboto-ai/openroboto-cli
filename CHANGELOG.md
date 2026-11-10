@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.8.1 (unreleased)
+
+Task authors using a contributor key outside the default location can pass
+`submit --key-file <path>`, just as they do for `identity`. The payment preflight
+checks that selected identity instead of incorrectly checking the default key.
+Repeat the same option when resuming an uploaded submission; the upload checkpoint
+is retained. Commands without the option keep the existing default, and scene
+registration continues to use the wallet hotkey.
+
 ## Unreleased — imported-scene CLI candidate (OPE-234)
 
 - Resolve the published protocol 0.18.0 from official PyPI and regenerate the
@@ -55,9 +64,9 @@ Every entry answers one question before it lists anything: **does a miner have t
 change something, and what breaks if they do not?** A diff summary without "who
 has to act" is not usable by the people who installed this.
 
-## 1.8.0 (unpublished candidate)
+## 1.8.0
 
-Consumers of this candidate require Python 3.11 and exactly protocol 0.18.0.
+Consumers of this release require Python 3.11 and exactly protocol 0.18.0.
 Existing v1 authors keep the same defaults and commands; composed v2 remains
 explicitly selected with `task create --profile panda-tabletop-v2`. Imported scenes
 use schema 3, execution contract 3 and `panda-open-scene-v1@2.1.0`, through the
@@ -71,11 +80,10 @@ The registry lock now names CLI 1.8.0 and published protocol 0.18.0, with real
 PyPI URLs and hashes. Use `uv sync --locked` and the existing CI/normal wheel
 installation gates. Earlier 1.7.2/0.14.0 locks and local candidate wheels retain
 their original historical evidence; they are not this index-resolved install.
-CLI merge/tag/PyPI publication requires its own authorization.
 
 Historical development requirement: the first composed-v2 checkpoint used protocol
 0.15.0 and runtime 0.2.0. Those versions describe that earlier checkpoint only;
-they are not the requirements of this 1.8.0 consumer candidate. Full physical and
+they are not the requirements of this 1.8.0 release. Full physical and
 remote admission remain pending; selecting a development entry authorizes no fees
 or model requests.
 
