@@ -138,7 +138,7 @@ from openroboto.competition_state import (
 )
 from openroboto.config import Settings
 from openroboto.console import fail, say
-from openroboto.contributor import ContributorKeyError, load_key
+from openroboto.contributor import ContributorKeyError, key_file, load_key
 from openroboto.huggingface import TreeError, build_repo_id, fetch_tree
 from openroboto.huggingface.access import (
     AccessError,
@@ -181,6 +181,12 @@ def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) 
     )
     parser.add_argument("--config", default="miner.yaml")
     parser.add_argument("--output-dir", default="")
+    parser.add_argument(
+        "--key-file",
+        default="",
+        help="Contributor key file (default: ~/.openroboto/contributor.key). "
+        "Keep it outside the workspace",
+    )
     parser.add_argument(
         "--scene-package",
         default="",
@@ -366,7 +372,9 @@ def run(args: argparse.Namespace) -> int:
                     "repository access list before retrying."
                 )
                 return 1
-            if not contributor_is_bound(settings, state, verdict.live):
+            if not contributor_is_bound(
+                settings, state, verdict.live, getattr(args, "key_file", "")
+            ):
                 return 1
             if not layout_is_payable(settings, state, verdict.live):
                 return 1
@@ -503,7 +511,7 @@ def _no_season(config_path: str) -> None:
 
 
 def contributor_is_bound(
-    settings: Settings, state: dict[str, Any], live: Competition
+    settings: Settings, state: dict[str, Any], live: Competition, key_path: str = ""
 ) -> bool:
     """Will the backend accept this submission's author, or refuse it after the
     fee? False = do not pay.
@@ -542,7 +550,7 @@ def contributor_is_bound(
         return False
 
     try:
-        key = load_key()
+        key = load_key(key_file(key_path))
     except ContributorKeyError as exc:
         fail(
             f"This hotkey ({hotkey}) has no contributor identity on this "
@@ -575,6 +583,8 @@ def contributor_is_bound(
                     f"so {live.label}'s task track would refuse the submission "
                     f"with `contributor_unbound` **after taking the entry "
                     f"fee**. Nothing was paid.\n"
+                    f"   → if your registered identity uses another key, retry "
+                    f"`openroboto submit --key-file <path>` with the same config\n"
                     f"   → `openroboto identity register --reward-address <your "
                     f"ss58>` registers it\n"
                     f"   → then `openroboto identity bind` binds hotkey {hotkey}"
