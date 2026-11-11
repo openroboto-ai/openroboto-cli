@@ -1,4 +1,4 @@
-"""`openroboto task status` and the read-only backend calls behind it.
+"""`openroboto status` and the read-only backend calls behind it.
 
 These are local tests with a fake HTTP layer: no request is sent to 8091 or any
 other backend. What they pin is the auth split the task endpoints require --
@@ -86,7 +86,19 @@ def test_task_check_refuses_without_the_shared_digest(
     monkeypatch.setattr(tp, "_shared_digest_of_files", None)
     monkeypatch.setattr(tp, "_shared_package_digest", None)
     package = axis_package(tmp_path / "pkg")
-    assert main(["task", "check", str(package), "--json"]) == 1
+    assert (
+        main(
+            [
+                "check",
+                str(package),
+                "--static-only",
+                "--config",
+                str(_config(tmp_path)),
+                "--json",
+            ]
+        )
+        == 1
+    )
     summary = json.loads(capsys.readouterr().out)
     assert summary["digest_source"] == "unavailable(protocol release 0.13.0 needed)"
     assert summary["issues"][0]["code"] == "package.digest_unavailable"
@@ -207,6 +219,7 @@ def test_invalid_signature_points_at_the_access_message(capsys) -> None:
 def _config(tmp_path: Path) -> Path:
     path = tmp_path / "miner.yaml"
     path.write_text(
+        "competition: {id: 1, seq: 1, track: task}\n"
         "backend:\n"
         "  url: http://127.0.0.1:8091\n"
         f"  public_key: {MINER_KEY}\n"
@@ -250,7 +263,6 @@ def test_status_queries_with_the_miner_key_and_prints_the_package(
     assert (
         main(
             [
-                "task",
                 "status",
                 "--config",
                 str(_config(tmp_path)),
@@ -291,10 +303,7 @@ def test_probe_json_reports_ready(
         ),
     )
     assert (
-        main(
-            ["task", "status", "--config", str(_config(tmp_path)), "--probe", "--json"]
-        )
-        == 0
+        main(["status", "--config", str(_config(tmp_path)), "--probe", "--json"]) == 0
     )
     output = json.loads(capsys.readouterr().out)
     assert output["readiness"]["ready"] is True
@@ -325,7 +334,6 @@ def test_backend_url_overrides_the_config_without_rewriting_it(
     assert (
         main(
             [
-                "task",
                 "status",
                 "--probe",
                 "--config",
@@ -360,10 +368,7 @@ def test_probe_exits_non_zero_when_not_ready(
         ),
     )
     assert (
-        main(
-            ["task", "status", "--config", str(_config(tmp_path)), "--probe", "--json"]
-        )
-        == 1
+        main(["status", "--config", str(_config(tmp_path)), "--probe", "--json"]) == 1
     )
     output = json.loads(capsys.readouterr().out)
     assert output["readiness"]["ready"] is False
@@ -406,7 +411,7 @@ def test_status_preserves_backend_reward_fields_in_json_and_text(
         lambda base_url, hotkey: f"sign this for {hotkey}",
     )
     _serving(monkeypatch, _envelope([_task(**reward)]))
-    command = ["task", "status", "--config", str(_config(tmp_path))]
+    command = ["status", "--config", str(_config(tmp_path))]
 
     assert main([*command, "--json"]) == 0
     parsed = json.loads(capsys.readouterr().out)["tasks"][0]

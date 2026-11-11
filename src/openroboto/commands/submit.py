@@ -213,7 +213,14 @@ def run(args: argparse.Namespace) -> int:
         _no_season(args.config)
         return 1
     competition_id = snapshot.id
-    output_dir = args.output_dir or resolve_output_dir(competition_id)
+    if snapshot.track == TASK_TRACK and settings.authoring:
+        from openroboto.task_workspace import workspace_path
+
+        output_dir = args.output_dir or str(
+            workspace_path(settings, args.config, "package")
+        )
+    else:
+        output_dir = args.output_dir or resolve_output_dir(competition_id)
     state = load_state(competition_id)
 
     scene_path = str(getattr(args, "scene_package", "") or "")
@@ -428,7 +435,7 @@ def run(args: argparse.Namespace) -> int:
 def _scene_registration_hint() -> None:
     say(
         "Scene identity registration is still required. Run `openroboto "
-        "task status`, then `openroboto task scene register "
+        "status`, then `openroboto scene register "
         "<backend-task-id> --package <original-directory> --config "
         "<miner.yaml>`. Retry registration without paying again. Server "
         "admission and rewards remain separate."
@@ -460,7 +467,7 @@ def _prepare_scene_submission(
     except (ScenePackageError, OSError):
         fail(
             "The scene submission is incomplete or its bytes drifted. Run "
-            "`openroboto task scene check <directory>` for a safe field "
+            "`openroboto scene check <directory>` for a safe field "
             "diagnostic, then rebuild both roots. Nothing was uploaded or paid."
         )
         return False
@@ -869,7 +876,7 @@ def task_package_is_payable(
             f"would reject it **after the fee was paid**. **Nothing was paid, "
             f"nothing was sent on chain.**\n"
             f"{lines}\n"
-            f"   → fix the package, re-upload, and run `openroboto task check "
+            f"   → fix the package, re-upload, and run `openroboto check "
             f"{repo_id}@{commit}` before submitting again"
         )
         return False
@@ -889,7 +896,7 @@ def task_package_is_payable(
             f"nothing was sent on chain.**\n"
             f"   → supply `reference.json` with non-empty `actions` for every "
             f"instance, rebuild the package (the digest changes), run "
-            f"`openroboto task check` and submit again"
+            f"`openroboto check` and submit again"
         )
         return False
 
@@ -978,7 +985,7 @@ def task_package_upload_is_unchanged(state: dict[str, Any], output_dir: str) -> 
         f"   local:      {local}\n"
         f"   A leftover `run_info.json` or any added/removed file changes the "
         f"digest; the task uploader itself does not add one.\n"
-        f"   → run `openroboto task check --repo <repo> --commit <commit>` to "
+        f"   → run `openroboto check --repo <repo> --commit <commit>` to "
         f"see the per-file difference, remove the extra file, and submit again"
     )
     return False
@@ -1023,7 +1030,7 @@ def _scene_is_payable(
     except (ScenePackageError, PackageFetchError, OSError):
         fail(
             "Cannot verify both scene roots at the fixed HF commit. Run "
-            "`openroboto task scene check --repo <repo> --commit <full-commit> "
+            "`openroboto scene check --repo <repo> --commit <full-commit> "
             "--config <miner.yaml>`. Restore access or repair the package and "
             "retry; nothing was paid."
         )

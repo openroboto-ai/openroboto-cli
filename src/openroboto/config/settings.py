@@ -153,6 +153,7 @@ class Settings:
     #: commands reach for often enough to deserve a name of their own; they are
     #: read out of this same section, never set independently.
     competition: dict[str, Any] = field(default_factory=dict)
+    authoring: dict[str, Any] = field(default_factory=dict)
     #: Which competition this workspace mines, as the adapter string
     #: `openroboto init` wrote into `miner.yaml`. Empty = a config from before
     #: competitions existed; see `adapters.DEFAULT_ADAPTER` for what that means.
@@ -353,6 +354,7 @@ class Settings:
         # here would mean a CLI release per competition parameter.
         competition = _section(data, "competition")
         cfg.competition = competition
+        cfg.authoring = _section(data, "authoring")
         cfg.competition_adapter = str(
             competition.get("adapter", cfg.competition_adapter) or ""
         )

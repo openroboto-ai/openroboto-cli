@@ -124,7 +124,7 @@ ADAPTERS: Final = {
     # Task-authoring seasons (`competitions.track = "task"`). The artifact is a
     # task package, not a model: there is nothing to train, so `build`/`train`
     # refuse instead of inventing a container. The adapter exists so that a
-    # workspace can be created, read and submitted; `openroboto task check`
+    # workspace can be created, read and submitted; `openroboto check`
     # judges the package.
     "task_authoring": Adapter(training=UNAVAILABLE),
 }

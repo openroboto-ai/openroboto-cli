@@ -26,37 +26,37 @@ as open.
 
 ---
 
-## Restricted task authoring (candidate)
+## Task authoring
 
-Task authors can inspect the allowed Panda tabletop robot and objects with
-`openroboto task catalog`, then use `task create`, `task build`,
-`task record-reference` and `task self-test`. Simulator commands run in an
-explicit, separately installed task runtime; installing the CLI does not install
-MuJoCo. [Task package guide](docs/TASK_PACKAGES.md#7-create-a-task-using-the-restricted-tabletop-scheme)
-explains the ranges, local reference recording and optional public synopsis.
-This checkout is the unpublished CLI 1.8.0 candidate. Its protocol dependency is
-the matching unpublished 0.17.0 candidate. Install the reviewed protocol and CLI
-wheels together with normal dependency resolution; this does not announce a
-production authoring season or a published index release.
+Task and model seasons use the same top-level workflow. Choose a task season:
 
-For composed-task development, run `openroboto task catalog --include-development`
-and `openroboto task create definition.json --profile panda-tabletop-v2`.
-Build/reference/self-test keep their existing commands. The v2 example only moves
-one 40 mm cube; other geometries and mechanisms need an explicit author solver.
-Real physics reference success alone is not full admission: disturbance, nop,
-visibility, independent replay and resource checks still apply. Current research
-has unresolved disturbance failures. The default create command remains v1.
-Read [the candidate guide](docs/TASK_PACKAGES.md#8-composed-tabletop-development-candidate).
+```bash
+openroboto init my-task-workspace
+cd my-task-workspace
+# Edit task.json using catalog.json and add solve.py.
+openroboto check                 # v1 demo: check --example
+openroboto submit
+```
 
-Schema-3 author-owned scenes use the explicit `openroboto task scene` commands
-and `openroboto submit --scene-package <directory>`. Build/check bind the complete
-`execution/` and `private/` roots without installing MuJoCo. Scene recording and
-self-test currently return `resource_unavailable` until the reviewed scene runtime
-bridge is delivered; no local physical success is claimed. Server submission
-also requires the exact verified route and the season's manual gated account.
-See [the scene guide](docs/TASK_PACKAGES.md#9-author-owned-scenes-schema-3).
+The CLI writes a track-specific workspace. For controlled Panda v1/v2 tasks,
+`check` automatically prepares the official bundled CPU Docker image, builds the
+package, records missing reference actions and runs worker structural/physical
+admission. MuJoCo and the worker stay inside the container. No validator checkout,
+registry login or Python runtime path is needed. `check --static-only` runs
+without Docker; it does not produce a physical passing verdict.
 
-## Requirements
+`catalog`, `create`, `record-reference` and `self-test` are top-level authoring
+verbs. `build`, `check`, `doctor` and `status` route by `competition.track`.
+The task command group has been removed. Read the
+[task package guide](docs/TASK_PACKAGES.md) for objects, ranges, reference scripts,
+image identities, JSON verdicts and the pre-payment gate.
+
+Schema-3 imported scenes retain the explicit `openroboto scene` workflow and
+`openroboto submit --scene-package <directory>`. They need matching execution and
+private roots and the scene-specific runtime. See the
+[scene guide](docs/TASK_PACKAGES.md#9-author-owned-scenes-schema-3).
+
+## Model training requirements
 
 - Linux, an NVIDIA GPU (24 GB VRAM minimum) and a recent driver
 - Python **3.11**
@@ -105,9 +105,9 @@ Real-machine setup, systemd, custom strategies: [docs/MINER_DEPLOY.md](docs/MINE
 
 | Command | What it does |
 |---|---|
-| `openroboto init [DIR] [-s simple\|example] [--validator] [--refresh] [--backend-url URL] [--force]` | Create a working workspace: config, a training strategy to edit, a README with the exact next commands, and a `.gitignore` that keeps your wallet password out of git. ⚠️ **This is the one command that needs the network**: the open competitions come from `GET /api/v1/competitions`, and if that cannot be reached it writes **no file at all** rather than guessing a season. `--refresh` rewrites only the `competition:` section of an existing `miner.yaml`; `--backend-url` says which backend to ask (and the whole workspace is then written to match it); `--force` overwrites existing files |
+| `openroboto init [DIR] [-s simple\|example] [--validator] [--refresh] [--backend-url URL] [--force]` | Create a working workspace: config, a training strategy to edit, a README with the exact next commands, and a `.gitignore` that keeps your wallet password out of git. ⚠️ **This command queries the backend**: the open competitions come from `GET /api/v1/competitions`, and if that cannot be reached it writes **no file at all** rather than guessing a season. `--refresh` rewrites only the `competition:` section of an existing `miner.yaml`; `--backend-url` says which backend to ask (and the whole workspace is then written to match it); `--force` overwrites existing files |
 | `openroboto doctor` | Environment check: Python, config, the season's own spec, Docker, GPU, image, HF token, wallet balance against **this season's** fee |
-| `openroboto build` | Build the training image from the build context shipped inside the package (no clone, no network). Refuses for a competition this client has no image for, rather than filling that competition's image name with the π0.5 one |
+| `openroboto build` | Build the training image, or the task package and official self-test image, from the bundled context (no clone). Refuses for a competition this client has no image for, rather than filling that competition's image name with the π0.5 one |
 | `openroboto train [-s script.py]` | Train once; your strategy script is mounted into the container |
 | `openroboto check [PATH]` | Verify checkpoint layout with the rules the evaluator uses — **no GPU, no network, no second repository** |
 | `openroboto identity keygen \| show \| register \| bind \| unbind \| migrate` | The persistent contributor identity an authored task is paid to. `keygen` writes an Ed25519 key to `~/.openroboto/contributor.key` (mode 0600); `register` signs a `register` message; `bind` binds the hotkey in `miner.yaml` with **two** signatures (contributor key + hotkey sr25519). `submit` refuses to pay for a task-track entry from an unbound hotkey. See [CONTRIBUTOR.md](docs/CONTRIBUTOR.md) |

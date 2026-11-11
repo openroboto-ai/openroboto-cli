@@ -18,8 +18,7 @@ states and payload hashes all come from the frozen official bundle. The one
 addition is ``instance``, the ordinal of each variant, because the package
 loader indexes variants by it while the official manifest uses ``variant_id``.
 
-The output is not uploaded anywhere by this script. Run ``openroboto task
-check <out>`` before submitting.
+The output is not uploaded anywhere by this script. Run ``openroboto check <out>`` before submitting.
 """
 
 from __future__ import annotations

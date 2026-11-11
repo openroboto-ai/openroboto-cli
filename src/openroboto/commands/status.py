@@ -64,11 +64,18 @@ def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) 
     parser.add_argument(
         "--limit", type=int, default=DEFAULT_LIMIT, help="Max rows shown per section"
     )
+    from openroboto.commands.task import add_status_options
+
+    add_status_options(parser)
     parser.set_defaults(handler=run)
 
 
 def run(args: argparse.Namespace) -> int:
     settings = _load_settings(args.config)
+    if settings.competition.get("track") == "task":
+        from openroboto.commands.task import status_run
+
+        return status_run(args)
     hotkey = args.hotkey or settings.hotkey_ss58
     if not hotkey:
         raise ConfigError(

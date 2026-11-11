@@ -20,9 +20,13 @@ COMMANDS = (
     "check",
     "identity",
     "submit",
-    "task",
     "status",
     "validator",
+    "catalog",
+    "create",
+    "record-reference",
+    "self-test",
+    "scene",
 )
 
 
@@ -36,11 +40,16 @@ def test_every_documented_command_is_registered() -> None:
         for name in action.choices
     }
     assert registered == set(COMMANDS)
-    assert len(COMMAND_MODULES) == len(COMMANDS)
+    assert len(COMMAND_MODULES) + 5 == len(COMMANDS)
 
 
 @pytest.mark.parametrize(
-    "command", [c for c in COMMANDS if c not in ("validator", "identity")]
+    "command",
+    [
+        c
+        for c in COMMANDS
+        if c not in ("validator", "identity", "scene", "record-reference")
+    ],
 )
 def test_each_command_binds_a_handler(command: str) -> None:
     args = build_parser().parse_args([command])

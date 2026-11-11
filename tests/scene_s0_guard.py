@@ -62,10 +62,10 @@ def blocked_import(fullname: str) -> bool:
 
 def classify_cli_invocation(argv: list[str]) -> str:
     """Parent-side whitelist: do not even launch an installed authoring command."""
-    if argv[:3] != ["task", "scene", "instruction"] or len(argv[3:]) % 2:
+    if argv[:2] != ["scene", "instruction"] or len(argv[2:]) % 2:
         raise S0Violation("S0 installed CLI command is not pure instruction")
     seen = set()
-    for key, value in zip(argv[3::2], argv[4::2], strict=True):
+    for key, value in zip(argv[2::2], argv[3::2], strict=True):
         if (
             key
             not in {

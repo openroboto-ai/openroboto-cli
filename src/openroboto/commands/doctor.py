@@ -86,10 +86,16 @@ def run(args: argparse.Namespace) -> int:
         results.append(check_wallet(settings))
 
     results.append(check_docker())
-    results.append(check_gpu())
+    is_task = settings is not None and settings.competition.get("track") == "task"
+    if not is_task:
+        results.append(check_gpu())
     # The competition decides which image `train` runs, so a config that did not
     # parse means checking the historical default rather than guessing one.
-    results.append(check_image(args.config if settings is not None else ""))
+    if is_task:
+        assert settings is not None
+        results.extend(check_task_workspace(settings, args.config))
+    else:
+        results.append(check_image(args.config if settings is not None else ""))
 
     for result in results:
         say(result.render())
@@ -106,6 +112,56 @@ def run(args: argparse.Namespace) -> int:
         return 1
     say("✅ All required checks passed")
     return 0
+
+
+def check_task_workspace(settings: Settings, config: str) -> list[CheckResult]:
+    from openroboto.commands.task_check import _definition, static_package
+    from openroboto.task_package import TaskPackageError
+    from openroboto.task_runtime import TaskRuntime
+    from openroboto.task_workspace import workspace_path
+
+    results = []
+    try:
+        profile = settings.competition_params["task"]["execution_profile"]
+        definition = workspace_path(settings, config, "definition")
+        package = workspace_path(settings, config, "package")
+        if package.is_dir():
+            report = static_package(package, settings)
+            if not report["ok"]:
+                raise ConfigError(str(report["issues"]))
+        else:
+            _definition(definition, profile)
+        results.append(
+            CheckResult(
+                "task package/profile",
+                True,
+                str(package if package.is_dir() else definition),
+            )
+        )
+    except (ConfigError, TaskPackageError, ValueError, OSError, KeyError) as exc:
+        results.append(
+            CheckResult(
+                "task package/profile",
+                False,
+                str(exc),
+                "Fix task.json using catalog.json; run openroboto check --static-only",
+            )
+        )
+    try:
+        runtime = TaskRuntime(settings)
+        runtime.prepare(build=False)
+        results.append(
+            CheckResult(
+                "task runtime", True, f"{runtime.release['version']} {runtime.image}"
+            )
+        )
+    except (ConfigError, OSError, subprocess.SubprocessError, ValueError) as exc:
+        results.append(
+            CheckResult(
+                "task runtime", False, str(exc), "openroboto build or openroboto check"
+            )
+        )
+    return results
 
 
 def check_protocol_capabilities(settings: Settings) -> CheckResult:

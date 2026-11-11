@@ -25,7 +25,8 @@ from openroboto.commands import (
     init,
     status,
     submit,
-    task,
+    task_authoring,
+    task_scene,
     train,
     validator,
 )
@@ -51,7 +52,6 @@ COMMAND_MODULES: tuple[ModuleType, ...] = (
     check,
     identity,
     submit,
-    task,
     status,
     validator,
 )
@@ -105,6 +105,8 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command")
     for module in COMMAND_MODULES:
         module.add_parser(subparsers)
+    task_authoring.add_authoring_parsers(subparsers)
+    task_scene.add_parser(subparsers)
     return parser
 
 

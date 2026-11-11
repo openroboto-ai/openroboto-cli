@@ -76,6 +76,25 @@ def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) 
         "output directory",
     )
     parser.add_argument("--config", default="miner.yaml")
+    from openroboto.commands.task import add_check_options
+
+    add_check_options(parser)
+    parser.add_argument(
+        "--static-only",
+        action="store_true",
+        help="task track: check format without Docker or physics",
+    )
+    parser.add_argument(
+        "--example",
+        action="store_true",
+        help="task track: record the bundled one-cube v1 example",
+    )
+    parser.add_argument(
+        "--script", default="", help="local solve(runtime, task, instance) script"
+    )
+    parser.add_argument(
+        "--output", default="", help="new report file outside the package"
+    )
     parser.set_defaults(handler=run)
 
 
@@ -83,17 +102,49 @@ def run(args: argparse.Namespace) -> int:
     settings = competition_settings(args.config)
     snapshot = load_snapshot(settings)
     if snapshot is not None and snapshot.track == "task":
-        # A task package is not a checkpoint: the layout rules below would judge
-        # a `task.json` by the π0.5/LingBot file rules and reject a package the
-        # validator will happily admit.
-        fail(
-            f"{snapshot.label} is a task-authoring season, so its artifact is a "
-            f"task package, not a model checkpoint. This command judges model "
-            f"layouts and would reject a correct package.\n"
-            f"   → `openroboto task check <package>` prints the per-file hashes "
-            f"and the package digest the validator computes"
-        )
-        return 1
+        from openroboto.commands import task, task_check
+
+        if bool(args.repo) != bool(args.commit):
+            fail("--repo and --commit must be given together")
+            return 1
+        if args.static_only and (args.path or args.repo):
+            args.execution_profile = settings.competition_params.get("task", {}).get(
+                "execution_profile"
+            )
+            args.expected_source = settings.competition_params.get("task", {}).get(
+                "source", ""
+            )
+            return task.run(args)
+        if args.repo:
+            import tempfile
+
+            from openroboto.task_package import (
+                PackageFetchError,
+                TaskPackageError,
+                fetch_package,
+                select_package,
+            )
+
+            with tempfile.TemporaryDirectory(
+                prefix="openroboto-check-remote-"
+            ) as cache:
+                try:
+                    root = fetch_package(
+                        args.repo, args.commit, token=settings.hf_token, cache_dir=cache
+                    )
+                    args.path = str(
+                        select_package(root, source=args.source, relative=args.package)
+                    )
+                except (PackageFetchError, TaskPackageError) as exc:
+                    fail(f"Could not inspect the pinned remote package: {exc}")
+                    return 1
+                if args.example or args.script:
+                    fail(
+                        "Remote checks are read-only. Record references locally first."
+                    )
+                    return 1
+                return task_check.run(args, settings)
+        return task_check.run(args, settings)
     directory = Path(
         args.path or resolve_output_dir(workspace_competition_id(settings))
     )
