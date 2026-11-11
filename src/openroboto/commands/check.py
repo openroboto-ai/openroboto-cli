@@ -102,7 +102,21 @@ def run(args: argparse.Namespace) -> int:
     settings = competition_settings(args.config)
     snapshot = load_snapshot(settings)
     if snapshot is not None and snapshot.track == "task":
+        from openroboto.check_receipt import invalidate_receipt
         from openroboto.commands import task, task_check
+        from openroboto.task_workspace import workspace_path
+
+        try:
+            invalidate_receipt(
+                settings,
+                args.config,
+                Path(args.path)
+                if args.path
+                else workspace_path(settings, args.config, "package"),
+            )
+        except (OSError, ConfigError) as exc:
+            fail(str(exc))
+            return 1
 
         if bool(args.repo) != bool(args.commit):
             fail("--repo and --commit must be given together")

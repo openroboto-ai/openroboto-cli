@@ -10,6 +10,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from openroboto.check_receipt import invalidate_receipt, write_receipt
 from openroboto.config import ConfigError, Settings
 from openroboto.console import say
 from openroboto.task_package import (
@@ -72,6 +73,12 @@ def run(args: argparse.Namespace, settings: Settings) -> int:
     result: dict[str, Any] = {"ok": False, "ready_to_submit": False, "checks": []}
     output: Path | None = None
     try:
+        package = (
+            Path(args.path).expanduser().resolve()
+            if args.path
+            else workspace_path(settings, args.config, "package")
+        )
+        invalidate_receipt(settings, args.config, package)
         if args.output:
             from openroboto.commands.task_authoring import _external_file
 
@@ -87,7 +94,17 @@ def run(args: argparse.Namespace, settings: Settings) -> int:
                 )
             output = selected
         result.update(_check(args, settings))
+        written = write_receipt(
+            settings,
+            args.config,
+            result,
+            scope="static-only" if args.static_only else "full",
+        )
+        if written is not None:
+            result["receipt"] = str(written)
     except (ConfigError, TaskPackageError, OSError, ValueError) as exc:
+        result["ok"] = False
+        result["ready_to_submit"] = False
         result["error"] = str(exc)
         result["next"] = (
             "Fix task.json / the reported package field, then run "
