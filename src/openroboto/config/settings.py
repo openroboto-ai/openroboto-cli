@@ -18,6 +18,7 @@ Division of labour:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import yaml
@@ -86,6 +87,10 @@ def check_weight_interval(minutes: int) -> list[str]:
 @dataclass
 class Settings:
     """The full content of one config file."""
+
+    config_path: str = field(
+        default="miner.yaml", init=False, repr=False, compare=False
+    )
 
     #: Which subnet + backend this config talks to: `mainnet` | `dev`.
     #:
@@ -302,7 +307,9 @@ class Settings:
                 f"got {type(raw).__name__}"
             )
 
-        return cls.from_mapping(raw)
+        settings = cls.from_mapping(raw)
+        settings.config_path = str(Path(path).expanduser().resolve())
+        return settings
 
     @classmethod
     def from_mapping(cls, data: dict[str, Any]) -> Settings:
