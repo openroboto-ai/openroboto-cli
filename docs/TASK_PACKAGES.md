@@ -138,8 +138,39 @@ any package file does. Do not put reports, solver code or temporary files there.
 `submit` preserves the existing pre-payment gate: fetch the exact `repo@commit`,
 select and validate the package, require reference trajectories, compare the
 season's task source and execution profile, and print the resulting digest.
-Failed fetch or validation stops payment. The fee and live season are rechecked
-before confirmation. Check does not implicitly authorize a payment.
+Failed fetch or validation stops payment. It then verifies the detached local
+`evidence/check-receipt.json` against that measured digest. The receipt records
+the final package identity, admission/runtime/content versions, actual image ID,
+UTC check time, workspace and season identity, scope, and each check's
+`name`/`passed`/`kind`. It contains no check details, reference actions or private
+task text. It stays outside the uploaded package and never changes its digest.
+Every new check invalidates the previous receipt before running; a failed check
+leaves no successful receipt.
+
+Payment requires a successful `full` receipt from this workspace and season,
+matching the current admission release and the season's declared validity period.
+Missing, stale, static-only or mismatched receipts stop before confirmation and
+tell you to run `openroboto check` again. Changed uploaded bytes require checking
+and uploading those same bytes. Submit reads the receipt without building a
+container or rerunning physics, and does not upload the receipt to the backend.
+The fee and live season are rechecked before confirmation. Check does not
+implicitly authorize a payment.
+
+Operators must publish `params.task.check_receipt.max_age_seconds` as a positive
+integer and `params.task.runtime.admission_version` as the active worker's
+admission version. There is no default validity period or guessed live worker
+version. The CLI reads these fields from the live season response during submit;
+editing the workspace snapshot cannot grant an exception. A season may explicitly
+set `params.task.check_receipt.allow_static_only=true`; submit then labels that
+exception in its output. Otherwise `--static-only` never qualifies for payment.
+The runtime version/content/policy and image digest declarations, when provided,
+must also match the checked release.
+
+This receipt workflow uses the official controlled Panda v1/v2 image. The advanced
+schema-3 scene path below does not yet issue this receipt; its structural check
+and historical runtime proof cannot satisfy the new payment gate. Scene submission
+stops before payment until a matching receipt producer binds both scene roots
+and the season runtime. Do not rename a scene proof into a check receipt.
 
 The CLI pins `openroboto-protocol==0.18.0`; runtime 0.3.19 carries the same protocol
 and MuJoCo 3.17.0. Verify normal locked installs and wheel contents with:

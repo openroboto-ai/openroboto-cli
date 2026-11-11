@@ -58,6 +58,9 @@ def test_a_valid_axis_package_passes_and_records_the_digest(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    monkeypatch.setattr(
+        submit_command, "check_receipt_is_payable", lambda *a, **kw: True
+    )
     package = axis_package(tmp_path / "pkg")
     monkeypatch.setattr(submit_command, "fetch_package", lambda *a, **k: package)
 
@@ -74,6 +77,9 @@ def test_the_gate_digests_the_nested_package_directory(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    monkeypatch.setattr(
+        submit_command, "check_receipt_is_payable", lambda *a, **kw: True
+    )
     """The validator digests the package directory, not the repository root."""
     package = axis_package(tmp_path / "repo" / "my-task")
     monkeypatch.setattr(

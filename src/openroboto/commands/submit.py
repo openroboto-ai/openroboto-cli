@@ -136,7 +136,7 @@ from openroboto.competition_state import (
     resolve_output_dir,
     save_state,
 )
-from openroboto.config import Settings
+from openroboto.config import ConfigError, Settings
 from openroboto.console import fail, say
 from openroboto.contributor import ContributorKeyError, key_file, load_key
 from openroboto.huggingface import TreeError, build_repo_id, fetch_tree
@@ -807,7 +807,9 @@ def task_package_is_payable(
     is this a well-formed package, and is it the same bytes the miner checked.
     """
     if state.get("scene_submission"):
-        return _scene_is_payable(settings, state, live)
+        if not _scene_is_payable(settings, state, live):
+            return False
+        return check_receipt_is_payable(settings, state, live, state["package_digest"])
     repo_id = str(state.get("hf_repo_id", ""))
     commit = announced_commit(state)
     where = f"{repo_id}@{commit[:8]}"
@@ -919,11 +921,35 @@ def task_package_is_payable(
     # same number the backend will store. `save_state` runs later in the same
     # command; a crash before it leaves the file as it was, which is the safe
     # direction (nothing was paid).
+    if not check_receipt_is_payable(settings, state, live, digest):
+        return False
     state["package_digest"] = digest
     state["package_source"] = package.source
     state["package_task_id"] = package.task_id
     say(f"✅ task package ok | {where} ({package.source}/{package.task_id})")
     say(f"   package_digest: {digest}")
+    return True
+
+
+def check_receipt_is_payable(
+    settings: Settings, state: dict[str, Any], live: Competition, digest: str
+) -> bool:
+    from openroboto.check_receipt import verify_receipt
+
+    scene = state.get("scene_submission")
+    try:
+        receipt = verify_receipt(
+            settings,
+            live,
+            digest,
+            submission_digest=scene["submission_digest"] if scene else None,
+        )
+    except ConfigError as exc:
+        fail(f"{exc}\nNothing was paid or sent on chain.")
+        return False
+    if receipt["scope"] == "static-only":
+        say("The live season explicitly allows this static-only check receipt.")
+    say(f"✅ check receipt matches {digest} ({receipt['scope']})")
     return True
 
 
