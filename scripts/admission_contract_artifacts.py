@@ -9,11 +9,18 @@ import subprocess
 import sys
 import tarfile
 import zipfile
-from importlib.resources import files
 from pathlib import Path
 from typing import Any
 
 CONTRACT_PATH = Path("tests/contracts/admission_contract")
+
+
+class AdmissionIdentityMismatch(ValueError):
+    def __init__(self, expected, actual, component):
+        super().__init__(f"Admission version mismatch: {component}")
+        self.expected = expected
+        self.actual = actual
+        self.component = component
 
 
 def verify_digest(path: Path, expected: str) -> None:
@@ -50,8 +57,19 @@ def extract_contract(archive: Path, output: Path) -> None:
                 destination.write_bytes(source.read())
 
 
-def extract_worker(output: Path) -> dict[str, Any]:
-    context = Path(str(files("openroboto").joinpath("runner/task")))
+def extract_worker(output: Path, *, python: str = sys.executable) -> dict[str, Any]:
+    probe = subprocess.run(
+        [
+            python,
+            "-c",
+            "from importlib.resources import files; "
+            "print(str(files('openroboto').joinpath('runner/task')))",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    context = Path(probe.stdout.strip())
     release = json.loads((context / "release.json").read_text())
     wheels = [name for name in release["files"] if name.endswith(".whl")]
     if len(wheels) != 1:
@@ -106,17 +124,20 @@ def prepare_contract(
     verify_digest(archive, lock["archive_sha256"])
     output.mkdir(parents=True, exist_ok=False)
     extract_contract(archive, output)
-    release = extract_worker(output)
+    release = extract_worker(output, python=python)
     baseline = json.loads((output / CONTRACT_PATH / "baseline.json").read_text())
     identity = probe_identity(output, python=python)
     identity["validator_commit"] = lock["validator_commit"]
-    if identity != baseline["identity"] or identity != lock["identity"]:
-        raise ValueError(
-            "Admission version mismatch between the fixture lock, worker baseline "
-            f"and CLI runtime bytes: actual={identity}, baseline={baseline['identity']}"
+    if identity != baseline["identity"]:
+        raise AdmissionIdentityMismatch(baseline["identity"], identity, "identity")
+    if lock["identity"] != baseline["identity"]:
+        raise AdmissionIdentityMismatch(
+            baseline["identity"], lock["identity"], "lock.identity"
         )
     if identity["admission_version"] != release["admission_version"]:
-        raise ValueError(
-            "Admission version mismatch between runtime code and release metadata"
+        raise AdmissionIdentityMismatch(
+            identity["admission_version"],
+            release["admission_version"],
+            "release.admission_version",
         )
     return {"root": output, "baseline": baseline, "identity": identity, "lock": lock}

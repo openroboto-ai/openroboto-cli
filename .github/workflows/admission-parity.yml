@@ -1,0 +1,53 @@
+name: Admission verdict parity
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: admission-parity-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  admission-parity:
+    name: fixed CLI / worker structural verdicts
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.11.18"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - run: uv sync --locked
+
+      # The archive is synthetic and version-locked in this public repository.
+      # The worker bytes come from the installed CLI's official runtime wheel.
+      # No private validator checkout, Docker, MuJoCo, or registry token is used.
+      - name: Compare the real CLI structural handler with worker evidence
+        run: |
+          uv run python scripts/capture_cli_admission.py \
+            --output-dir artifacts/admission-parity
+
+      - name: Keep verdicts and field differences, including failures
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: admission-parity-cli
+          path: |
+            artifacts/admission-parity/*.json
+            artifacts/admission-parity/raw/*
+          retention-days: 14
+          if-no-files-found: error

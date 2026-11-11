@@ -291,7 +291,7 @@ def test_contract_source_identity_must_match_all_three_parties(tmp_path, monkeyp
     monkeypatch.setattr(
         module,
         "extract_worker",
-        lambda root: {"admission_version": "task-source-miner/1"},
+        lambda root, **kw: {"admission_version": "task-source-miner/1"},
     )
     content = {k: v for k, v in baseline["identity"].items() if k != "validator_commit"}
     monkeypatch.setattr(module, "probe_identity", lambda *a, **kw: dict(content))
