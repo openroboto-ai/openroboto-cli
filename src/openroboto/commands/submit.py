@@ -879,7 +879,7 @@ def task_package_is_payable(
             f"nothing was sent on chain.**\n"
             f"{lines}\n"
             f"   → fix the package, re-upload, and run `openroboto check "
-            f"{repo_id}@{commit}` before submitting again"
+            f"--repo {repo_id} --commit {commit}` before submitting again"
         )
         return False
 

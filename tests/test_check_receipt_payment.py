@@ -162,7 +162,9 @@ def test_receipt_does_not_replace_remote_structure_validation(
     data["package_digest"] = package_digest(package)
     path.write_text(json.dumps(data))
     assert not submit.task_package_is_payable(settings, state, live)
-    assert "not well formed" in capsys.readouterr().err
+    error = capsys.readouterr().err
+    assert "not well formed" in error
+    assert f"openroboto check --repo author/task --commit {'a' * 40}" in error
 
 
 def test_same_local_receipt_must_match_the_uploaded_commit(checked, monkeypatch):
