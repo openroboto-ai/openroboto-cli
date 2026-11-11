@@ -50,7 +50,7 @@ def test_real_cli_rejects_special_task_json_without_blocking(
         )
         with entry.open("wb") as stream:
             stream.truncate(limit + 1)
-    args = ["task", "scene", command]
+    args = ["scene", command]
     if command == "build":
         args += [
             "--execution",
@@ -243,10 +243,7 @@ def test_register_finds_exact_task_after_first_page(
         return page(rows, kwargs.get("offset", 0), kwargs["limit"])
 
     monkeypatch.setattr(task_scene, "fetch_my_tasks", fetch)
-    assert (
-        main(["task", "scene", "register", "paid-task", "--package", str(submission)])
-        == 0
-    )
+    assert main(["scene", "register", "paid-task", "--package", str(submission)]) == 0
     assert [offset for offset, _ in calls] == list(range(0, target_index + 1, 100))
     downloaded, registered, signed = registration
     assert downloaded == [
@@ -274,10 +271,7 @@ def test_registration_exhaustion_has_no_download_or_register(
         )
 
     monkeypatch.setattr(task_scene, "fetch_my_tasks", fetch)
-    assert (
-        main(["task", "scene", "register", "paid-task", "--package", str(submission)])
-        == 1
-    )
+    assert main(["scene", "register", "paid-task", "--package", str(submission)]) == 1
     assert json.loads(capsys.readouterr().out)["issues"][0]["code"] == "task_not_found"
     assert calls == ([0] if count == 0 else [0, 100])
     assert registration[0] == registration[1] == []
@@ -296,7 +290,7 @@ def test_lookup_page_cap_is_distinct_and_resumable(
         return page(rows, offset, kwargs["limit"])
 
     monkeypatch.setattr(task_scene, "fetch_my_tasks", fetch)
-    args = ["task", "scene", "register", "paid-task", "--package", str(submission)]
+    args = ["scene", "register", "paid-task", "--package", str(submission)]
     assert main(args) == 1
     finding = json.loads(capsys.readouterr().out)["issues"][0]
     assert finding["code"] == "task_lookup_limit"
@@ -320,7 +314,6 @@ def test_negative_lookup_offset_does_not_query_pages(
     assert (
         main(
             [
-                "task",
                 "scene",
                 "register",
                 "paid-task",
@@ -356,10 +349,7 @@ def test_failed_second_page_preserves_auth_and_has_no_registration(
         return page(rows, offset, kwargs["limit"])
 
     monkeypatch.setattr(task_scene, "fetch_my_tasks", fetch)
-    assert (
-        main(["task", "scene", "register", "paid-task", "--package", str(submission)])
-        == 1
-    )
+    assert main(["scene", "register", "paid-task", "--package", str(submission)]) == 1
     result = json.loads(capsys.readouterr().out)
     assert result["code"] == (
         "INVALID_SIGNATURE" if failure == "auth" else "TASK_LOOKUP_PAGE_MISMATCH"
@@ -385,10 +375,7 @@ def test_lookup_does_not_register_a_different_private_identity(
         remote.root / "execution", tmp_path / "changed", private=remote.root / "private"
     )
     monkeypatch.setattr(task_scene, "fetch_package", lambda *a, **k: changed.root)
-    assert (
-        main(["task", "scene", "register", "paid-task", "--package", str(submission)])
-        == 1
-    )
+    assert main(["scene", "register", "paid-task", "--package", str(submission)]) == 1
     assert (
         json.loads(capsys.readouterr().out)["issues"][0]["code"] == "submission_drift"
     )

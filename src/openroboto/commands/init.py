@@ -129,12 +129,6 @@ def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) 
         help="where to ask for the competition list; defaults to backend.url in "
         "the target's miner.yaml, or to production",
     )
-    parser.add_argument(
-        "--include-task",
-        action="store_true",
-        help="also list task-authoring seasons (track=task). Those take a task "
-        "package, not a model checkpoint; model miners should leave this off",
-    )
     parser.add_argument("--force", action="store_true", help="overwrite existing files")
     parser.set_defaults(handler=run)
 
@@ -148,13 +142,7 @@ def run(args: argparse.Namespace) -> int:
     target = Path(args.directory)
     try:
         backend_url = _backend_url(args, target)
-        # `--refresh` always asks for task seasons too: its whole job is to
-        # find the season the workspace already mines, and a task workspace
-        # cannot do that if the list omits tracks the CLI now understands.
-        rows = _competitions(
-            backend_url,
-            include_task=getattr(args, "include_task", False) or args.refresh,
-        )
+        rows = _competitions(backend_url)
         # 🔴 `--refresh` re-reads **the season this workspace already mines**.
         #    It must not ask.
         #
@@ -167,8 +155,11 @@ def run(args: argparse.Namespace) -> int:
         #    competition section, leave every other line untouched"; switching
         #    seasons is the one thing that cannot honour it.
         live = _refresh_target(target, rows) if args.refresh else _pick(rows)
-        adapters.resolve(live.adapter)
-        strategy = _strategy(args.strategy, live)
+        if str(live.track) != "task":
+            adapters.resolve(live.adapter)
+        strategy = (
+            _strategy(args.strategy, live) if str(live.track) != "task" else "simple"
+        )
         if args.refresh:
             return _refresh(target / CONFIG_TEMPLATE["miner"], live, backend_url)
         subnet = _subnet_of(backend_url)
@@ -192,6 +183,40 @@ def run(args: argparse.Namespace) -> int:
         # password. The dot is added only when it lands on disk.
         ".gitignore": _template("gitignore"),
     }
+
+    if str(live.track) == "task":
+        from openroboto.task_runtime import resolve_runtime
+        from openroboto.task_workspace import catalog_for, definition_for, json_text
+
+        try:
+            profile = live.params.get("task", {}).get("execution_profile")
+            catalog = catalog_for(profile)
+            definition = definition_for(profile)
+            runtime_settings = Settings(competition_params=live.params)
+            release = resolve_runtime(runtime_settings)
+        except (ConfigError, ValueError) as exc:
+            fail(str(exc))
+            return 1
+        config = yaml.safe_load(contents["miner.yaml"])
+        for section in ("model", "training", "custom_train_script"):
+            config.pop(section, None)
+        config["authoring"] = {
+            "definition": "task.json",
+            "package": "task-package",
+            "solve": "solve.py",
+            "evidence": "evidence",
+            "runtime": {
+                key: release[key]
+                for key in ("version", "content_sha256", "admission_version")
+            },
+        }
+        contents = {
+            "miner.yaml": yaml.safe_dump(config, sort_keys=False, allow_unicode=True),
+            "task.json": json_text(definition),
+            "catalog.json": json_text(catalog),
+            "README.md": _template("README-task.md"),
+            ".gitignore": _template("gitignore") + "\nevidence/\ntask-package/\n",
+        }
 
     target.mkdir(parents=True, exist_ok=True)
     for name, content in contents.items():
@@ -221,17 +246,11 @@ def run(args: argparse.Namespace) -> int:
     )
     say("  2. `openroboto doctor` — catch environment problems before you pay")
     if str(live.track) == "task":
-        # A task season takes a task package, not a model. Telling the miner to
-        # run `build`/`train` would have them train something no one evaluates.
         say(
-            "  3. Put the task package under the output directory, then "
-            "`openroboto task check <package>`"
+            "  3. Edit task.json using catalog.json; add solve.py or "
+            "use --example for the v1 example"
         )
-        say("  4. `openroboto submit` — uploads the package and pays the entry fee")
-        say(
-            "     Set `huggingface.repo_id` to the package repository; the "
-            "default `pi05-…` name is a model name"
-        )
+        say("  4. `openroboto check` → `openroboto submit`")
     else:
         say("  3. `openroboto build` → `openroboto train` →")
         say("     `openroboto check` → `openroboto submit`")
@@ -335,12 +354,9 @@ def _config_text(subnet: Subnet) -> str:
     )
 
 
-def _competitions(backend_url: str, *, include_task: bool = False) -> list[Competition]:
-    """Ask which competitions are open. Unreachable = stop, never a default."""
-    if include_task:
-        rows = list(fetch_competitions(backend_url, include_task=True).data)
-    else:
-        rows = list(fetch_competitions(backend_url).data)
+def _competitions(backend_url: str) -> list[Competition]:
+    """List every supported track, including task-authoring seasons."""
+    rows = list(fetch_competitions(backend_url, include_task=True).data)
     if not rows:
         raise BackendError(
             f"{backend_url} lists no competition taking submissions right now.\n"

@@ -43,7 +43,7 @@ so that a mistake costs you nothing:
 ```bash
 openroboto doctor       # config, competition + entry fee, HF permissions, balance, Docker, GPU, image
 openroboto check        # the evaluation format rules, applied locally
-openroboto task check   # task-authoring seasons: per-file hashes + package digest
+openroboto check   # task-authoring seasons: per-file hashes + package digest
 ```
 
 Run both before `openroboto submit`. The rules they enforce are documented in

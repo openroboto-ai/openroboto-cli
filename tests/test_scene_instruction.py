@@ -132,7 +132,6 @@ def instruction_case(runtime_case, monkeypatch):
 
 def instruction_command(case, *, prepare=True):
     args = [
-        "task",
         "scene",
         "instruction",
         "--execution",

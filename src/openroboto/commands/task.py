@@ -1,4 +1,4 @@
-"""``openroboto task`` -- inspect and validate a task package before submission.
+"""Task package inspection -- inspect and validate a task package before submission.
 
 A task season takes a **task package** (``task.json`` + instances) instead of a
 model checkpoint. The miner needs two answers before paying the entry fee:
@@ -39,8 +39,6 @@ from openroboto.backend_api import (
 )
 from openroboto.chain import hotkey_signature as sign_hotkey
 from openroboto.chain import open_wallet
-from openroboto.commands.task_authoring import add_authoring_parsers
-from openroboto.commands.task_scene import add_parser as add_scene_parser
 from openroboto.config import ConfigError, Settings
 from openroboto.console import fail, say
 from openroboto.task_package import (
@@ -59,24 +57,7 @@ from openroboto.task_package import (
 )
 
 
-def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    parser = subparsers.add_parser(
-        "task",
-        help="inspect and validate a task package (task-authoring seasons)",
-    )
-    subparsers_ = parser.add_subparsers(dest="task_command")
-    add_authoring_parsers(subparsers_)
-    add_scene_parser(subparsers_)
-    check = subparsers_.add_parser(
-        "check",
-        help="print per-file SHA-256s and the package digest; validate the format",
-    )
-    check.add_argument(
-        "path",
-        nargs="?",
-        default=".",
-        help="local task package directory, defaults to the current directory",
-    )
+def add_check_options(check: argparse.ArgumentParser) -> None:
     check.add_argument(
         "--repo",
         default="",
@@ -101,12 +82,6 @@ def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) 
         "source (the validator also filters by the season's source)",
     )
     check.add_argument(
-        "--config",
-        default="miner.yaml",
-        help="read huggingface.token from this file when fetching --repo "
-        "(default: miner.yaml; never required for a public package)",
-    )
-    check.add_argument(
         "--expect-digest",
         default="",
         help="fail when the computed digest differs from this value (for example "
@@ -117,29 +92,18 @@ def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) 
         action="store_true",
         help="machine-readable output (one JSON object on stdout)",
     )
-    check.set_defaults(handler=run)
 
-    status = subparsers_.add_parser(
-        "status",
-        help="read the task packages this hotkey submitted (MINER key + signature)",
-    )
-    status.add_argument("--config", default="miner.yaml")
+
+def add_status_options(status: argparse.ArgumentParser) -> None:
     status.add_argument(
         "--backend-url",
         default="",
         help="override backend.url from --config; useful for the isolated "
         "instance (http://127.0.0.1:8091) without rewriting the file",
     )
-    status.add_argument(
-        "--hotkey",
-        default="",
-        help="SS58 whose packages to read; defaults to subnet.hotkey_ss58 or the "
-        "wallet's own hotkey",
-    )
     status.add_argument("--status", default="", help="filter by task status")
     status.add_argument("--source", default="", choices=("", *TASK_SOURCES))
     status.add_argument("--skill", default="")
-    status.add_argument("--limit", type=int, default=20)
     status.add_argument(
         "--run-id",
         default="",
@@ -154,13 +118,6 @@ def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) 
         "sends no key and no task query",
     )
     status.add_argument("--json", action="store_true")
-    status.set_defaults(handler=status_run)
-    parser.set_defaults(handler=lambda args: _usage(parser))
-
-
-def _usage(parser: argparse.ArgumentParser) -> int:
-    parser.print_help()
-    return 1
 
 
 def status_run(args: argparse.Namespace) -> int:
@@ -414,12 +371,25 @@ def run(args: argparse.Namespace) -> int:
             directory = selected
             where = str(directory)
 
-        summary = inspect(directory)
+        summary = inspect(directory, expected_profile=args.execution_profile)
     finally:
         if temporary is not None:
             temporary.cleanup()
 
     summary["locator"] = where
+    summary["ready_to_submit"] = False
+    summary["phase"] = "static"
+    if args.expected_source and summary["source"] != args.expected_source:
+        summary["ok"] = False
+        summary["issues"].append(
+            {
+                "code": "source_mismatch",
+                "severity": "error",
+                "message": (
+                    f"Expected source {args.expected_source}, got {summary['source']}"
+                ),
+            }
+        )
     summary["repo"] = args.repo
     summary["commit"] = args.commit
     if snapshot_root.resolve() != directory.resolve():
@@ -465,7 +435,9 @@ def select_package(
         return None
 
 
-def inspect(directory: str | pathlib.Path) -> dict[str, Any]:
+def inspect(
+    directory: str | pathlib.Path, *, expected_profile: object = None
+) -> dict[str, Any]:
     """Everything both the human and JSON outputs need, without printing."""
     root = pathlib.Path(directory).expanduser()
     summary: dict[str, Any] = {
@@ -541,7 +513,7 @@ def inspect(directory: str | pathlib.Path) -> dict[str, Any]:
     summary["source"] = package.source
     summary["task_id"] = package.task_id
     summary["instruction"] = package.instruction
-    issues = validate_package(package)
+    issues = validate_package(package, expected_execution_profile=expected_profile)
     summary["issues"].extend(
         {"code": issue.code, "message": issue.message, "severity": issue.severity}
         for issue in issues
@@ -608,4 +580,4 @@ def _token(config_path: str) -> str:
         return ""
 
 
-__all__ = ["add_parser", "inspect", "run"]
+__all__ = ["add_check_options", "add_status_options", "inspect", "run"]

@@ -1,393 +1,160 @@
-# Task packages — checking one before you pay
+# Task packages — the miner workflow
 
-> **Status**: current · **Updated**: 2026-11-05 · **Audience**: miners entering a
-> task-authoring season (`competitions.track = "task"`).
+> **Status**: current · **Updated**: 2026-11-12 · **Audience**: task authors.
 
-A task-authoring season does **not** take a model checkpoint. The on-chain
-commitment names a Hugging Face repository at one commit, exactly as a model
-submission does, but that repository holds a **task package**. This document is
-about checking that package locally and understanding the digest the subnet
-stores for it.
-
-The package format itself (the `task.json` fields, the AXIS manifests, the
-RoboDojo reference shape) belongs to the validator; see
-`openroboto-validator` → `docs/task-package-format.md`. This document covers the
-miner-facing commands and the one number that joins the two sides.
-
-## 1. What the CLI does
+## Initialize, check, submit
 
 ```bash
-openroboto task check ./my-task                 # local directory, offline
-openroboto task check ./my-task --json          # machine-readable evidence
-openroboto task check --repo user/pkg --commit <40-hex>
-openroboto task check --repo user/pkg --commit <40-hex> --expect-digest <64-hex>
-
-openroboto task status --probe                  # GET /healthz + /readyz only
-openroboto task status --json                   # your own tasks (MINER key + signature)
-openroboto task status --probe \
-  --backend-url http://127.0.0.1:8091           # override backend.url for one call
-```
-
-`task status` reads the backend's `/healthz` and `/readyz` (`--probe`, no key
-sent), or `GET /api/v1/tasks/mine` for the tasks the configured hotkey
-submitted. Its JSON output includes the `meta.request_id` of the task query, so
-the line can be quoted in an evidence record and matched against backend
-logs.
-
-`--run-id <id>` records an operator run id in that output. It is **not sent on
-the wire**: the miner task endpoints have no `run_id` field or header, and the
-backend rejects unknown query parameters with `400 UNKNOWN_QUERY_PARAM` rather
-than ignoring them. The run id is for joining the CLI evidence with the
-A/B budget/shared-run files, not part of the task request. The latter needs **two independent proofs**, and they fail
-differently:
-
-- the **MINER-level key** in `X-API-Key`, from `backend.public_key` (or the
-  `public_key` published in `control.json`);
-- the **hotkey signature** over the exact text from
-  `GET /api/v1/tasks/access-message`.
-
-🔴 **Never put the ADMIN_KEY in a miner workspace.** It configures seasons,
-fees and settlements; the CLI has no field for it and never reads one. A
-`UNAUTHORIZED` answer means the MINER key is missing; `INVALID_SIGNATURE`
-means the wallet's hotkey is not the one being queried.
-
-A minimal config for an isolated backend (the key comes from the operator's
-`0600` env file, never from this repository):
-
-```yaml
-backend:
-  url: http://127.0.0.1:8091
-  public_key: <MINER-level key>
-subnet:
-  hotkey_ss58: <the hotkey in the wallet this config names>
-```
-
-When the backend is ready, run the probe first; it touches no key, no chain and
-no task row. A `readyz: NOT ready` line names whether the database or the
-migration head is the failing half.
-
-`task check` prints:
-
-- the **SHA-256 of every file**, sorted by path, so two packages can be diffed
-  file by file;
-- the **package digest** computed from those files;
-- structural findings for the declared source.
-
-`--repo/--commit` downloads exactly that revision and judges what the validator
-will read. A branch or tag is refused: the identity is `repo@commit`.
-
-`--expect-digest` compares the computed value with a digest the subnet reported
-(for example a validator's `package_digest`). A mismatch is exit code 1.
-
-The command validates the **format**: required manifests, instance references,
-and the canonical hashes the manifests declare. It does not claim the task is
-solvable, deterministic or not a freebie — those are the validator's runtime
-admission results, not something a static check can answer.
-
-## 2. The digest rule
-
-> The implementation is `openroboto_protocol.package_digest`, introduced in
-> protocol 0.13.0. The CLI has no local mirror. Protocol 0.14.0 adds the
-> restricted authoring contract without changing this digest or the on-chain
-> format. See the release requirement below for the separately installed runtime.
-
-The miner, the admission worker and the backend must compute the same value
-byte for byte:
-
-1. walk **every regular file** in the package directory, recursively, with no
-   whitelist and no exclusions;
-2. sort paths **as paths** (not as strings);
-3. per file, `sha256(read_bytes())`;
-4. digest the UTF-8 bytes of `"\n".join(f"{path}\0{file_sha256}")`.
-
-Three consequences worth knowing:
-
-- Adding any file — a `run_info.json`, a `.DS_Store`, a stray backup — changes
-  the digest. `openroboto submit` therefore uploads a task package exactly as
-  written and does not inject a run-info file.
-- Renaming the directory does not change the digest. The identity is the
-  content, not the directory name.
-- The backend does not recompute this value. The validator reports
-  `package_digest` on `POST /api/v1/task/admit`, and the backend stores the
-  reported value in `tasks.package_digest` (a second report with a different
-  digest is a `PACKAGE_DIGEST_MISMATCH`).
-
-### Reference solutions are required for runtime admission
-
-A package may omit `reference_solution` and still pass the **static** format
-check. It is not a complete submission: the validator's runtime admission has
-no trajectory to replay and rejects it as `reject_unsolvable` (OPE-145 measured
-this on an official-payload package that passed every static check).
-
-`task check` emits `axis.reference_not_declared` as a warning in that case. If
-a reference is declared, it must carry a non-empty `actions` list for every
-instance; a `final_state`-only file is an error
-(`axis.reference_actions_missing`).
-
-Adding a reference changes the package digest. Build a **new** package
-identity/digest for it; never edit an old frozen digest to make it match. The
-builder accepts a real reference with `--reference <reference.json>` and
-refuses one whose instances lack actions.
-
-## 3. Submitting
-
-```bash
-openroboto init my-task-workspace --include-task
+openroboto init my-task-workspace
 cd my-task-workspace
-# put the package in the output directory (or pass --output-dir to submit)
-openroboto task check <package>
+# Select a task season, edit task.json using catalog.json, and add solve.py.
+openroboto check
 openroboto submit
 ```
 
-For a task season `submit`:
+`init` lists task seasons by default. It selects templates using the chosen
+`competition.track`: model seasons keep their training workspace; task seasons
+get `miner.yaml` with `authoring`, a valid `task.json` authoring definition,
+`catalog.json`, this track's README and `.gitignore`. The catalog contains the
+complete protocol catalog for the season's exact execution profile, including
+all objects, dimensions, limits and resource profiles. A development profile
+stays marked as development even when a season explicitly selects it.
 
-- skips the model layout and weights-fingerprint gates;
-- downloads the repository at the commit that will go on chain, validates it,
-  and refuses if the package's declared `source` differs from the season's
-  `params.task.source` (the validator would use the wrong checker vocabulary);
-- prints the package digest it computed, which is the value admission will
-  report and the backend will store.
+The workspace `task.json` is a definition. The generated `task-package/task.json`
+is the submission manifest. Submit uploads only `authoring.package` (default
+`task-package/`); it does not upload `miner.yaml`, solve.py or evidence.
 
-It then pays the entry fee and announces the commitment as usual. Runtime
-admission happens after the commitment is scanned; a package that passes this
-check can still be rejected as unsolvable, non-deterministic or a freebie.
-
-One runtime-fatal shape is refused **before** the fee: an AXIS package with no
-reference solution actions. OPE-145 measured that such a package passes every
-static check and is rejected by the runtime as `reject_unsolvable`; paying for
-it would buy a rejection. Supply `reference.json` with non-empty per-instance
-`actions`, rebuild (the digest changes), and submit again.
-
-A task workspace must set `huggingface.repo_id`. There is no honest default:
-`pi05-<hotkey>` is a model name, and the repository holds a task package.
-
-## 4. Official source material
-
-The validator repository ships the frozen official AXIS release bundle
-(`configs/benchmarks/axis_v2.0.tar.zst`) with its release receipt and payloads.
-A per-task package derived from that bundle keeps the official `mjcf_xml`,
-checker configuration, initial states and payload hashes; only the package
-loader key `instance` is added to each randomization variant. Do not substitute
-a self-made scene for the official one: it may pass this command while testing
-something nobody evaluates.
-
-The CLI repository ships a reproducible builder for that conversion:
+## Free local admission
 
 ```bash
-python scripts/build_task_package.py \
-  --release <validator>/configs/benchmarks/axis_v2.0.tar.zst \
-  --receipt <validator>/configs/benchmarks/axis_v2.0-release.json \
-  --task-id 22 --out /tmp/axis-22
-openroboto task check /tmp/axis-22
+openroboto check --static-only           # definition/package format, no Docker
+openroboto check                         # missing reference: use solve.py
+openroboto check --example               # unchanged v1 one-cube example only
+openroboto check --script ./solve.py --json
+openroboto check ./existing-package --json
+openroboto check --repo user/pkg --commit <40-hex> --static-only --json
 ```
 
-It verifies the archive against the receipt, copies payloads verbatim, and adds
-only the loader's `instance` ordinal. The resulting package is accepted by the
-validator's static admission (`checker_registered`, `axis.payload_hashes`,
-`axis.manifest_hashes`, instance count); solvable / not-a-freebie remain runtime
-checks.
+Full check validates the definition, builds a missing/changed package, records a
+missing reference, packages the reference into a new content identity, runs the
+worker's structural admission, then its physical admission. The worker's actual
+`admit_package` / `_admit_task` and `run_admission` supply the verdict. Checks
+retain `name`, `passed`, `kind`, and `detail`; the CLI does not implement another
+checker, noise, freebie or determinism policy.
 
-RoboDojo packages reference the official task at the validator's pinned commit
-(`task.json.robodojo_ref`); they contain no geometry of their own. Runtime
-requires Isaac Sim 5.1 and an A100.
+`READY TO SUBMIT` means the local static/physics checks passed. JSON records
+`package_digest`, `admission_version`, `runtime_version`,
+`admission_policy_sha256`, `runtime_content_sha256` and the immutable local
+Docker `image_digest`. A missing reference, unsolved instance, unstable checker,
+freebie or invalid structure yields `NOT READY` and a next action. Static-only
+success has `ready_to_submit=false` and does not produce a physical passing
+receipt. It never builds or runs a container.
 
-## 5. Requirement on the protocol release
+Your local `solve.py` defines `solve(runtime, task, instance)`. It must solve every
+instance through the runtime; reference replay and admission check the recorded
+actions. `--example` is a real pushing example for the v1 cube template, not a
+solver for arbitrary objects or composed tasks. For an existing incorrect
+reference, use `openroboto record-reference --script solve.py`, then check again.
 
-This checkout declares CLI **1.8.0** and exactly **openroboto-protocol==0.18.0**.
-Protocol 0.18.0 is published on official PyPI. The normally generated `uv.lock`
-names CLI 1.8.0, protocol 0.18.0 and the same exact metadata requirement, with the
-actual published URLs and hashes. The older 1.7.2/0.14.0 lock is historical evidence.
+Recording uses a working copy. Only a complete new reference is published into
+the task package. The final `reference.json` is required package content and
+changes the digest; solve scripts, raw recording reports and admission reports
+stay in `evidence/`. Physical admission mounts the package read-only. Old failed
+attempts and previous bundles remain available for inspection outside the upload.
 
-The official protocol wheel SHA-256 is
-`bcddd6aa202352d0b83f4f023b395d6cef99128e419c49efa1a52a661229f3bf`;
-the sdist SHA-256 is
-`b721d1594bb1cd7d1e3935af97f3a865aa7458b1557d35018a126a3deab71c43`.
-These belong to release `v0.18.0`, source
-`73175b4a20476717a436695853b53b722baea3ed`. They are distinct from the earlier
-local candidate wheel in section 9, even though its package files are identical.
+No check uploads, pays, contacts a model or requires a model API key. The local
+dedup corpus is explicitly empty: passing it cannot establish originality
+against the server's private corpus. Server registration, admission and reward
+eligibility remain separate server decisions.
 
-Verify locked sync, CI and a clean wheel installation. Do not edit lock entries by
-hand, override dependencies, skip dependency resolution or substitute a local wheel
-for formal index evidence. CLI merge/tag/publication needs separate authorization;
-publishing the protocol does not freeze or admit a runtime environment.
+## Official self-test image
 
-Historical baseline: CLI 1.7.0 used published protocol 0.14.0 and its registry lock;
-protocol 0.13.0 introduced task commitments/shared package digests. These statements
-describe the earlier release evidence, not this checkout's consumer requirements.
+As with simulation training, the CLI wheel carries the official Docker build
+context. No container registry login or validator checkout is needed:
 
-## 6. Normal-install verification
+```bash
+openroboto build                         # optional package/image preparation
+openroboto doctor                        # package, profile, Docker and image
+```
 
-A `PYTHONPATH` splice does not establish that a miner can install this release.
-Verify the actual consumer through normal locked resolution, using the repository's
-existing CI commands. Maintainers regenerate the lock with `uv lock` only when
-intentionally updating dependencies; ordinary verification keeps it unchanged:
+`check` builds the image automatically on first use. The context includes a
+pinned Python base digest, a fixed Debian snapshot, a hash-locked dependency
+file and the validator's runtime wheel. Every file is SHA-256-bound in
+`runner/task/release.json`. The installed CLI verifies those bytes, the local
+image label, and the container's runtime/protocol/admission/profile metadata.
+Commands then run by immutable image ID, not a mutable tag. The first build needs
+network access to download the pinned dependencies; container execution uses
+`--network=none`. Subsequent checks reuse the matching local image.
+
+The optional season declaration is `params.task.runtime` with `version`,
+`content_sha256` and `admission_version`. Each declared field must match the
+bundled release. `init` records the selected release under `authoring.runtime`;
+`check` and `doctor` refuse a mismatch instead of substituting another runtime.
+The exact execution profile is mandatory for this workflow. Older unprofiled
+packages can still be inspected with explicit `check <path> --static-only`.
+
+The CPU admission policy comes from the worker's bundled `axis-cpu` policy:
+180 seconds for a complete package's physics; reference recording allows at
+most 900 seconds. The local container additionally limits CPU to 2 cores, memory
+to 4 GiB, PIDs to 256 and temporary storage to 512 MiB. It runs as the host UID,
+with a read-only root, no capabilities, no network and only explicit input files
+and a scratch output mount. No workspace credentials are mounted. These local
+isolation limits do not assert that an independently deployed worker has the
+same host/cgroup configuration.
+
+Maintainers build the runtime context with the validator's
+`authoring_runtime/build_image_context.py`, then include that exact context in
+the CLI release. The runtime wheel is part of the CLI artifact; it does not need
+a separate PyPI or registry publication. Keep the release manifest, build log,
+wheel hash and actual image ID with acceptance evidence.
+
+## Other commands and task status
+
+`catalog` prints the same profile-filtered object as `catalog.json`.
+`create [task.json]` creates a fresh definition without overwriting a file.
+`record-reference` and `self-test` use the bundled container and default to the
+workspace package. These task-specific verbs refuse model workspaces. There is
+one top-level set of `build`, `check`, `status` and `doctor`, routed by the
+workspace track. The former task command group has been removed without aliases.
+
+```bash
+openroboto status --json
+openroboto status --probe
+openroboto status --probe --backend-url http://127.0.0.1:8091
+```
+
+Task status uses the configured hotkey's signature over the backend access
+message plus the MINER-level API key. A readiness probe sends no key and queries
+only health/readiness. The CLI never reads an ADMIN_KEY. `--run-id` is recorded
+in output only, not sent as an unknown backend query parameter.
+
+## The digest and payment gate
+
+`openroboto_protocol.package_digest` is the shared implementation. It hashes all
+regular package files, sorts paths as paths, and hashes the UTF-8 sequence of
+`path + NUL + file_sha256` lines. Directory names do not affect identity; adding
+any package file does. Do not put reports, solver code or temporary files there.
+
+`submit` preserves the existing pre-payment gate: fetch the exact `repo@commit`,
+select and validate the package, require reference trajectories, compare the
+season's task source and execution profile, and print the resulting digest.
+Failed fetch or validation stops payment. The fee and live season are rechecked
+before confirmation. Check does not implicitly authorize a payment.
+
+The CLI pins `openroboto-protocol==0.18.0`; runtime 0.3.19 carries the same protocol
+and MuJoCo 3.17.0. Verify normal locked installs and wheel contents with:
 
 ```bash
 uv sync --locked
 bash scripts/lint.sh
-uv run coverage run --source=src -m pytest -q --junitxml=pytest-report.xml
+uv run coverage run --source=src -m pytest -q
 uv run coverage report
 uv build
-# Use a new, unused environment; install the built wheel with all dependencies.
-uv venv /tmp/openroboto-consumer-new --python 3.11
-uv pip install --python /tmp/openroboto-consumer-new/bin/python dist/openroboto-1.8.0-py3-none-any.whl
-uv pip check --python /tmp/openroboto-consumer-new/bin/python
-/tmp/openroboto-consumer-new/bin/openroboto --version
-/tmp/openroboto-consumer-new/bin/openroboto task scene --help
 ```
 
-CI also audits skips and wheel contents. Retain raw results and published protocol
-artifact hashes; the release build's actual bytes need not equal a local candidate
-wheel. The CLI environment does not install a simulator runtime. Installed S0
-checks may use registry/describe/pure render/NEW E only; actual record/self-test
-requires an independently approved trial plan and the final joint runtime tuple.
-
-Historical explicit-wheel development verification used the following helper:
-
-```bash
-python scripts/verify_task_cli_install.py \
-  --protocol-wheel /path/to/openroboto_protocol-<version>-py3-none-any.whl \
-  --package /path/to/task/package \
-  --expect-digest <64-hex> \
-  --config <miner.yaml> \
-  --status-config <miner.yaml-with-wallet> \
-  --run-id <operator-run-id>
-```
-
-That historical helper copies the working tree to a temporary directory, rewrites the
-protocol pin **only in that copy** to the candidate wheel's version, builds the
-CLI wheel, creates a fresh venv, installs both wheels with normal dependency
-resolution, and runs the installed `openroboto` binary without `PYTHONPATH`.
-It is not the formal index/lock verification above. It checks `Track.TASK`,
-`AXIS_LAYOUT`, the package digest, the live `/healthz`
-+ `/readyz` probe, and (with `--status-config`) a signed `tasks/mine` read.
-
-`--shared-module` / `--shared-function` (default
-`openroboto_protocol.package_digest.package_digest`) compare the CLI digest
-with the shared implementation. The verifier is **fail-closed**: a missing
-module or function, a non-zero probe, malformed output, a non-64-hex value,
-`digest_source` other than `openroboto-protocol`, or a digest mismatch all exit
-non-zero. There is no fail-open diagnostic mode; a probe pointed at a missing
-function must be red.
-
-The simulator runtime candidate is not a published release. Review it as an
-explicit local wheel, with normal dependency resolution; installing the CLI
-alone does not install the simulator.
-
-## 7. Create a task using the restricted tabletop scheme
-
-These commands are a local authoring flow, not a task submission. They do not
-upload, pay, call a model or grant an admission result themselves:
-
-```bash
-openroboto task catalog --json
-openroboto task create task-definition.json
-# Edit positions and goals within the catalog's ranges.
-openroboto task build --definition task-definition.json --output ./my-task \
-  --runtime-python /path/to/task-runtime/bin/python
-openroboto task record-reference ./my-task --example \
-  --runtime-python /path/to/task-runtime/bin/python
-openroboto task self-test ./my-task --output ./self-test.json \
-  --runtime-python /path/to/task-runtime/bin/python
-openroboto task check ./my-task --json
-```
-
-The lightweight CLI does not install a simulator. Install the separately
-versioned `openroboto-task-runtime` wheel in a dedicated environment and select
-its Python with `--runtime-python`. A missing or failed runtime is an error;
-there is no mock or fallback runtime. The runtime wheel must be published before
-this becomes an index-only public runtime installation path.
-
-The initial scheme uses one Franka Panda arm, one or two fixed rigid cubes and
-round target areas on a fixed tabletop. `task catalog` publishes the exact
-object sizes, mass, position ranges, success conditions and fixed runtime
-reference. Authors may change only the listed fields. An arbitrary mesh,
-robot, gravity, object mass or checker is not accepted by this scheme.
-
-`--example` is a verified local one-cube push demonstration, not a general
-solver. For other tasks, record the author's own local reference:
-
-```bash
-openroboto task record-reference ./my-task --script ./solve.py \
-  --runtime-python /path/to/task-runtime/bin/python
-```
-
-`solve.py` defines `solve(runtime, task, instance)`. It runs explicitly on the
-author's machine. Keep it outside the task package; remote workers only replay
-the resulting action JSON. Keep self-test reports outside too: every package
-file affects the digest. Build outputs and reports never overwrite existing
-files. `task check` checks format and shared budget rules; only a successful
-physical self-test demonstrates the reference can run. The official admission
-worker must independently repeat its own checks after submission.
-
-A new definition freezes `execution_profile` (id, version and digest) and a
-restricted `task_definition`. The CLI, runtime and backend use the same shared
-validation. If a season requires that profile, omitting it cannot fall back to
-a legacy task. Existing task bytes and digests are never rewritten.
-
-Public display is opt-in: pass `--public-summary public.json` to `task create`
-or `task build`. The synopsis must explicitly declare title, instruction,
-robot, execution_profile and origin (`original`, `derived` or `imported`).
-It is intended to be public. Omitting it leaves no public synopsis; old private
-instructions are not copied into it. Start from the exact reference returned
-by `task catalog`, rather than typing a digest by hand.
-
-When local validation is complete, reuse the existing task workspace,
-Hugging Face upload and `openroboto submit` flow. The live season's fee and
-required profile are rechecked before payment. Static validity or an example
-reference is not a promise of discrimination, author emissions or launch
-readiness.
-
-## 8. Composed tabletop development candidate
-
-CLI 1.8.0 requires protocol 0.18.0, which retains the controlled-v2 contract
-introduced in 0.15.0. Use the matching reviewed CPU task runtime for v1/v2
-authoring. The index-resolved consumer lock is described in section 5. Do not
-deploy a stale lockfile or present a source-path development run as a cold install.
-
-```bash
-openroboto task catalog --include-development --json
-openroboto task create composed.json --profile panda-tabletop-v2
-openroboto task build --definition composed.json --output composed-package \
-  --task-id local-composed --runtime-python /path/to/cpu-env/bin/python
-openroboto task record-reference composed-package --example \
-  --runtime-python /path/to/cpu-env/bin/python
-openroboto task self-test composed-package \
-  --runtime-python /path/to/cpu-env/bin/python
-```
-
-`--example` is only a local one-cube recording example. It has unresolved
-disturbance failures and is not a generally admitted solver. A failing self-test
-must remain visible; do not remove seeds or loosen tolerances to pass it.
-
-The generated definition names actual catalog assets and circular zones. Each
-zone declares accepted asset specifications and capacity. A stage combines
-`in_zone`, `pose`, `stable`, `released`, `supported_by`, `no_contact` and `matching`
-using `all`, `any` or `not`. Held stage goals and earlier-stage dependencies are
-explicit; `reject_early` rejects early satisfaction. Episode and active-stage
-invariants run at every 2 ms physics step, with violations latched until reset.
-Reference action order has no scoring meaning unless the authored stage program
-explicitly requires it. Zone capacity constrains the named objects assigned by
-`matching`; it is not a global occupancy invariant. Use explicit predicates and
-invariants when another object must stay outside a zone or retain its state. Whole-shape containment and real upward supporting
-contact replace fixed-cube approximations. Spherical pose targets are rejected
-as unobservable under geometric symmetry.
-
-`observation: "state"` exposes physical object truth. `"vision"` hides object
-coordinates, truth state, private judge traces and diagnostics; it requires real
-camera pixels and uses visual object/zone labels in instructions. The candidate
-freezes a 1280 by 720 vision image and a 320 by 180 state-mode image; camera
-calibration and dimensions are part of its digest. It does not
-claim visual recognition quality until per-object visibility is independently
-checked. Resource tiers bound development inputs and steps; they do not grant
-API calls or establish a supported object-count limit. Both compared agents must
-use the same frozen observation, tools, resource tier and execution contract.
-
-This candidate implements controlled rigid primitives and convex meshes on
-Panda. Full physical robustness, all supported combinations and remote dev
-submission are pending. Importing arbitrary author-owned scenes/assets, robot
-adapters or deformable simulation needs a separate validated capability path;
-renaming a primitive or loading a mesh does not establish that capability.
+Legacy official AXIS and RoboDojo material remains subject to the season's source
+and runtime. The bundled CPU authoring image supports the exact controlled
+Panda v1/v2 profiles; RoboDojo's Isaac Sim runtime is not a CPU substitute.
 
 ## 9. Author-owned scenes (schema 3)
 
@@ -428,10 +195,10 @@ because model-card content may bypass HF gating.
 
 ```bash
 # These commands require only the lightweight CLI, not MuJoCo.
-openroboto task catalog --include-development --json
-openroboto task scene build --execution ./my-execution \
+openroboto catalog --include-development --json
+openroboto scene build --execution ./my-execution \
   --reference ./my-private-reference.json --output ./my-submission
-openroboto task scene check ./my-submission
+openroboto scene check ./my-submission
 ```
 
 Alternatively pass `--private ./my-private-tree` instead of `--reference` to
@@ -455,7 +222,7 @@ Its JSON says `scope=structure_only`, `local_physics=not_run`,
 Canonical instruction generation uses an optional capability in the same runtime:
 
 ```bash
-openroboto task scene instruction --execution ./source/execution \
+openroboto scene instruction --execution ./source/execution \
   --runtime-python /path/to/runtime/bin/python \
   --output ./instruction-public.json --prepared-execution ./prepared/execution
 ```
@@ -573,17 +340,17 @@ recording. The CLI never derives private materials from a public summary, copies
 solver code into E, overwrites an existing P, or rewrites E for another runtime.
 
 ```bash
-openroboto task scene record-reference --execution ./authored/execution \
+openroboto scene record-reference --execution ./authored/execution \
   --private ./authored/private --manifest ./authored/submission.json \
   --script ./solve.py --runtime-python /path/to/runtime/bin/python \
   --private-report ./private-diagnostics/record.json --output ./record-summary.json
-openroboto task scene check ./authored
-openroboto task scene self-test --execution ./authored/execution \
+openroboto scene check ./authored
+openroboto scene self-test --execution ./authored/execution \
   --private ./authored/private --manifest ./authored/submission.json \
   --runtime-python /path/to/runtime/bin/python \
   --private-report ./private-diagnostics/test.json --output ./self-test-summary.json
 # Equivalent self-test shorthand (existing complete bundle):
-# openroboto task scene self-test ./authored --runtime-python ... --output ...
+# openroboto scene self-test ./authored --runtime-python ... --output ...
 ```
 
 `--output` receives only projected identities, fixed errors and check booleans.
@@ -641,11 +408,11 @@ pipeline:
 
 ```bash
 openroboto submit --config miner.yaml --scene-package ./my-submission
-openroboto task status --config miner.yaml
+openroboto status --config miner.yaml
 # Use the backend task id above, not task.json's author-defined task id.
-openroboto task scene register BACKEND_TASK_ID --package ./my-submission \
+openroboto scene register BACKEND_TASK_ID --package ./my-submission \
   --config miner.yaml
-openroboto task scene status BACKEND_TASK_ID --config miner.yaml
+openroboto scene status BACKEND_TASK_ID --config miner.yaml
 ```
 
 If the contributor identity uses a nondefault key, add `--key-file /path/to/author.key`

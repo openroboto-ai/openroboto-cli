@@ -48,7 +48,6 @@ def test_build_and_check_bind_both_roots_and_never_publish_reference(
     assert (
         main(
             [
-                "task",
                 "scene",
                 "build",
                 "--execution",
@@ -65,7 +64,7 @@ def test_build_and_check_bind_both_roots_and_never_publish_reference(
     assert "do-not-log-me" not in json.dumps(built)
     assert built["scope"] == "structure_only"
     assert built["local_physics"] == built["server_admission"] == "not_run"
-    assert main(["task", "scene", "check", str(output)]) == 0
+    assert main(["scene", "check", str(output)]) == 0
     checked = read_output(capsys)
     assert built["submission"] == checked["submission"]
     assert checked["reward_status"] == "not_evaluated"
@@ -74,7 +73,6 @@ def test_build_and_check_bind_both_roots_and_never_publish_reference(
     assert (
         main(
             [
-                "task",
                 "scene",
                 "build",
                 "--execution",
@@ -99,7 +97,6 @@ def test_build_from_private_tree_rebinds_execution_and_retains_stray_bytes(
     assert (
         main(
             [
-                "task",
                 "scene",
                 "build",
                 "--execution",
@@ -168,7 +165,7 @@ def test_diagnostics_before_upload_are_private_and_actionable(
         (scene / "private/reference.json").write_text(
             '{"schema_version":true,"private_marker":"private-marker"}'
         )
-    assert main(["task", "scene", "check", str(root)]) == 1
+    assert main(["scene", "check", str(root)]) == 1
     raw = capsys.readouterr()
     assert "private-marker" not in raw.out + raw.err
     finding = json.loads(raw.out)["issues"][0]
@@ -190,25 +187,21 @@ def test_xml_edges_are_independently_checked_after_dependency_hashes(scene, caps
                 size_bytes=xml.stat().st_size,
             )
     task_path.write_text(json.dumps(task))
-    assert main(["task", "scene", "check", str(scene)]) == 1
+    assert main(["scene", "check", str(scene)]) == 1
     assert read_output(capsys)["issues"][0]["code"] == "dependency_undeclared"
 
 
 def test_remote_check_requires_exact_locator_and_checks_joint_digest(
     scene, monkeypatch, capsys
 ):
-    assert main(["task", "scene", "check", "--repo", "author/scene"]) == 1
+    assert main(["scene", "check", "--repo", "author/scene"]) == 1
     assert read_output(capsys)["issues"][0]["code"] == "locator_incomplete"
     monkeypatch.setattr(task_scene, "fetch_package", lambda *a, **k: scene)
-    assert (
-        main(["task", "scene", "check", "--repo", "author/scene", "--commit", "a" * 40])
-        == 0
-    )
+    assert main(["scene", "check", "--repo", "author/scene", "--commit", "a" * 40]) == 0
     assert read_output(capsys)["ok"]
     assert (
         main(
             [
-                "task",
                 "scene",
                 "check",
                 str(scene),
@@ -237,7 +230,7 @@ def test_missing_scene_runtime_never_runs_author_code_or_claims_physics(
         scene_authoring, "_invoke", lambda python, argv, **kw: probe(argv, **kw)
     )
     output = tmp_path / "diagnostic.json"
-    argv = ["task", "scene", command, "--output", str(output)]
+    argv = ["scene", command, "--output", str(output)]
     if command == "record-reference":
         argv += [
             "--execution",
@@ -384,10 +377,7 @@ def test_registration_signs_transport_and_roots_without_inferring_reward(
 
     monkeypatch.setattr(task_scene, "hotkey_signature", sign)
     monkeypatch.setattr(task_scene, "register_scene", lambda *a: progress(scene))
-    assert (
-        main(["task", "scene", "register", "backend-task", "--package", str(scene)])
-        == 0
-    )
+    assert main(["scene", "register", "backend-task", "--package", str(scene)]) == 0
     assert messages[-1] == registration_message(
         row.task_id,
         row.package_repo,
@@ -398,13 +388,10 @@ def test_registration_signs_transport_and_roots_without_inferring_reward(
     assert registered["result"]["admission"] == "not_run"
     assert registered["result"]["reward_status"] == "not_evaluated"
     monkeypatch.setattr(task_scene, "fetch_scene_progress", lambda *a: progress(scene))
-    assert main(["task", "scene", "status", "backend-task"]) == 0
+    assert main(["scene", "status", "backend-task"]) == 0
     assert read_output(capsys) == registered
     (scene / "private/extra.txt").write_text("changed")
-    assert (
-        main(["task", "scene", "register", "backend-task", "--package", str(scene)])
-        == 1
-    )
+    assert main(["scene", "register", "backend-task", "--package", str(scene)]) == 1
     assert read_output(capsys)["issues"][0]["code"] == "private_drift"
 
 
@@ -424,10 +411,7 @@ def test_registration_wallet_mismatch_fails_before_any_backend_request(
         raise AssertionError("No request should be sent with the wrong wallet")
 
     monkeypatch.setattr(task_scene, "miner_key", forbidden)
-    assert (
-        main(["task", "scene", "register", "backend-task", "--package", str(scene)])
-        == 1
-    )
+    assert main(["scene", "register", "backend-task", "--package", str(scene)]) == 1
     assert read_output(capsys)["issues"][0]["code"] == "wallet_mismatch"
 
 
@@ -465,13 +449,16 @@ def test_scene_http_envelope_auth_and_safe_progress(scene, monkeypatch):
 
 @pytest.mark.parametrize("command", ["record-reference", "self-test"])
 def test_legacy_physics_commands_refuse_scene_roots(scene, monkeypatch, command):
-    from openroboto.commands import task_authoring
 
     def forbidden(*a, **k):
         raise AssertionError("A v1 recorder must not receive a schema-3 package")
 
-    monkeypatch.setattr(task_authoring, "_runtime", forbidden)
-    argv = ["task", command, str(scene / "execution")]
+    from openroboto.task_runtime import TaskRuntime
+    from tests.task_workspace_fixture import write_task_config
+
+    config = write_task_config(scene.parent)
+    monkeypatch.setattr(TaskRuntime, "prepare", forbidden)
+    argv = [command, str(scene / "execution"), "--config", str(config)]
     if command == "record-reference":
         argv.append("--example")
     assert main(argv) == 1
@@ -614,7 +601,7 @@ def test_normal_submit_entry_orders_gates_and_reuses_paid_checkpoint(
 def test_previous_scene_profile_is_explicitly_rejected_without_migration(capsys):
     old = FIXTURE.with_name("open_scene_profile_2_0")
     before = {p.relative_to(old): p.read_bytes() for p in old.rglob("*") if p.is_file()}
-    assert main(["task", "scene", "check", str(old)]) == 1
+    assert main(["scene", "check", str(old)]) == 1
     report = read_output(capsys)
     assert report["ok"] is False and report["scope"] == "structure_only"
     assert before == {

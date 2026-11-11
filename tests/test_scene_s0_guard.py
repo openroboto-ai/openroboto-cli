@@ -106,14 +106,13 @@ def test_s0_guard_leaves_regular_pure_python_operations_available():
 @pytest.mark.parametrize("command", ["record-reference", "self-test"])
 def test_s0_guard_rejects_even_parent_cli_authoring_before_launch(command):
     with pytest.raises(guard.S0Violation):
-        guard.classify_cli_invocation(["task", "scene", command])
+        guard.classify_cli_invocation(["scene", command])
 
 
 def test_s0_guard_allows_parent_cli_instruction_and_new_E():
     assert (
         guard.classify_cli_invocation(
             [
-                "task",
                 "scene",
                 "instruction",
                 "--execution",

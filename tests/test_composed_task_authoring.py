@@ -9,9 +9,15 @@ from openroboto.commands.task_authoring import run_catalog, run_create
 
 
 def test_create_v2_is_explicit_and_does_not_overwrite(tmp_path):
+    from tests.task_workspace_fixture import write_task_config
+
+    config = write_task_config(tmp_path, profile=profile_ref())
     target = tmp_path / "definition.json"
     args = argparse.Namespace(
-        definition=str(target), profile="panda-tabletop-v2", public_summary=""
+        config=str(config),
+        definition=str(target),
+        profile="panda-tabletop-v2",
+        public_summary="",
     )
     assert run_create(args) == 0
     document = json.loads(target.read_text())
@@ -21,13 +27,12 @@ def test_create_v2_is_explicit_and_does_not_overwrite(tmp_path):
     assert run_create(args) == 1 and target.read_bytes() == original
 
 
-def test_default_catalog_does_not_advertise_development_as_released(capsys):
-    assert run_catalog(argparse.Namespace(json=True, include_development=False)) == 0
-    released = json.loads(capsys.readouterr().out)
-    assert all(
-        p["execution_profile"]["id"] != "panda-tabletop-v2"
-        for p in released["profiles"]
-    )
-    assert run_catalog(argparse.Namespace(json=True, include_development=True)) == 0
-    candidate = json.loads(capsys.readouterr().out)["profiles"][-1]
-    assert candidate["status"] == "development_candidate"
+def test_catalog_respects_exact_season_profile(tmp_path, capsys):
+    from tests.task_workspace_fixture import write_task_config
+
+    config = write_task_config(tmp_path, profile=profile_ref())
+    assert run_catalog(argparse.Namespace(config=str(config), json=True)) == 0
+    profiles = json.loads(capsys.readouterr().out)["profiles"]
+    assert len(profiles) == 1
+    assert profiles[0]["execution_profile"] == profile_ref()
+    assert profiles[0]["status"] == "development_candidate"

@@ -168,7 +168,6 @@ def runtime_case(tmp_path, monkeypatch):
 
 def command(case, name="record-reference"):
     args = [
-        "task",
         "scene",
         name,
         "--execution",
@@ -385,7 +384,6 @@ def test_old_record_form_gets_migration_without_loading_private_root(
     assert (
         main(
             [
-                "task",
                 "scene",
                 "record-reference",
                 str(case["root"]),
@@ -742,7 +740,6 @@ def test_retained_default_diagnostics_are_private_and_self_test_shorthand_works(
     assert (
         main(
             [
-                "task",
                 "scene",
                 "self-test",
                 str(case["root"]),

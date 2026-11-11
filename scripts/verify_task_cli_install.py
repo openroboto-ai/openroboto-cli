@@ -15,8 +15,8 @@ real install path in a throwaway copy and a fresh venv:
 5. run the installed `openroboto` binary -- no `PYTHONPATH`, no source tree on
    `sys.path` -- and check:
    - `Track` admits `task` and `model_format` has `AXIS_LAYOUT`;
-   - `openroboto task check <package>` reports the expected digest;
-   - optionally `openroboto task status --probe --config <miner.yaml>`.
+   - `openroboto check <package>` reports the expected digest;
+   - optionally `openroboto status --probe --config <miner.yaml>`.
 
 The candidate wheel is a **candidate**, not a published release. This proves
 the install shape; it does not make the version pip-installable from PyPI.
@@ -167,17 +167,17 @@ def venv_python(venv: pathlib.Path) -> pathlib.Path:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--protocol-wheel", required=True)
-    parser.add_argument("--package", default="", help="task package for `task check`")
+    parser.add_argument("--package", default="", help="task package for `check`")
     parser.add_argument(
         "--scene-package", default="", help="dual-root input for scene build/check"
     )
     parser.add_argument(
-        "--config", default="", help="miner.yaml for `task status --probe`"
+        "--config", default="", help="miner.yaml for `status --probe`"
     )
     parser.add_argument(
         "--status-config",
         default="",
-        help="miner.yaml with a signable hotkey wallet for `task status`",
+        help="miner.yaml with a signable hotkey wallet for `status`",
     )
     parser.add_argument(
         "--run-id", default="", help="operator run id recorded in the output"
@@ -185,7 +185,7 @@ def main() -> int:
     parser.add_argument(
         "--expect-digest",
         default="",
-        help="fail when `task check` reports a different package digest",
+        help="fail when `check` reports a different package digest",
     )
     parser.add_argument(
         "--shared-module",
@@ -268,7 +268,6 @@ def main() -> int:
                 run(
                     [
                         str(cli),
-                        "task",
                         "scene",
                         "build",
                         "--execution",
@@ -280,7 +279,7 @@ def main() -> int:
                     ]
                 )
             )
-            checked = json.loads(run([str(cli), "task", "scene", "check", str(built)]))
+            checked = json.loads(run([str(cli), "scene", "check", str(built)]))
             summary["scene_check"] = checked
             if not checked["ok"] or checked["scope"] != "structure_only":
                 raise SystemExit(
@@ -297,7 +296,7 @@ def main() -> int:
                     raise SystemExit(f"Scene {name} digest disagrees with the protocol")
 
         if args.package:
-            check_raw = run([str(cli), "task", "check", args.package, "--json"])
+            check_raw = run([str(cli), "check", args.package, "--static-only", "--config", args.config, "--json"])
             check = json.loads(check_raw)
             summary["task_check"] = {
                 "ok": check["ok"],
@@ -313,7 +312,7 @@ def main() -> int:
                     f"{args.expect_digest}"
                 )
             if check.get("ok") is not True:
-                raise SystemExit(f"task check reported ok={check.get('ok')!r}")
+                raise SystemExit(f"check reported ok={check.get('ok')!r}")
             if check.get("digest_source") != "openroboto-protocol":
                 raise SystemExit(
                     f"CLI digest_source is {check.get('digest_source')!r}, not "
@@ -341,7 +340,6 @@ def main() -> int:
             probe_raw = run(
                 [
                     str(cli),
-                    "task",
                     "status",
                     "--probe",
                     "--config",
@@ -361,7 +359,6 @@ def main() -> int:
         if args.status_config:
             command = [
                 str(cli),
-                "task",
                 "status",
                 "--config",
                 args.status_config,

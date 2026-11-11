@@ -80,6 +80,11 @@ def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) 
         action="store_true",
         help="print the docker command that would run, and stop",
     )
+    parser.add_argument("--definition", default="")
+    parser.add_argument("--output", default="")
+    parser.add_argument("--task-id", default="")
+    parser.add_argument("--title", default="")
+    parser.add_argument("--public-summary", default="")
     parser.set_defaults(handler=run)
 
 
@@ -201,6 +206,19 @@ def packaged_context(adapter_name: str, config_path: str) -> Path | None:
 
 
 def run(args: argparse.Namespace) -> int:
+    if Path(args.config).is_file():
+        settings = Settings.load(args.config)
+        if settings.competition.get("track") == "task":
+            from openroboto.commands.task_authoring import run_build
+            from openroboto.task_workspace import workspace_path
+
+            args.definition = args.definition or str(
+                workspace_path(settings, args.config, "definition")
+            )
+            args.output = args.output or str(
+                workspace_path(settings, args.config, "package")
+            )
+            return run_build(args)
     adapter_name = competition_adapter(args.config)
     adapter = adapters.resolve(adapter_name)
     # 🔴 The "not released yet" refusal comes **first**, and deliberately does not

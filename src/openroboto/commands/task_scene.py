@@ -126,7 +126,7 @@ def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) 
     register = commands.add_parser(
         "register", help="bind an announced task to both roots"
     )
-    register.add_argument("task_id", help="backend task id from task status")
+    register.add_argument("task_id", help="backend task id from status")
     register.add_argument("--package", required=True)
     register.add_argument("--config", default="miner.yaml")
     register.add_argument(
