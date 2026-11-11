@@ -94,6 +94,8 @@ def run(args: argparse.Namespace, settings: Settings) -> int:
                 )
             output = selected
         result.update(_check(args, settings))
+        if output is not None:
+            output.write_text(json_text(result))
         written = write_receipt(
             settings,
             args.config,
@@ -110,8 +112,6 @@ def run(args: argparse.Namespace, settings: Settings) -> int:
             "Fix task.json / the reported package field, then run "
             "openroboto check again."
         )
-    if output is not None:
-        output.write_text(json_text(result))
     if args.json:
         say(json_text(result).rstrip())
     else:
@@ -298,3 +298,55 @@ def _check(args: argparse.Namespace, settings: Settings) -> dict[str, Any]:
         )
     (evidence / "check.json").write_text(json_text(verdict))
     return verdict
+
+
+def run_structural(args: argparse.Namespace, settings: Settings) -> int:
+    """Expose the raw worker structural stage for contract regression only."""
+    result: dict[str, Any] = {
+        "ok": False,
+        "accepted": False,
+        "code": None,
+        "checks": [],
+        "scope": "structural-only",
+        "ready_to_submit": False,
+    }
+    try:
+        package = (
+            Path(args.path).expanduser().resolve()
+            if args.path
+            else workspace_path(settings, args.config, "package")
+        )
+        invalidate_receipt(settings, args.config, package)
+        policy = settings.competition_params["task"]
+        runtime = TaskRuntime(settings)
+        runtime.prepare()
+        verdict = runtime.run(
+            [
+                "admit-static",
+                str(package),
+                "--execution-profile",
+                json.dumps(policy.get("execution_profile")),
+                "--source",
+                policy["source"],
+            ],
+            [(package, False)],
+        )
+        result.update(verdict)
+        result.update(
+            ok=verdict["accepted"], scope="structural-only", ready_to_submit=False
+        )
+    except (ConfigError, TaskPackageError, OSError, ValueError) as exc:
+        result["error"] = str(exc)
+    if args.json:
+        say(json_text(result).rstrip())
+    else:
+        say(
+            "STRUCTURAL ADMISSION PASSED"
+            if result["ok"]
+            else "STRUCTURAL ADMISSION FAILED"
+        )
+        say(
+            "Full runtime admission has not been run. "
+            "Run openroboto check before submitting."
+        )
+    return 0 if result["ok"] else 1

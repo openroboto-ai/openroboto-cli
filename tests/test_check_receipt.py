@@ -134,3 +134,41 @@ def test_cannot_write_receipts_inside_the_package(workspace):
     settings.authoring["evidence"] = str(package / "evidence")
     with pytest.raises(ConfigError, match="outside the task package"):
         invalidate_receipt(settings, config, package)
+
+
+def test_report_write_failure_cannot_leave_a_success_receipt(workspace, monkeypatch):
+    from openroboto.commands import task_check
+
+    settings, config, root = workspace
+    path = write_receipt(settings, config, full_result("a" * 64), scope="full")
+    monkeypatch.setattr(task_check, "_check", lambda *a: full_result("a" * 64))
+    assert (
+        main(
+            [
+                "check",
+                "--output",
+                str(root / "missing" / "report.json"),
+                "--config",
+                config,
+            ]
+        )
+        == 1
+    )
+    assert not path.exists()
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        ["--static-only"],
+        ["--repo", "author/task"],
+        ["--commit", "a" * 40],
+        ["--example"],
+        ["--script", "solve.py"],
+    ],
+)
+def test_structural_probe_rejects_recording_and_remote_options(workspace, options):
+    settings, config, _root = workspace
+    path = write_receipt(settings, config, full_result("a" * 64), scope="full")
+    assert main(["check", "--structural-only", *options, "--config", config]) == 1
+    assert not path.exists()
