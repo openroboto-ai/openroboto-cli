@@ -8,6 +8,12 @@
     "fixture_suite_sha256": "0fc4b01c78650ca291c4e452d076201d08e0c092d092a729f4b200023d65337d",
     "validator_commit": "ca3f555fe81cbd38fe2a7e913a23421d480b099e"
   },
+  "protocol_wheel": {
+    "filename": "openroboto_protocol-0.18.0-py3-none-any.whl",
+    "sha256": "bcddd6aa202352d0b83f4f023b395d6cef99128e419c49efa1a52a661229f3bf",
+    "url": "https://files.pythonhosted.org/packages/23/4b/5c81d88cc7e7ee0ed34422f9489f6d603ff4b755a288d16083f2ce8c0629/openroboto_protocol-0.18.0-py3-none-any.whl",
+    "version": "0.18.0"
+  },
   "repository": "openroboto-ai/validator",
   "schema_version": 1,
   "validator_commit": "ca3f555fe81cbd38fe2a7e913a23421d480b099e"

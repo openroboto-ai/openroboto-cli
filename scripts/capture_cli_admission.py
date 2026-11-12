@@ -175,7 +175,7 @@ def capture(prepared: dict[str, Any], output: Path, *, python: str) -> dict[str,
         completed = subprocess.run(
             command,
             cwd=root,
-            env=runtime_environment(root),
+            env=runtime_environment(root, include_frozen_protocol=False),
             capture_output=True,
             text=True,
             check=False,

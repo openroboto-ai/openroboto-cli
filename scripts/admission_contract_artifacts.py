@@ -76,6 +76,11 @@ def extract_worker(output: Path, *, python: str = sys.executable) -> dict[str, A
         raise ValueError("The official release must contain one task runtime wheel")
     wheel = context / wheels[0]
     verify_digest(wheel, release["files"][wheels[0]])
+    _extract_wheel(wheel, output)
+    return release
+
+
+def _extract_wheel(wheel: Path, output: Path) -> None:
     with zipfile.ZipFile(wheel) as package:
         for member in package.infolist():
             destination = (output / member.filename).resolve()
@@ -84,14 +89,16 @@ def extract_worker(output: Path, *, python: str = sys.executable) -> dict[str, A
                     f"Runtime wheel path is outside its root: {member.filename}"
                 )
         package.extractall(output)
-    return release
 
 
-def runtime_environment(root: Path) -> dict[str, str]:
+def runtime_environment(
+    root: Path, *, include_frozen_protocol: bool = True
+) -> dict[str, str]:
     environment = dict(os.environ)
-    environment["PYTHONPATH"] = os.pathsep.join(
-        [str(root), str(root / "tests/contracts")]
-    )
+    paths = [str(root), str(root / "tests/contracts")]
+    if include_frozen_protocol:
+        paths.insert(0, str(root / "frozen_protocol"))
+    environment["PYTHONPATH"] = os.pathsep.join(paths)
     environment["TASK_SOURCE_CONFIG"] = str(root / CONTRACT_PATH / "config.json")
     environment["PYTHONDONTWRITEBYTECODE"] = "1"
     return environment
@@ -125,6 +132,14 @@ def prepare_contract(
     output.mkdir(parents=True, exist_ok=False)
     extract_contract(archive, output)
     release = extract_worker(output, python=python)
+    # The baseline binds the worker and its protocol together. A newer host CLI
+    # must not silently change the protocol bytes in this frozen execution.
+    protocol = lock["protocol_wheel"]
+    protocol_wheel = (lock_path.parent / protocol["filename"]).resolve()
+    if protocol_wheel.parent != lock_path.parent.resolve():
+        raise ValueError("The frozen protocol wheel must live beside its lock")
+    verify_digest(protocol_wheel, protocol["sha256"])
+    _extract_wheel(protocol_wheel, output / "frozen_protocol")
     baseline = json.loads((output / CONTRACT_PATH / "baseline.json").read_text())
     identity = probe_identity(output, python=python)
     identity["validator_commit"] = lock["validator_commit"]

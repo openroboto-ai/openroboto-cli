@@ -91,6 +91,10 @@ def test_real_capture_process_stops_on_version_mismatch_without_case_results(tmp
     lock = json.loads(LOCK.read_text())
     lock["identity"]["admission_source_sha256"] = "0" * 64
     shutil.copyfile(LOCK.parent / lock["archive"], tmp_path / lock["archive"])
+    shutil.copyfile(
+        LOCK.parent / lock["protocol_wheel"]["filename"],
+        tmp_path / lock["protocol_wheel"]["filename"],
+    )
     altered_lock = tmp_path / "contract.json"
     altered_lock.write_text(json.dumps(lock))
     output = tmp_path / "evidence"

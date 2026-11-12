@@ -267,6 +267,13 @@ def test_contract_source_identity_must_match_all_three_parties(tmp_path, monkeyp
 
     module = artifacts()
     baseline = bundle()
+    fixture_root = Path(__file__).parent / "fixtures/admission_parity"
+    protocol = json.loads((fixture_root / "contract.json").read_text())[
+        "protocol_wheel"
+    ]
+    (tmp_path / protocol["filename"]).write_bytes(
+        (fixture_root / protocol["filename"]).read_bytes()
+    )
     archive = archive_contract(
         tmp_path,
         [
@@ -285,6 +292,7 @@ def test_contract_source_identity_must_match_all_three_parties(tmp_path, monkeyp
                 "archive_sha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
                 "validator_commit": "a" * 40,
                 "identity": baseline["identity"],
+                "protocol_wheel": protocol,
             }
         )
     )
