@@ -8,11 +8,11 @@ RUN printf 'deb [check-valid-until=no] https://snapshot.debian.org/archive/debia
 ENV MUJOCO_GL=osmesa PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 HOME=/tmp
 COPY requirements.lock /opt/runtime/requirements.lock
 RUN pip install --no-cache-dir --require-hashes -r /opt/runtime/requirements.lock
-COPY openroboto_task_runtime-0.3.19-py3-none-any.whl /opt/runtime/
-RUN pip install --no-cache-dir /opt/runtime/openroboto_task_runtime-0.3.19-py3-none-any.whl \
+COPY openroboto_task_runtime-0.3.20-py3-none-any.whl /opt/runtime/
+RUN pip install --no-cache-dir /opt/runtime/openroboto_task_runtime-0.3.20-py3-none-any.whl \
     && python -m pip check
 COPY task_sources.json /usr/local/lib/python3.11/site-packages/configs/task_sources.json
 ARG RUNTIME_CONTENT_SHA256
-LABEL org.openroboto.runtime.version="0.3.19" org.openroboto.runtime.content-sha256=$RUNTIME_CONTENT_SHA256
+LABEL org.openroboto.runtime.version="0.3.20" org.openroboto.runtime.content-sha256=$RUNTIME_CONTENT_SHA256
 WORKDIR /tmp
 ENTRYPOINT ["python", "-m", "task_source.miner"]

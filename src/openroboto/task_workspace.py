@@ -63,6 +63,10 @@ def definition_for(profile: object) -> dict[str, Any]:
             ],
             "goals": [{"object_id": "cube_a", "target_position": target}],
         }
+    elif catalog["id"] == "panda-open-scene-v1":
+        from openroboto.scene_workflow import starter_files
+
+        return dict(json.loads(starter_files()["task.json"]))
     else:
         raise ConfigError(
             "Imported scenes use openroboto scene build with explicit "

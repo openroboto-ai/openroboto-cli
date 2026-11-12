@@ -192,9 +192,43 @@ def run(args: argparse.Namespace) -> int:
             profile = live.params.get("task", {}).get("execution_profile")
             catalog = catalog_for(profile)
             definition = definition_for(profile)
+            if definition["schema_version"] == 3:
+                from openroboto_protocol.scene_contract import parse_execution_contract
+
+                from openroboto.scene_api import fetch_scene_profiles
+
+                for candidate in fetch_scene_profiles(backend_url):
+                    if (
+                        candidate["execution_profile"] == profile
+                        and candidate.get("execution_contract") is not None
+                    ):
+                        contract = parse_execution_contract(
+                            candidate["execution_contract"]
+                        )
+                        if (
+                            contract["agent"]
+                            != definition["execution_contract"]["agent"]
+                        ):
+                            raise ConfigError(
+                                "The active panel uses another agent binding. "
+                                "Install its matching CLI/runtime before "
+                                "creating a workspace."
+                            )
+                        definition["execution_contract"] = contract
+                        definition["task_definition"]["resource_profile"] = contract[
+                            "resource_profile"
+                        ]
+                        definition["checker"]["checker"]["definition"][
+                            "resource_profile"
+                        ] = contract["resource_profile"]
+                        from openroboto_protocol.scene_schema import SceneTask
+
+                        SceneTask.model_validate(definition)
+                        catalog["profiles"][0]["execution_contract"] = contract
+                        break
             runtime_settings = Settings(competition_params=live.params)
             release = resolve_runtime(runtime_settings)
-        except (ConfigError, ValueError) as exc:
+        except (BackendError, ConfigError, ValueError) as exc:
             fail(str(exc))
             return 1
         config = yaml.safe_load(contents["miner.yaml"])
@@ -210,6 +244,11 @@ def run(args: argparse.Namespace) -> int:
                 for key in ("version", "content_sha256", "admission_version")
             },
         }
+        if (
+            definition["schema_version"] == 3
+            and "execution_contract" in catalog["profiles"][0]
+        ):
+            config["authoring"]["execution_contract"] = definition["execution_contract"]
         contents = {
             "miner.yaml": yaml.safe_dump(config, sort_keys=False, allow_unicode=True),
             "task.json": json_text(definition),
@@ -217,9 +256,21 @@ def run(args: argparse.Namespace) -> int:
             "README.md": _template("README-task.md"),
             ".gitignore": _template("gitignore") + "\nevidence/\ntask-package/\n",
         }
+        if definition["schema_version"] == 3:
+            from openroboto.scene_workflow import starter_files
+
+            contents.update(
+                {
+                    key: value
+                    for key, value in starter_files().items()
+                    if key != "task.json"
+                }
+            )
+            contents["README.md"] = _template("README-scene.md")
 
     target.mkdir(parents=True, exist_ok=True)
     for name, content in contents.items():
+        (target / name).parent.mkdir(parents=True, exist_ok=True)
         say(f"✅ {_write(target / name, content, args.force)}")
 
     say("")

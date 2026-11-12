@@ -20,9 +20,11 @@ complete protocol catalog for the season's exact execution profile, including
 all objects, dimensions, limits and resource profiles. A development profile
 stays marked as development even when a season explicitly selects it.
 
-The workspace `task.json` is a definition. The generated `task-package/task.json`
-is the submission manifest. Submit uploads only `authoring.package` (default
-`task-package/`); it does not upload `miner.yaml`, solve.py or evidence.
+The workspace `task.json` is an editable authoring input. Controlled profiles
+produce `task-package/task.json`. Scene profiles produce `task-package/execution/`,
+`task-package/private/` and the detached `task-package/submission.json`. Submit
+uploads only `authoring.package` (default `task-package/`); it does not upload
+`miner.yaml`, solve.py or evidence.
 
 ## Free local admission
 
@@ -166,13 +168,23 @@ exception in its output. Otherwise `--static-only` never qualifies for payment.
 The runtime version/content/policy and image digest declarations, when provided,
 must also match the checked release.
 
-This receipt workflow uses the official controlled Panda v1/v2 image. The advanced
-schema-3 scene path below does not yet issue this receipt; its structural check
-and historical runtime proof cannot satisfy the new payment gate. Scene submission
-stops before payment until a matching receipt producer binds both scene roots
-and the season runtime. Do not rename a scene proof into a check receipt.
+This workflow supports controlled Panda v1/v2 and schema-3 scenes. Scene receipts
+also bind the private-root digest, joint `submission_digest`, environment,
+execution-contract digest and exact runtime identity. A changed E creates a new
+P; neither an old scene proof nor a structural check can replace the full receipt.
+Ordinary `submit` recognizes the dual-root workspace automatically and registers
+the measured identity with the backend after announcement. If chain ingestion
+is pending, rerun `submit` to finish registration without paying again. An
+unregistered or mismatched server runtime still stops upload/payment.
+The backend must also publish a matching active reference-panel execution
+contract. Its exact digest is part of the verified submission route; runtime
+availability alone cannot authorize payment. `init` writes the published contract
+into the scene template and `catalog.json`, and snapshots it in `authoring`.
+Importing into that workspace uses the published contract and requires fresh
+reference actions. Check refuses a changed contract; submit verifies it again
+against the current server declaration.
 
-The CLI pins `openroboto-protocol==0.18.0`; runtime 0.3.19 carries the same protocol
+The CLI pins `openroboto-protocol==0.18.0`; runtime 0.3.20 carries the same protocol
 and MuJoCo 3.17.0. Verify normal locked installs and wheel contents with:
 
 ```bash
@@ -185,9 +197,41 @@ uv build
 
 Legacy official AXIS and RoboDojo material remains subject to the season's source
 and runtime. The bundled CPU authoring image supports the exact controlled
-Panda v1/v2 profiles; RoboDojo's Isaac Sim runtime is not a CPU substitute.
+Panda v1/v2 and exact scene profiles; RoboDojo's Isaac Sim runtime is not a CPU
+substitute.
 
 ## 9. Author-owned scenes (schema 3)
+
+Use the same `init` → `check` → `submit` workflow above. A scene workspace includes
+a complete public CC0 import starter, MJCF, declared mesh and catalog. Replace its
+probe goal with your task and write `solve.py`. The starter is structural input,
+not a general solver or admission example. Check copies only `task.json` and
+declared dependencies into a new E, renders the complete canonical instruction
+in the official image, records every initial state and verifies the exact E/P
+pair through the existing scene authoring API. No host runtime interpreter is
+needed. `doctor`, `build`, `record-reference` and `self-test` use this profile too.
+Solvers that read local data files declare them in `authoring.solve_inputs` as
+workspace-relative paths. Recording mounts only those regular files and the
+script read-only, preserving their paths; it never mounts workspace credentials
+or uploads the solver's auxiliary inputs.
+
+To import an existing execution tree without changing its old evidence:
+
+```bash
+openroboto create authored/task.json --from-execution /path/to/original/E
+# Set authoring.definition: authored/task.json in miner.yaml.
+openroboto check
+```
+
+Create retains the original E and writes new inputs with the bundled runtime's
+environment and agent binding. Scene assets, all initial states and the original
+checker remain author inputs; source solvers and any private supporting data
+stay outside the uploaded roots. An imported task still needs fresh successful
+reference actions. Missing inputs, physical penetration, solver failures or
+freebies stop readiness and cannot authorize payment.
+
+The explicit `scene` commands below remain available for advanced inspection
+and independently installed runtimes. They do not replace the workspace workflow.
 
 This scene capability remains a development path. The reviewed protocol input is commit
 `ea476625c7f84e4ce8fbd9fed4e56ac001c01109`, version `0.18.0`, task schema 3,
@@ -266,7 +310,7 @@ requires the advertised `scene-render-instruction` capability. A runtime lacking
 that optional command returns structured unsupported; its existing record and
 self-test capabilities remain usable.
 
-The current runtime 0.3.11 and historical 0.3.5/0.3.6/0.3.7 producers share
+The historical 0.3.5/0.3.6/0.3.7/0.3.11 producers share
 `instruction=InstructionResult.to_dict()`.
 The CLI reads that single nested format, binds `input_task_sha256` to the original
 task bytes, and compares installed/input environments with the selected runtime.

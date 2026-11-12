@@ -90,6 +90,19 @@ def write_receipt(
             {key: check[key] for key in ("name", "passed", "kind")} for check in checks
         ],
     }
+    if "submission_digest" in result:
+        receipt.update(
+            {
+                key: result[key]
+                for key in (
+                    "submission_digest",
+                    "private_package_digest",
+                    "environment",
+                    "execution_contract_digest",
+                    "runtime_identity_digest",
+                )
+            }
+        )
     target = receipt_path(settings, config)
     target.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(

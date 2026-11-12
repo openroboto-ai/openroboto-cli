@@ -17,6 +17,7 @@ from openroboto_protocol.task_profiles import (
     validate_task_document,
 )
 
+from openroboto.config import Settings
 from openroboto.console import fail, hint, say
 
 
@@ -47,8 +48,14 @@ def add_authoring_parsers(
         help="new JSON file; existing files are never overwritten",
     )
     create.add_argument(
+        "--from-execution",
+        default="",
+        help="create NEW scene inputs from an existing E; bind the "
+        "released runtime and require a fresh reference",
+    )
+    create.add_argument(
         "--profile",
-        choices=["panda-tabletop-v1", "panda-tabletop-v2"],
+        choices=["panda-tabletop-v1", "panda-tabletop-v2", "panda-open-scene-v1"],
         default="",
     )
     create.add_argument(
@@ -168,6 +175,13 @@ def run_create(args: argparse.Namespace) -> int:
     if args.profile and args.profile != selected["id"]:
         fail("--profile differs from this workspace's profile. Use catalog.json.")
         return 1
+    from openroboto.scene_workflow import is_scene
+
+    if is_scene(settings):
+        return _create_scene(args, settings)
+    if args.from_execution:
+        fail("--from-execution requires a schema-3 scene season.")
+        return 1
     document = definition_for(selected)
     try:
         if getattr(args, "profile", "panda-tabletop-v1") == "panda-tabletop-v2":
@@ -208,8 +222,96 @@ def run_create(args: argparse.Namespace) -> int:
     return 0
 
 
+def _create_scene(args: argparse.Namespace, settings: Settings) -> int:
+    from openroboto.scene_package import execution_input
+    from openroboto.scene_workflow import starter_files
+    from openroboto.task_workspace import json_text
+
+    try:
+        if args.public_summary:
+            raise ValueError("Edit public_summary in the new scene task.json.")
+        output = pathlib.Path(args.definition).expanduser().resolve()
+        template = starter_files()
+        binding = json.loads(template["task.json"])
+        if args.from_execution:
+            task, content = execution_input(
+                pathlib.Path(args.from_execution).expanduser().resolve()
+            )
+            document = json.loads(content["task.json"])
+            if task.execution_profile.model_dump() != binding["execution_profile"]:
+                raise ValueError(
+                    "Source E uses another scene profile; retain it unchanged."
+                )
+            document["environment"] = binding["environment"]
+            document["execution_contract"]["agent"] = binding["execution_contract"][
+                "agent"
+            ]
+            content["task.json"] = json_text(document).encode()
+        else:
+            content = {name: text.encode() for name, text in template.items()}
+        if "execution_contract" in settings.authoring:
+            from openroboto_protocol.scene_contract import parse_execution_contract
+
+            document = json.loads(content["task.json"])
+            document["execution_contract"] = parse_execution_contract(
+                settings.authoring["execution_contract"]
+            )
+            from openroboto_protocol.scene_schema import SceneTask
+
+            SceneTask.model_validate(document)
+            content["task.json"] = json_text(document).encode()
+        targets = {
+            output if name == "task.json" else output.parent / name: data
+            for name, data in content.items()
+        }
+        if any(p.exists() or p.is_symlink() for p in targets):
+            raise ValueError(
+                "Choose a new source directory; scene inputs are never overwritten."
+            )
+        for path, data in targets.items():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+    except (OSError, ValueError) as exc:
+        fail(str(exc))
+        return 1
+    say(
+        f"Created {output}. Set authoring.definition to this path; "
+        "add solve.py and run openroboto check. The new runtime binding "
+        "requires fresh reference actions."
+    )
+    return 0
+
+
 def run_build(args: argparse.Namespace) -> int:
     """Reject unsupported definitions before invoking physical package construction."""
+    from openroboto.scene_workflow import is_scene
+    from openroboto.task_workspace import task_settings
+
+    settings = task_settings(args.config)
+    if is_scene(settings):
+        from openroboto.scene_workflow import source_execution
+        from openroboto.task_runtime import TaskRuntime
+
+        try:
+            with tempfile.TemporaryDirectory(
+                prefix="openroboto-scene-build-"
+            ) as temporary:
+                source_execution(
+                    pathlib.Path(args.definition), pathlib.Path(temporary) / "execution"
+                )
+            runtime = TaskRuntime(settings)
+            if args.dry_run:
+                say(f"docker build -t {runtime.tag} {runtime.context}")
+            else:
+                runtime.prepare()
+                say(
+                    f"Prepared scene runtime {runtime.image}. Run openroboto check "
+                    "to bind and verify both roots."
+                )
+        except (OSError, ValueError) as exc:
+            fail(str(exc))
+            return 1
+        return 0
     try:
         document = _definition(args.definition)
         if pathlib.Path(args.output).expanduser().exists():
@@ -309,6 +411,26 @@ def run_reference(args: argparse.Namespace) -> int:
     from openroboto.task_workspace import task_settings, workspace_path
 
     settings = task_settings(args.config)
+    from openroboto.scene_workflow import is_scene
+
+    if is_scene(settings):
+        from openroboto.commands.task_check import run
+
+        return run(
+            argparse.Namespace(
+                config=args.config,
+                path=args.package,
+                script=args.script or "",
+                example=args.example,
+                output="",
+                json=True,
+                static_only=False,
+                repo="",
+                expect_digest="",
+                record_reference=True,
+            ),
+            settings,
+        )
     args.package = args.package or str(workspace_path(settings, args.config, "package"))
     try:
         package = pathlib.Path(args.package).expanduser().resolve()
@@ -353,6 +475,25 @@ def run_self_test(args: argparse.Namespace) -> int:
     from openroboto.task_workspace import task_settings, workspace_path
 
     settings = task_settings(args.config)
+    from openroboto.scene_workflow import is_scene
+
+    if is_scene(settings):
+        from openroboto.commands.task_check import run
+
+        return run(
+            argparse.Namespace(
+                config=args.config,
+                path=args.package,
+                script="",
+                example=False,
+                output=args.output,
+                json=True,
+                static_only=False,
+                repo="",
+                expect_digest="",
+            ),
+            settings,
+        )
     args.package = args.package or str(workspace_path(settings, args.config, "package"))
     try:
         package = pathlib.Path(args.package).expanduser().resolve()

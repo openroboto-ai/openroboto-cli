@@ -17,11 +17,13 @@ There are two classes:
 from __future__ import annotations
 
 import argparse
+import json
 import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError, requires, version
+from pathlib import Path
 from types import ModuleType
 
 from openroboto import adapters
@@ -125,7 +127,44 @@ def check_task_workspace(settings: Settings, config: str) -> list[CheckResult]:
         profile = settings.competition_params["task"]["execution_profile"]
         definition = workspace_path(settings, config, "definition")
         package = workspace_path(settings, config, "package")
-        if package.is_dir():
+        from openroboto.scene_workflow import is_scene, source_execution, starter_files
+
+        if is_scene(settings):
+            import tempfile
+
+            from openroboto.scene_package import load_submission
+
+            if package.is_dir():
+                task = load_submission(package).task
+            else:
+                with tempfile.TemporaryDirectory(
+                    prefix="openroboto-scene-doctor-"
+                ) as temporary:
+                    task, _ = source_execution(
+                        definition, Path(temporary) / "execution"
+                    )
+            if task.execution_profile.model_dump() != profile:
+                raise ConfigError("Scene execution_profile differs from this season.")
+            if "execution_contract" in settings.authoring:
+                from openroboto_protocol.scene_contract import parse_execution_contract
+
+                if parse_execution_contract(
+                    task.execution_contract
+                ) != parse_execution_contract(settings.authoring["execution_contract"]):
+                    raise ConfigError(
+                        "Scene execution_contract differs from the season snapshot. "
+                        "Use catalog.json and record a fresh reference."
+                    )
+            if (
+                task.environment.model_dump()
+                != json.loads(starter_files()["task.json"])["environment"]
+            ):
+                raise ConfigError(
+                    "Scene environment differs from the bundled runtime. "
+                    "Create a new source E with openroboto create --from-execution; "
+                    "retain old E/P unchanged."
+                )
+        elif package.is_dir():
             report = static_package(package, settings)
             if not report["ok"]:
                 raise ConfigError(str(report["issues"]))

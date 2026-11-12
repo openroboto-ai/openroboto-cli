@@ -327,7 +327,9 @@ def _public_rendering(
         ) from exc
 
 
-def run_instruction(args: argparse.Namespace) -> dict[str, Any]:
+def run_instruction(
+    args: argparse.Namespace, *, runtime_workdir: pathlib.Path | None = None
+) -> dict[str, Any]:
     """Ask the same runtime for public text; create no P, proof or physics result."""
     report: dict[str, Any] = {
         "ok": False,
@@ -392,7 +394,7 @@ def run_instruction(args: argparse.Namespace) -> dict[str, Any]:
                 "Install the reviewed renderer runtime; do not guess text.",
             )
         with tempfile.TemporaryDirectory(
-            prefix="openroboto-scene-instruction-"
+            prefix="openroboto-scene-instruction-", dir=runtime_workdir
         ) as temporary:
             public = pathlib.Path(temporary) / "instruction.json"
             if contents_digest(execution_input(source)[1]) != digest:

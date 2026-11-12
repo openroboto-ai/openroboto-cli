@@ -68,6 +68,16 @@ ERROR_MESSAGES = {
     "reference_tool_proof_failed": "Tool verification failed; inspect private proof.",
     "scene_recording_failed": "The solver failed; inspect private diagnostics.",
     "scene_static_checks_failed": "Runtime structure checks failed; inspect privately.",
+    "motion_mismatch": (
+        "Native object motion differs from the declared scene joints. "
+        "Correct task_definition and its checker in a NEW E; retain the "
+        "private diagnostics, then run openroboto check again."
+    ),
+    "reference_instances_failed": (
+        "The reference did not complete every initial state. Inspect the "
+        "private per-instance diagnostics, fix solve.py or the authored scene, "
+        "and run openroboto check again."
+    ),
 }
 
 

@@ -18,6 +18,7 @@ def test_create_v2_is_explicit_and_does_not_overwrite(tmp_path):
         definition=str(target),
         profile="panda-tabletop-v2",
         public_summary="",
+        from_execution="",
     )
     assert run_create(args) == 0
     document = json.loads(target.read_text())
