@@ -54,7 +54,7 @@ def test_full_receipt_contains_identity_and_booleans_only(workspace):
     assert data["competition"]["track"] == "task"
     assert data["competition"]["seq"] == 1
     assert data["admission_version"] == "task-source-miner/1"
-    assert data["runtime_version"] == "0.3.19"
+    assert data["runtime_version"] == "0.3.20"
     assert data["image_digest"] == "sha256:" + "1" * 64
     assert data["checks"] == [
         {"name": "runtime.solvable", "passed": True, "kind": "runtime"}

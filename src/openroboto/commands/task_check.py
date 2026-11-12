@@ -128,7 +128,8 @@ def run(args: argparse.Namespace, settings: Settings) -> int:
             say(f"[{issue['code']}] {issue['message']}")
         for check in result["checks"]:
             if not check["passed"]:
-                say(f"{check['name']}: {json.dumps(check['detail'], sort_keys=True)}")
+                detail = json.dumps(check.get("detail", {}), sort_keys=True)
+                say(f"{check['name']}: {detail}")
         for key in ("error", "reason", "next", "report"):
             if result.get(key):
                 say(f"{key}: {result[key]}")
@@ -136,6 +137,10 @@ def run(args: argparse.Namespace, settings: Settings) -> int:
 
 
 def _check(args: argparse.Namespace, settings: Settings) -> dict[str, Any]:
+    from openroboto.scene_workflow import check, is_scene
+
+    if is_scene(settings):
+        return check(args, settings)
     policy = settings.competition_params.get("task", {})
     profile = policy.get("execution_profile")
     definition = workspace_path(settings, args.config, "definition")

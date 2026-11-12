@@ -137,7 +137,9 @@ def run(args: argparse.Namespace) -> int:
         if bool(args.repo) != bool(args.commit):
             fail("--repo and --commit must be given together")
             return 1
-        if args.static_only and (args.path or args.repo):
+        from openroboto.scene_workflow import is_scene
+
+        if args.static_only and (args.path or args.repo) and not is_scene(settings):
             args.execution_profile = settings.competition_params.get("task", {}).get(
                 "execution_profile"
             )
@@ -163,7 +165,11 @@ def run(args: argparse.Namespace) -> int:
                         args.repo, args.commit, token=settings.hf_token, cache_dir=cache
                     )
                     args.path = str(
-                        select_package(root, source=args.source, relative=args.package)
+                        root
+                        if is_scene(settings)
+                        else select_package(
+                            root, source=args.source, relative=args.package
+                        )
                     )
                 except (PackageFetchError, TaskPackageError) as exc:
                     fail(f"Could not inspect the pinned remote package: {exc}")

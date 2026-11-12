@@ -111,6 +111,7 @@ from openroboto.backend_api import (
     ContributorDetail,
     fetch_contributor,
     fetch_roster,
+    fetch_submissions,
 )
 from openroboto.commands.announce import perform_announce
 from openroboto.commands.burn import perform_burn, perform_transfer
@@ -240,11 +241,7 @@ def run(args: argparse.Namespace) -> int:
     elif (pathlib.Path(output_dir) / "submission.json").exists() or (
         pathlib.Path(output_dir) / "execution/task.json"
     ).exists():
-        fail(
-            "This is a dual-root scene. Use --scene-package <directory> so both"
-            " roots are checked before upload."
-        )
-        return 1
+        scene_path = output_dir
 
     if (scene_path or state.get("scene_submission")) and (
         not state.get("burn_tx_hash") or args.force
@@ -266,8 +263,7 @@ def run(args: argparse.Namespace) -> int:
                 "This scene is already announced. Continue registration "
                 "without paying again."
             )
-            _scene_registration_hint()
-            return 0
+            return _finish_scene_registration(settings, state, args.config)
         say(
             "⏭️  this submission is already announced. Pass --force to redo it "
             "(that pays the entry fee again)"
@@ -428,18 +424,58 @@ def run(args: argparse.Namespace) -> int:
 
     say("✅ submitted. Run `openroboto status` to see whether the backend accepted it")
     if state.get("scene_submission"):
-        _scene_registration_hint()
+        return _finish_scene_registration(settings, state, args.config)
     return 0
 
 
-def _scene_registration_hint() -> None:
-    say(
-        "Scene identity registration is still required. Run `openroboto "
-        "status`, then `openroboto scene register "
-        "<backend-task-id> --package <original-directory> --config "
-        "<miner.yaml>`. Retry registration without paying again. Server "
-        "admission and rewards remain separate."
+def _finish_scene_registration(
+    settings: Settings, state: dict[str, Any], config: str
+) -> int:
+    from openroboto.commands.task_scene import (
+        REGISTRATION_MAX_PAGES,
+        REGISTRATION_PAGE_SIZE,
+        run_register,
     )
+
+    offset = 0
+    try:
+        for _ in range(REGISTRATION_MAX_PAGES):
+            page = fetch_submissions(
+                settings.backend_url,
+                int(state["competition_id"]),
+                hotkey=str(state.get("hotkey_ss58") or settings.hotkey_ss58),
+                limit=REGISTRATION_PAGE_SIZE,
+                offset=offset,
+            )
+            if page.meta.page.offset != offset:
+                raise BackendError(
+                    "Submission history returned inconsistent pagination."
+                )
+            for row in page.data:
+                if (
+                    row.hf_repo_id == state["hf_repo_id"]
+                    and row.hf_commit == announced_commit(state)
+                    and row.burn_tx_hash == state["burn_tx_hash"]
+                ):
+                    return run_register(
+                        argparse.Namespace(
+                            config=config,
+                            package=state["scene_local_path"],
+                            task_id=row.task_id,
+                            lookup_offset=0,
+                        )
+                    )
+            if not page.data or not page.meta.page.has_more:
+                break
+            offset += len(page.data)
+    except BackendError as exc:
+        fail(f"Cannot finish scene registration: {exc}")
+    say(
+        "Scene registration is pending. Wait for chain ingestion, then rerun "
+        "openroboto submit with the same workspace; it resumes without paying "
+        "again. The backend has not admitted this scene yet."
+    )
+    return 1
 
 
 def _prepare_scene_submission(
@@ -1084,6 +1120,9 @@ def _server_scene_ready(settings: Settings, task: Any) -> bool:
     This is a capability declaration from the server, never an admission result
     for the author's task and never a grant of reward eligibility.
     """
+    from openroboto_protocol.scene_contract import parse_execution_contract
+    from openroboto_protocol.tabletop_assets import canonical_digest
+
     expected = {
         "execution_profile": task.execution_profile.model_dump(),
         "environment": task.environment.model_dump(),
@@ -1091,6 +1130,9 @@ def _server_scene_ready(settings: Settings, task: Any) -> bool:
         "control_mapping": task.robot.control_mapping.model_dump(),
         "resource_profile": task.task_definition.resource_profile,
         "observation_contract": task.task_definition.observation,
+        "execution_contract_digest": canonical_digest(
+            parse_execution_contract(task.execution_contract)
+        ),
     }
     try:
         profiles = fetch_scene_profiles(settings.backend_url)
@@ -1112,7 +1154,8 @@ def _server_scene_ready(settings: Settings, task: Any) -> bool:
             return True
     fail(
         "The server has no verified submission route for this exact scene, "
-        "robot, control, observation and resource identity. Contact its operator; "
+        "robot, control, observation, resource and active reference-panel "
+        "execution contract. Contact its operator; "
         "structure validity is not server support. Nothing was paid."
     )
     return False

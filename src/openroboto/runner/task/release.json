@@ -1,7 +1,7 @@
 {
   "admission_policy_sha256": "0c1415ee4f0c70edd39b50e55e7ff8ce8210186355045eea81206071c31a0654",
   "admission_version": "task-source-miner/1",
-  "content_sha256": "aeed113206b7792e860ae41c9089072cd047aaacff09b6d3867ba77583e068bf",
+  "content_sha256": "fef675d5da941fa413d2092577ece9498304000c4736b2476ade44ca95ce6de7",
   "execution_profiles": [
     {
       "digest": "f72932959102b72b74812a7ef68339c0ea0116b0211499f1263de025f6821066",
@@ -12,15 +12,20 @@
       "digest": "4206469478bc1f121c4f76e65d364af734fa08efe2fb3cb514c34371bd76f7b7",
       "id": "panda-tabletop-v2",
       "version": "2.0.0"
+    },
+    {
+      "digest": "9badf61d742ed5787e7af4ad19adc90b616147ee4c62159915bddeff53f9a1a2",
+      "id": "panda-open-scene-v1",
+      "version": "2.1.0"
     }
   ],
   "files": {
-    "Dockerfile": "70e2fc2a0dbf84b0cdb91c56bd9d26fbad77342fb0ee079f267e7c5f25c4be09",
-    "openroboto_task_runtime-0.3.19-py3-none-any.whl": "042a6dfc1442584869d5239fb899e7d7c54ef67e61d3955cb8233c7fcdb2561d",
+    "Dockerfile": "4bad6c9c8023b6a950c0be7bb12f76cbb1fb82ee3975d610b21295edd43b447e",
+    "openroboto_task_runtime-0.3.20-py3-none-any.whl": "1733ff232443493031739df15818fef15dfcaa478959a6cc720396e74abe8c43",
     "requirements.lock": "a49970aa19f97aa2296dbe52ab126bf820d3c7ecd4d35d9c4bb64076959f1903",
     "task_sources.json": "323b874225ed7f8cf516d135f98c8be1d92eb3367c1ca4c3a6498044330a891a"
   },
   "protocol_version": "0.18.0",
   "timeout_s": 180,
-  "version": "0.3.19"
+  "version": "0.3.20"
 }

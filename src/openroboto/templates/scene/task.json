@@ -1,0 +1,1228 @@
+{
+  "checker": {
+    "checker": {
+      "definition": {
+        "invariants": [],
+        "objects": [
+          {
+            "asset": {
+              "digest": "c8ac3c2eca711a9bbb51a583159e932a77e6e2f2b67cec3d8e9fa95b07f6c6cf",
+              "id": "door_asset",
+              "version": "1"
+            },
+            "asset_pose_in_body": {
+              "position_m": [
+                0.01,
+                0.0,
+                0.0
+              ],
+              "quaternion_xyzw": [
+                0.0,
+                0.0,
+                0.7071067811865476,
+                0.7071067811865476
+              ]
+            },
+            "body": "door",
+            "body_frame": "door_frame",
+            "collision_geoms": {
+              "handle": "door_handle",
+              "panel": "door_panel"
+            },
+            "free_joint_name": null,
+            "id": "door",
+            "motion": "articulated"
+          },
+          {
+            "asset": {
+              "digest": "22bfa0a30938a70b6110697b8a5d99065bbfa5e3ea075314c1079e07e7bf518b",
+              "id": "drawer_asset",
+              "version": "1"
+            },
+            "asset_pose_in_body": {
+              "position_m": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "quaternion_xyzw": [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ]
+            },
+            "body": "drawer",
+            "body_frame": "drawer_frame",
+            "collision_geoms": {
+              "tray": "drawer_tray"
+            },
+            "free_joint_name": null,
+            "id": "drawer",
+            "motion": "articulated"
+          },
+          {
+            "asset": {
+              "digest": "758eda26fc73a3ec4edcd502dbb05af8a603382df352da8020c22edd373801da",
+              "id": "token_asset",
+              "version": "1"
+            },
+            "asset_pose_in_body": {
+              "position_m": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "quaternion_xyzw": [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ]
+            },
+            "body": "token",
+            "body_frame": "token_frame",
+            "collision_geoms": {
+              "solid": "token_solid"
+            },
+            "free_joint_name": "token_free",
+            "id": "token",
+            "motion": "free"
+          },
+          {
+            "asset": {
+              "digest": "f81c9728ca131b6055a866ae78968f948efb4b9592b27338ee21f3bc83a784a2",
+              "id": "bracket_asset",
+              "version": "1"
+            },
+            "asset_pose_in_body": {
+              "position_m": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "quaternion_xyzw": [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ]
+            },
+            "body": "bracket",
+            "body_frame": "bracket_frame",
+            "collision_geoms": {
+              "base": "bracket_base"
+            },
+            "free_joint_name": null,
+            "id": "bracket",
+            "motion": "fixed"
+          }
+        ],
+        "observation": "state",
+        "resource_profile": "tabletop-standard-v2",
+        "stages": [
+          {
+            "goal": {
+              "object_id": "token",
+              "type": "stable"
+            },
+            "hold_ticks": 500,
+            "id": "probe",
+            "invariants": [],
+            "reject_early": false,
+            "requires": []
+          }
+        ],
+        "template": "imported_scene",
+        "zones": []
+      },
+      "type": "TabletopProgramChecker"
+    }
+  },
+  "environment": {
+    "digest": "0bd8d954c2e4b01548168059d19f10154fba5e21d058fddc607685e6c5355e93",
+    "id": "panda-mujoco-scene",
+    "version": "ope274-scene-runtime-0.3.20-r1"
+  },
+  "execution_contract": {
+    "agent": {
+      "harness_commit": "71c038ebabb77411ca306a14e72eb41a0b412710",
+      "system_prompt_digest": "0d6db8fbfca8ad568d387528ccbc38fd5dc031b10eff1c41a22029b65ea1668c",
+      "tools_digest": "2ef160b4647a5c9cbd0fc5f85efca224abda3298ea7811a66f8ed55ce202de32"
+    },
+    "budget": {
+      "max_api_calls": 12,
+      "max_steps": 500,
+      "wall_seconds": 60.0
+    },
+    "execution_profile": {
+      "digest": "9badf61d742ed5787e7af4ad19adc90b616147ee4c62159915bddeff53f9a1a2",
+      "id": "panda-open-scene-v1",
+      "version": "2.1.0"
+    },
+    "harness": {
+      "name": "headless"
+    },
+    "observation_contract": "state",
+    "permissions": {
+      "allowed_sensors": [
+        "image",
+        "object_positions",
+        "proprioception",
+        "state",
+        "success"
+      ],
+      "mode": "privileged"
+    },
+    "resource_profile": "tabletop-standard-v2",
+    "timing": {
+      "clock_mode": "sim",
+      "control_step_seconds": 0.2,
+      "s": 0.0
+    },
+    "version": 3
+  },
+  "execution_profile": {
+    "digest": "9badf61d742ed5787e7af4ad19adc90b616147ee4c62159915bddeff53f9a1a2",
+    "id": "panda-open-scene-v1",
+    "version": "2.1.0"
+  },
+  "instruction": "State-known\nRH Z-up world m/rad\nbody-origin xyzw poses.\ndt=0.002s\ntick0 checks invariants,no hold\ninvalid sample/false invariant latches failure.\nRequires=all done on earlier ticks\nHold=consecutive active goal-true elapsed ticks,else0\nComplete at N,persistent\nStage inv=active and incomplete at tick start\nEpisode inv=every tick.\nearly=true forbids goal before active,false allows\nPass=all complete,no failure,each leaf's current hold>=N\nleaf=never required.\nI=[[0.0,0.0,0.0],[0.0,0.0,0.0,1.0]].\nO(id,body,frame,asset,A)=[[\"door\",\"door\",\"door_frame\",\"door_asset\",[[0.01,0.0,0.0],[0.0,0.0,0.7071067811865476,0.7071067811865476]]],[\"drawer\",\"drawer\",\"drawer_frame\",\"drawer_asset\",\"I\"],[\"token\",\"token\",\"token_frame\",\"token_asset\",\"I\"],[\"bracket\",\"bracket\",\"bracket_frame\",\"bracket_asset\",\"I\"]]\nAsset(id,version,digest)=[[\"door_asset\",\"1\",\"c8ac3c2eca711a9bbb51a583159e932a77e6e2f2b67cec3d8e9fa95b07f6c6cf\"],[\"drawer_asset\",\"1\",\"22bfa0a30938a70b6110697b8a5d99065bbfa5e3ea075314c1079e07e7bf518b\"],[\"token_asset\",\"1\",\"758eda26fc73a3ec4edcd502dbb05af8a603382df352da8020c22edd373801da\"],[\"bracket_asset\",\"1\",\"f81c9728ca131b6055a866ae78968f948efb4b9592b27338ee21f3bc83a784a2\"]]\nF(id,parent,pose)=[[\"scene\",\"world\",\"I\"],[\"door_frame\",\"scene\",[[0.72,0.2,0.79],[0.0,0.0,0.0,1.0]]],[\"drawer_frame\",\"scene\",[[0.72,-0.18,0.79],[0.0,0.0,0.0,1.0]]],[\"token_frame\",\"scene\",[[0.48,0.1,0.84],[0.0,0.0,0.0,1.0]]],[\"bracket_frame\",\"scene\",[[0.72,-0.18,0.76],[0.0,0.0,0.0,1.0]]]]\npose=[xyz,xyzw]\nA=asset into body\nF=reset child into parent\nworld root.\nstable(o)=L2(linear velocity)<=0.05m/s AND L2(angular velocity)<=0.2rad/s.\nEpisode=[]\nStage \"probe\" requires=[],N=500,early=false,goal=stable(\"token\"),inv=[]",
+  "public_summary": {
+    "execution_profile": {
+      "digest": "9badf61d742ed5787e7af4ad19adc90b616147ee4c62159915bddeff53f9a1a2",
+      "id": "panda-open-scene-v1",
+      "version": "2.1.0"
+    },
+    "instruction": "Replace the probe goal with your authored task.",
+    "origin": "original",
+    "robot": "franka-panda",
+    "title": "Editable scene starter"
+  },
+  "robot": {
+    "artifact": {
+      "digest": "2e71806da0effe9069dfb1a615c81c11e3edcac5e4c26fdd921529816d638b26",
+      "id": "franka-panda",
+      "version": "panda-tabletop-v1/1.0.0"
+    },
+    "control_mapping": {
+      "digest": "2ef160b4647a5c9cbd0fc5f85efca224abda3298ea7811a66f8ed55ce202de32",
+      "id": "panda-tools",
+      "version": "axis-tool-runtime/1"
+    },
+    "mount": {
+      "position_m": [
+        0.0,
+        0.0,
+        0.829999997392
+      ],
+      "quaternion_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    }
+  },
+  "scene": {
+    "assets": [
+      {
+        "collision": {
+          "digest": "9592abe3b920e5fcfea29e951a3d486bec50d66f0398b3cda875efade0a51d4b",
+          "parts": [
+            {
+              "id": "panel",
+              "kind": "mesh",
+              "mesh_path": "assets/panel.obj",
+              "pose_in_asset": {
+                "position_m": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "quaternion_xyzw": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              },
+              "size": [
+                1.0,
+                1.0,
+                1.0
+              ]
+            },
+            {
+              "id": "handle",
+              "kind": "capsule",
+              "mesh_path": null,
+              "pose_in_asset": {
+                "position_m": [
+                  0.04,
+                  0.0,
+                  0.03
+                ],
+                "quaternion_xyzw": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              },
+              "size": [
+                0.006,
+                0.02
+              ]
+            }
+          ]
+        },
+        "digest": "c8ac3c2eca711a9bbb51a583159e932a77e6e2f2b67cec3d8e9fa95b07f6c6cf",
+        "id": "door_asset",
+        "physics": {
+          "center_of_mass_m": [
+            0.01,
+            0.0,
+            0.02
+          ],
+          "contacts": {
+            "handle": {
+              "contact_dimension": 6,
+              "friction": [
+                0.8,
+                0.01,
+                0.001
+              ]
+            },
+            "panel": {
+              "contact_dimension": 6,
+              "friction": [
+                0.8,
+                0.01,
+                0.001
+              ]
+            }
+          },
+          "digest": "f7a7baf10a2e9ba0e1509aa442b1dbb240f027966e4de24c667034d9f6dc5222",
+          "inertia_kg_m2": [
+            0.001,
+            0.0012,
+            0.0015,
+            0.0001,
+            2e-05,
+            3e-05
+          ],
+          "mass_kg": 0.4
+        },
+        "provenance": {
+          "digest": "5e9e31887a837ab70514dd69d04ac4e0b1378a124195c282dbadb211ff0719d3",
+          "license": "CC0-1.0",
+          "source": "original://openroboto/ope230",
+          "source_revision": "64d1ea750c33b3c312a325ab93502aeb8ad80441d55e07e712ef272de4401a79"
+        },
+        "symmetry": {
+          "axis_xyz": null,
+          "category": "none",
+          "digest": "60c05d822fdeea600a38ccb5d661687ba4c15e4c1396226fb9b70032214bd8fa",
+          "rotations_xyzw": [
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          ]
+        },
+        "version": "1",
+        "visual": {
+          "digest": "9592abe3b920e5fcfea29e951a3d486bec50d66f0398b3cda875efade0a51d4b",
+          "parts": [
+            {
+              "id": "panel",
+              "kind": "mesh",
+              "mesh_path": "assets/panel.obj",
+              "pose_in_asset": {
+                "position_m": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "quaternion_xyzw": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              },
+              "size": [
+                1.0,
+                1.0,
+                1.0
+              ]
+            },
+            {
+              "id": "handle",
+              "kind": "capsule",
+              "mesh_path": null,
+              "pose_in_asset": {
+                "position_m": [
+                  0.04,
+                  0.0,
+                  0.03
+                ],
+                "quaternion_xyzw": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              },
+              "size": [
+                0.006,
+                0.02
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "collision": {
+          "digest": "892e2654984aa07849f8be43d33098ebb17953491efc2471facfb35ecceb04e8",
+          "parts": [
+            {
+              "id": "tray",
+              "kind": "box",
+              "mesh_path": null,
+              "pose_in_asset": {
+                "position_m": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "quaternion_xyzw": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              },
+              "size": [
+                0.04,
+                0.03,
+                0.01
+              ]
+            }
+          ]
+        },
+        "digest": "22bfa0a30938a70b6110697b8a5d99065bbfa5e3ea075314c1079e07e7bf518b",
+        "id": "drawer_asset",
+        "physics": {
+          "center_of_mass_m": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "contacts": {
+            "tray": {
+              "contact_dimension": 6,
+              "friction": [
+                0.8,
+                0.01,
+                0.001
+              ]
+            }
+          },
+          "digest": "0e5a3298d9ac574fde0e325663d9a0bd38e15d9b7f03facb276a3824838c16f8",
+          "inertia_kg_m2": [
+            0.0002,
+            0.0003,
+            0.0004,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "mass_kg": 0.2
+        },
+        "provenance": {
+          "digest": "5e9e31887a837ab70514dd69d04ac4e0b1378a124195c282dbadb211ff0719d3",
+          "license": "CC0-1.0",
+          "source": "original://openroboto/ope230",
+          "source_revision": "64d1ea750c33b3c312a325ab93502aeb8ad80441d55e07e712ef272de4401a79"
+        },
+        "symmetry": {
+          "axis_xyz": null,
+          "category": "none",
+          "digest": "60c05d822fdeea600a38ccb5d661687ba4c15e4c1396226fb9b70032214bd8fa",
+          "rotations_xyzw": [
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          ]
+        },
+        "version": "1",
+        "visual": {
+          "digest": "892e2654984aa07849f8be43d33098ebb17953491efc2471facfb35ecceb04e8",
+          "parts": [
+            {
+              "id": "tray",
+              "kind": "box",
+              "mesh_path": null,
+              "pose_in_asset": {
+                "position_m": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "quaternion_xyzw": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              },
+              "size": [
+                0.04,
+                0.03,
+                0.01
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "collision": {
+          "digest": "0bf4008bf48dfcde64d69ba45176ac7d0b9c82ac16fc12a580c815c6d5acbec6",
+          "parts": [
+            {
+              "id": "solid",
+              "kind": "box",
+              "mesh_path": null,
+              "pose_in_asset": {
+                "position_m": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "quaternion_xyzw": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              },
+              "size": [
+                0.018,
+                0.012,
+                0.01
+              ]
+            }
+          ]
+        },
+        "digest": "758eda26fc73a3ec4edcd502dbb05af8a603382df352da8020c22edd373801da",
+        "id": "token_asset",
+        "physics": {
+          "center_of_mass_m": [
+            0.003,
+            0.002,
+            0.001
+          ],
+          "contacts": {
+            "solid": {
+              "contact_dimension": 6,
+              "friction": [
+                0.8,
+                0.01,
+                0.001
+              ]
+            }
+          },
+          "digest": "9f7bcca68e72bc2c1d3433b76cf3d5f1c5f6639251c7d4974c4fb8ff0f4155c1",
+          "inertia_kg_m2": [
+            2e-05,
+            3e-05,
+            4e-05,
+            1e-06,
+            2e-06,
+            3e-06
+          ],
+          "mass_kg": 0.1
+        },
+        "provenance": {
+          "digest": "5e9e31887a837ab70514dd69d04ac4e0b1378a124195c282dbadb211ff0719d3",
+          "license": "CC0-1.0",
+          "source": "original://openroboto/ope230",
+          "source_revision": "64d1ea750c33b3c312a325ab93502aeb8ad80441d55e07e712ef272de4401a79"
+        },
+        "symmetry": {
+          "axis_xyz": null,
+          "category": "none",
+          "digest": "60c05d822fdeea600a38ccb5d661687ba4c15e4c1396226fb9b70032214bd8fa",
+          "rotations_xyzw": [
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          ]
+        },
+        "version": "1",
+        "visual": {
+          "digest": "0bf4008bf48dfcde64d69ba45176ac7d0b9c82ac16fc12a580c815c6d5acbec6",
+          "parts": [
+            {
+              "id": "solid",
+              "kind": "box",
+              "mesh_path": null,
+              "pose_in_asset": {
+                "position_m": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "quaternion_xyzw": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              },
+              "size": [
+                0.018,
+                0.012,
+                0.01
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "collision": {
+          "digest": "82546239f82e8dd27a89d053a4153d5070d54b48342b750fb9ee18fb1863033e",
+          "parts": [
+            {
+              "id": "base",
+              "kind": "box",
+              "mesh_path": null,
+              "pose_in_asset": {
+                "position_m": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "quaternion_xyzw": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              },
+              "size": [
+                0.05,
+                0.04,
+                0.01
+              ]
+            }
+          ]
+        },
+        "digest": "f81c9728ca131b6055a866ae78968f948efb4b9592b27338ee21f3bc83a784a2",
+        "id": "bracket_asset",
+        "physics": {
+          "center_of_mass_m": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "contacts": {
+            "base": {
+              "contact_dimension": 6,
+              "friction": [
+                0.8,
+                0.01,
+                0.001
+              ]
+            }
+          },
+          "digest": "1ee4c2404f5f30f7fea3b658bbb5442563f1e98cacfc9c80635092ff9cf9b60d",
+          "inertia_kg_m2": [
+            0.0003,
+            0.0004,
+            0.0005,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "mass_kg": 0.3
+        },
+        "provenance": {
+          "digest": "5e9e31887a837ab70514dd69d04ac4e0b1378a124195c282dbadb211ff0719d3",
+          "license": "CC0-1.0",
+          "source": "original://openroboto/ope230",
+          "source_revision": "64d1ea750c33b3c312a325ab93502aeb8ad80441d55e07e712ef272de4401a79"
+        },
+        "symmetry": {
+          "axis_xyz": null,
+          "category": "none",
+          "digest": "60c05d822fdeea600a38ccb5d661687ba4c15e4c1396226fb9b70032214bd8fa",
+          "rotations_xyzw": [
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          ]
+        },
+        "version": "1",
+        "visual": {
+          "digest": "82546239f82e8dd27a89d053a4153d5070d54b48342b750fb9ee18fb1863033e",
+          "parts": [
+            {
+              "id": "base",
+              "kind": "box",
+              "mesh_path": null,
+              "pose_in_asset": {
+                "position_m": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "quaternion_xyzw": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              },
+              "size": [
+                0.05,
+                0.04,
+                0.01
+              ]
+            }
+          ]
+        }
+      }
+    ],
+    "camera": {
+      "digest": "ddae432a995d0a90675e8e1da02c62d5020dd78e9c9b3f3680fe6b0742d0c506",
+      "frame": "world",
+      "image_size": [
+        320,
+        180
+      ],
+      "name": "author_camera",
+      "pose_in_frame": {
+        "position_m": [
+          0.58,
+          -0.35,
+          1.8
+        ],
+        "quaternion_xyzw": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      },
+      "vertical_fov_deg": 47.0
+    },
+    "contact_targets": [
+      {
+        "entity_id": "door",
+        "geom_names": [
+          "door_handle"
+        ],
+        "id": "door_handle_surface"
+      }
+    ],
+    "coordinates": "right_handed_z_up_xyzw",
+    "dependencies": [
+      {
+        "license": "CC0-1.0",
+        "path": "scene.xml",
+        "requires": [
+          "assets/panel.obj"
+        ],
+        "sha256": "48e78554bc07477d74c13bb0bea7ec6c47448e978ae20ff79ef2af3020b0497a",
+        "size_bytes": 2161,
+        "source": "original://openroboto/ope230",
+        "source_revision": "48e78554bc07477d74c13bb0bea7ec6c47448e978ae20ff79ef2af3020b0497a"
+      },
+      {
+        "license": "CC0-1.0",
+        "path": "assets/panel.obj",
+        "requires": [],
+        "sha256": "64d1ea750c33b3c312a325ab93502aeb8ad80441d55e07e712ef272de4401a79",
+        "size_bytes": 119,
+        "source": "original://openroboto/ope230",
+        "source_revision": "64d1ea750c33b3c312a325ab93502aeb8ad80441d55e07e712ef272de4401a79"
+      }
+    ],
+    "entrypoint": "scene.xml",
+    "frames": [
+      {
+        "id": "scene",
+        "parent": "world",
+        "pose_in_parent": {
+          "position_m": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "quaternion_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        }
+      },
+      {
+        "id": "door_frame",
+        "parent": "scene",
+        "pose_in_parent": {
+          "position_m": [
+            0.72,
+            0.2,
+            0.79
+          ],
+          "quaternion_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        }
+      },
+      {
+        "id": "drawer_frame",
+        "parent": "scene",
+        "pose_in_parent": {
+          "position_m": [
+            0.72,
+            -0.18,
+            0.79
+          ],
+          "quaternion_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        }
+      },
+      {
+        "id": "token_frame",
+        "parent": "scene",
+        "pose_in_parent": {
+          "position_m": [
+            0.48,
+            0.1,
+            0.84
+          ],
+          "quaternion_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        }
+      },
+      {
+        "id": "bracket_frame",
+        "parent": "scene",
+        "pose_in_parent": {
+          "position_m": [
+            0.72,
+            -0.18,
+            0.76
+          ],
+          "quaternion_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        }
+      }
+    ],
+    "initial_states": [
+      {
+        "id": "closed",
+        "joints": [
+          {
+            "joint_id": "door_joint",
+            "position": 0.0
+          },
+          {
+            "joint_id": "drawer_joint",
+            "position": 0.0
+          }
+        ],
+        "objects": [
+          {
+            "object_id": "door",
+            "pose": {
+              "position_m": [
+                0.72,
+                0.2,
+                0.79
+              ],
+              "quaternion_xyzw": [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ]
+            }
+          },
+          {
+            "object_id": "drawer",
+            "pose": {
+              "position_m": [
+                0.72,
+                -0.18,
+                0.79
+              ],
+              "quaternion_xyzw": [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ]
+            }
+          },
+          {
+            "object_id": "token",
+            "pose": {
+              "position_m": [
+                0.48,
+                0.1,
+                0.84
+              ],
+              "quaternion_xyzw": [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ]
+            }
+          },
+          {
+            "object_id": "bracket",
+            "pose": {
+              "position_m": [
+                0.72,
+                -0.18,
+                0.76
+              ],
+              "quaternion_xyzw": [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "id": "opened",
+        "joints": [
+          {
+            "joint_id": "door_joint",
+            "position": 0.3
+          },
+          {
+            "joint_id": "drawer_joint",
+            "position": 0.05
+          }
+        ],
+        "objects": [
+          {
+            "object_id": "door",
+            "pose": {
+              "position_m": [
+                0.72,
+                0.2,
+                0.79
+              ],
+              "quaternion_xyzw": [
+                0.0,
+                0.0,
+                0.14943813247359922,
+                0.9887710779360422
+              ]
+            }
+          },
+          {
+            "object_id": "drawer",
+            "pose": {
+              "position_m": [
+                0.77,
+                -0.18,
+                0.79
+              ],
+              "quaternion_xyzw": [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ]
+            }
+          },
+          {
+            "object_id": "token",
+            "pose": {
+              "position_m": [
+                0.48,
+                0.08,
+                0.84
+              ],
+              "quaternion_xyzw": [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ]
+            }
+          },
+          {
+            "object_id": "bracket",
+            "pose": {
+              "position_m": [
+                0.72,
+                -0.18,
+                0.76
+              ],
+              "quaternion_xyzw": [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ]
+            }
+          }
+        ]
+      }
+    ],
+    "joints": [
+      {
+        "axis_in_child_body": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "body_id": "door",
+        "id": "door_joint",
+        "kind": "hinge",
+        "name": "door_joint",
+        "parent_body": "world",
+        "range": [
+          0.0,
+          1.2
+        ],
+        "unit": "rad"
+      },
+      {
+        "axis_in_child_body": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "body_id": "drawer",
+        "id": "drawer_joint",
+        "kind": "slide",
+        "name": "drawer_joint",
+        "parent_body": "world",
+        "range": [
+          0.0,
+          0.1
+        ],
+        "unit": "m"
+      }
+    ],
+    "platform_groups": [
+      {
+        "body": "franka/",
+        "collision_geoms": [
+          "franka//unnamed_geom_11",
+          "franka//unnamed_geom_13",
+          "franka//unnamed_geom_15",
+          "franka//unnamed_geom_20",
+          "franka//unnamed_geom_25",
+          "franka//unnamed_geom_29",
+          "franka//unnamed_geom_30",
+          "franka//unnamed_geom_31",
+          "franka//unnamed_geom_49",
+          "franka//unnamed_geom_58",
+          "franka//unnamed_geom_64",
+          "franka//unnamed_geom_67",
+          "franka//unnamed_geom_68",
+          "franka//unnamed_geom_69",
+          "franka//unnamed_geom_70",
+          "franka//unnamed_geom_71",
+          "franka//unnamed_geom_72",
+          "franka//unnamed_geom_75",
+          "franka//unnamed_geom_76",
+          "franka//unnamed_geom_77",
+          "franka//unnamed_geom_78",
+          "franka//unnamed_geom_79",
+          "franka//unnamed_geom_80"
+        ],
+        "id": "robot"
+      },
+      {
+        "body": "world",
+        "collision_geoms": [
+          "floor",
+          "table"
+        ],
+        "id": "table"
+      }
+    ],
+    "units": "metres_radians"
+  },
+  "schema_version": 3,
+  "source": "axis",
+  "task_definition": {
+    "invariants": [],
+    "objects": [
+      {
+        "asset": {
+          "digest": "c8ac3c2eca711a9bbb51a583159e932a77e6e2f2b67cec3d8e9fa95b07f6c6cf",
+          "id": "door_asset",
+          "version": "1"
+        },
+        "asset_pose_in_body": {
+          "position_m": [
+            0.01,
+            0.0,
+            0.0
+          ],
+          "quaternion_xyzw": [
+            0.0,
+            0.0,
+            0.7071067811865476,
+            0.7071067811865476
+          ]
+        },
+        "body": "door",
+        "body_frame": "door_frame",
+        "collision_geoms": {
+          "handle": "door_handle",
+          "panel": "door_panel"
+        },
+        "free_joint_name": null,
+        "id": "door",
+        "motion": "articulated"
+      },
+      {
+        "asset": {
+          "digest": "22bfa0a30938a70b6110697b8a5d99065bbfa5e3ea075314c1079e07e7bf518b",
+          "id": "drawer_asset",
+          "version": "1"
+        },
+        "asset_pose_in_body": {
+          "position_m": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "quaternion_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        },
+        "body": "drawer",
+        "body_frame": "drawer_frame",
+        "collision_geoms": {
+          "tray": "drawer_tray"
+        },
+        "free_joint_name": null,
+        "id": "drawer",
+        "motion": "articulated"
+      },
+      {
+        "asset": {
+          "digest": "758eda26fc73a3ec4edcd502dbb05af8a603382df352da8020c22edd373801da",
+          "id": "token_asset",
+          "version": "1"
+        },
+        "asset_pose_in_body": {
+          "position_m": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "quaternion_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        },
+        "body": "token",
+        "body_frame": "token_frame",
+        "collision_geoms": {
+          "solid": "token_solid"
+        },
+        "free_joint_name": "token_free",
+        "id": "token",
+        "motion": "free"
+      },
+      {
+        "asset": {
+          "digest": "f81c9728ca131b6055a866ae78968f948efb4b9592b27338ee21f3bc83a784a2",
+          "id": "bracket_asset",
+          "version": "1"
+        },
+        "asset_pose_in_body": {
+          "position_m": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "quaternion_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        },
+        "body": "bracket",
+        "body_frame": "bracket_frame",
+        "collision_geoms": {
+          "base": "bracket_base"
+        },
+        "free_joint_name": null,
+        "id": "bracket",
+        "motion": "fixed"
+      }
+    ],
+    "observation": "state",
+    "resource_profile": "tabletop-standard-v2",
+    "stages": [
+      {
+        "goal": {
+          "object_id": "token",
+          "type": "stable"
+        },
+        "hold_ticks": 500,
+        "id": "probe",
+        "invariants": [],
+        "reject_early": false,
+        "requires": []
+      }
+    ],
+    "template": "imported_scene",
+    "zones": []
+  },
+  "task_id": "authored_scene"
+}

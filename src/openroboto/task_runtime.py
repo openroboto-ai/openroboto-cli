@@ -6,7 +6,11 @@ import hashlib
 import json
 import os
 import subprocess
+import sys
+import tempfile
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from importlib.resources import files
 from pathlib import Path
 from typing import Any
@@ -87,6 +91,60 @@ class TaskRuntime:
             f"{self.release['content_sha256'][:12]}"
         )
         self.image = ""
+
+    @contextmanager
+    def python_bridge(self, mounts: list[tuple[Path, bool]]) -> Iterator[str]:
+        """Run the existing strict scene bridge inside one owned container."""
+        name = "openroboto-scene-authoring-" + uuid.uuid4().hex
+        command = image_command(
+            self.image, ["-c", "import time; time.sleep(950)"], mounts, name
+        )
+        command[2:2] = ["--detach", "--entrypoint", "python"]
+        # This control directory is never mounted: author code cannot replace
+        # the host executable used for the next identity probe.
+        with tempfile.TemporaryDirectory(prefix="openroboto-scene-control-") as folder:
+            wrapper = Path(folder) / "runtime-python"
+            wrapper.write_text(
+                "#!/usr/bin/env python3\nimport os, sys\n"
+                f"command = ['docker', 'exec', {name!r}, 'python', *sys.argv[1:]]\n"
+                "os.execvp('docker', command)\n"
+            )
+            wrapper.chmod(0o700)
+            running = False
+            try:
+                started = subprocess.run(
+                    command, capture_output=True, text=True, check=False, timeout=30
+                )
+                if started.returncode:
+                    raise ConfigError(
+                        "Cannot start scene authoring container: "
+                        f"{started.stderr[-2000:]}"
+                    )
+                running = True
+                yield str(wrapper)
+            except (OSError, subprocess.SubprocessError) as exc:
+                raise ConfigError(
+                    f"Cannot run the official scene container: {exc}. "
+                    "Run openroboto doctor and retain the failed attempt."
+                ) from exc
+            finally:
+                # Killing a docker-exec client alone does not kill native work.
+                try:
+                    stopped = subprocess.run(
+                        ["docker", "rm", "-f", name],
+                        capture_output=True,
+                        check=False,
+                        timeout=30,
+                    )
+                except (OSError, subprocess.SubprocessError) as exc:
+                    raise ConfigError(
+                        "Cannot stop the scene container. Run docker rm -f " + name
+                    ) from exc
+                if running and stopped.returncode and sys.exception() is None:
+                    raise ConfigError(
+                        "Cannot remove the scene authoring container; no check "
+                        "receipt was issued. Stop it with docker rm -f " + name
+                    )
 
     def prepare(self, *, build: bool = True) -> None:
         try:

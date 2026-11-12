@@ -283,6 +283,9 @@ def test_preupload_and_remote_payment_gates_bind_both_roots(
 
 
 def catalog(scene):
+    from openroboto_protocol.scene_contract import parse_execution_contract
+    from openroboto_protocol.tabletop_assets import canonical_digest
+
     task = load_submission(scene).task
     return {
         "execution_profile": profile_ref(),
@@ -296,13 +299,17 @@ def catalog(scene):
                 "control_mapping": task.robot.control_mapping.model_dump(),
                 "resource_profile": task.task_definition.resource_profile,
                 "observation_contract": task.task_definition.observation,
+                "execution_contract_digest": canonical_digest(
+                    parse_execution_contract(task.execution_contract)
+                ),
             }
         ],
     }
 
 
 @pytest.mark.parametrize(
-    "change", ["development", "disabled", "environment", "observation", "malformed"]
+    "change",
+    ["development", "disabled", "environment", "observation", "malformed", "contract"],
 )
 def test_server_gate_requires_a_current_exact_route(scene, monkeypatch, change):
     profile = catalog(scene)
@@ -312,6 +319,8 @@ def test_server_gate_requires_a_current_exact_route(scene, monkeypatch, change):
         profile["available_for_submission"] = False
     if change == "malformed":
         profile["verified_routes"] = None
+    if change == "contract":
+        profile["verified_routes"][0]["execution_contract_digest"] = "0" * 64
     if change in {"environment", "observation"}:
         profile["verified_routes"][0][
             "environment" if change == "environment" else "observation_contract"
@@ -567,6 +576,12 @@ def test_normal_submit_entry_orders_gates_and_reuses_paid_checkpoint(
         return True
 
     monkeypatch.setattr(submit, "perform_announce", announce)
+
+    def register(*a):
+        calls.append("register")
+        return 0
+
+    monkeypatch.setattr(submit, "_finish_scene_registration", register)
     if failure == "changed-local":
 
         def changed(*a, **k):
@@ -579,18 +594,18 @@ def test_normal_submit_entry_orders_gates_and_reuses_paid_checkpoint(
         "--log-dir",
         str(tmp_path / "logs"),
         "submit",
-        "--scene-package",
+        "--output-dir" if failure == "none" else "--scene-package",
         str(scene),
     ]
     if failure == "force-invalid":
         argv.append("--force")
     assert main(argv) == expected
     if failure == "none":
-        assert calls == ["gate", "upload", "confirm", "pay", "announce"]
+        assert calls == ["gate", "upload", "confirm", "pay", "announce", "register"]
     elif failure == "paid-resume":
-        assert calls == ["upload", "announce"]
+        assert calls == ["upload", "announce", "register"]
     elif failure == "announced":
-        assert calls == []
+        assert calls == ["register"]
     elif failure == "force-invalid":
         assert calls == []
         assert state["burn_tx_hash"] == "fixture-tx"
@@ -609,3 +624,51 @@ def test_previous_scene_profile_is_explicitly_rejected_without_migration(capsys)
     assert before == {
         p.relative_to(old): p.read_bytes() for p in old.rglob("*") if p.is_file()
     }
+
+
+@pytest.mark.parametrize("found", [True, False])
+def test_submit_registration_binds_season_repo_commit_and_payment(
+    scene, monkeypatch, found
+):
+    settings = Settings(backend_url="https://example.invalid", hotkey_ss58="author")
+    state = {
+        "competition_id": 77,
+        "hf_repo_id": "author/scene",
+        "hf_commit": "a" * 40,
+        "burn_tx_hash": "current-payment",
+        "scene_local_path": str(scene),
+    }
+    queried, registered = [], []
+
+    def history(base, competition, **kwargs):
+        queried.append((base, competition, kwargs))
+        offset = kwargs["offset"]
+        wrong_payment = SimpleNamespace(
+            task_id="old",
+            hf_repo_id="author/scene",
+            hf_commit="a" * 40,
+            burn_tx_hash="old-payment",
+        )
+        correct = SimpleNamespace(
+            task_id="exact",
+            hf_repo_id="author/scene",
+            hf_commit="a" * 40,
+            burn_tx_hash="current-payment",
+        )
+        return SimpleNamespace(
+            data=[wrong_payment] if offset == 0 else ([correct] if found else []),
+            meta=SimpleNamespace(
+                page=SimpleNamespace(offset=offset, has_more=offset == 0)
+            ),
+        )
+
+    monkeypatch.setattr(submit, "fetch_submissions", history)
+    monkeypatch.setattr(
+        task_scene, "run_register", lambda args: registered.append(args) or 0
+    )
+    assert submit._finish_scene_registration(settings, state, "miner.yaml") == (
+        0 if found else 1
+    )
+    assert [q[1] for q in queried] == [77, 77]
+    assert all(q[2]["hotkey"] == "author" for q in queried)
+    assert [args.task_id for args in registered] == (["exact"] if found else [])
