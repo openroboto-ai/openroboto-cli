@@ -257,6 +257,7 @@ def test_missing_scene_runtime_never_runs_author_code_or_claims_physics(
 def test_preupload_and_remote_payment_gates_bind_both_roots(
     scene, tmp_path, monkeypatch
 ):
+    monkeypatch.setattr(submit, "check_receipt_is_payable", lambda *a, **kw: True)
     policy = {"task": {"source": "axis", "execution_profile": profile_ref()}}
     state = {"hf_repo_id": "author/scene", "hf_commit": "a" * 40}
     assert submit._prepare_scene_submission(str(scene), policy, state)
@@ -480,6 +481,7 @@ def test_legacy_physics_commands_refuse_scene_roots(scene, monkeypatch, command)
 def test_normal_submit_entry_orders_gates_and_reuses_paid_checkpoint(
     scene, tmp_path, monkeypatch, failure
 ):
+    monkeypatch.setattr(submit, "check_receipt_is_payable", lambda *a, **kw: True)
     from openroboto.competition import Snapshot
 
     params = {

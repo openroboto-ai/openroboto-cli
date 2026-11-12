@@ -85,6 +85,9 @@ def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) 
         help="task track: check format without Docker or physics",
     )
     parser.add_argument(
+        "--structural-only", action="store_true", help=argparse.SUPPRESS
+    )
+    parser.add_argument(
         "--example",
         action="store_true",
         help="task track: record the bundled one-cube v1 example",
@@ -102,7 +105,34 @@ def run(args: argparse.Namespace) -> int:
     settings = competition_settings(args.config)
     snapshot = load_snapshot(settings)
     if snapshot is not None and snapshot.track == "task":
+        from openroboto.check_receipt import invalidate_receipt
         from openroboto.commands import task, task_check
+        from openroboto.task_workspace import workspace_path
+
+        try:
+            invalidate_receipt(
+                settings,
+                args.config,
+                Path(args.path)
+                if args.path
+                else workspace_path(settings, args.config, "package"),
+            )
+        except (OSError, ConfigError) as exc:
+            fail(str(exc))
+            return 1
+        if args.structural_only:
+            if (
+                args.static_only
+                or args.repo
+                or args.commit
+                or args.example
+                or args.script
+            ):
+                fail(
+                    "--structural-only takes a local package and no recording options."
+                )
+                return 1
+            return task_check.run_structural(args, settings)
 
         if bool(args.repo) != bool(args.commit):
             fail("--repo and --commit must be given together")

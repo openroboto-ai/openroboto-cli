@@ -405,6 +405,14 @@ def run(args: argparse.Namespace) -> int:
         if not summary["digest_matches"]:
             summary["ok"] = False
 
+    from openroboto.check_receipt import write_receipt
+
+    written = write_receipt(
+        Settings.load(args.config), args.config, summary, scope="static-only"
+    )
+    if written is not None:
+        summary["receipt"] = str(written)
+
     if args.json:
         say(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
     else:
