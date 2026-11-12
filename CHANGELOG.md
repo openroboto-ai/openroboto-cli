@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.9.0 (unreleased)
+## 1.9.0 (2026-11-12)
 
 - Support fixed, season-configured Gamma submission fees for task authors, with
   protocol 0.19.0 payment identity. Check the miner-owned deposit, local spender,

@@ -16,11 +16,11 @@ Each evaluated submission may require a public entry fee. **It is published on t
 
 | `params.fee.kind` | What happens on chain | Recipient |
 |---|---|---|
-| `burn` | `add_stake_burn` for `params.fee.amount_tao` — alpha is bought and destroyed (`payment/burn.py`) | none; the TAO ceases to exist |
+| `burn` | `add_stake_burn` for `params.fee.amount_tao` — alpha is bought and destroyed (`payment/burn.py`) | none; the bought Alpha is destroyed |
 | `transfer` | `Balances.transfer_keep_alive` for `params.fee.amount_tao` into `params.fee.coldkey` (`payment/transfer.py`) | the address the season publishes |
 | `gamma` | `spend_gamma` for the fixed `params.fee.amount_gamma` from the miner-owned deposit (`payment/gamma.py`) | credits are destroyed; no transfer recipient |
 
-The simulation seasons charge a `burn`; the real track charges a `transfer`. Three consequences worth knowing before you pay:
+The simulation seasons charge a `burn`; the real track charges a `transfer`. Before you pay:
 
 - **They are not interchangeable.** A burn of the right amount on a `transfer` season pays nobody, and the submission stays unpaid with the TAO gone. `submit` refuses unknown kinds rather than defaulting to the burn.
 - **`transfer_keep_alive`, not `transfer_allow_death`** — a payment that would reap your coldkey fails and moves nothing instead of taking the remainder with it.
@@ -116,7 +116,7 @@ payments are not refunded.
 
 ## Verification
 
-An independent reviewer should verify that the transaction exists on the selected network, is associated with the submitting wallet, burns the required amount, and is referenced by the same model commitment. Service-side payment records and operational checks are outside this repository.
+An independent reviewer should verify that the transaction exists on the selected network, is associated with the submitting wallet, pays the required amount in the configured currency, and is referenced by the same model or task commitment. Service-side payment records and operational checks are outside this repository.
 
 ### Verification rules
 
@@ -130,9 +130,9 @@ The TAO-specific amount rules below remain unchanged.
 1. **Extrinsic hash, not extrinsic ID.** The commitment's `b` field must contain the burn extrinsic **hash** (`0x…`, 32 bytes). Explorer-style identifiers such as `8783031-0016` are not accepted. Matching is a strict exact comparison; truncated or prefixed values fail.
 2. **Existence and signer.** The transaction must exist in the referenced block (`bb`) and be signed by the submitting hotkey or by the coldkey that owns it.
 3. **Amount and target.** The amount must meet the season's published entry fee (`params.fee.amount_tao`; the comparison is `>=` on Rao, so being one Rao short is a rejection). On a `burn` season the burn target hotkey must match the submitting hotkey; on a `transfer` season the destination must be `params.fee.coldkey` and the signer must be the coldkey that owns the submitting hotkey.
-4. **Time window.** The payment block must be within a bounded window of the commitment block — **50 blocks** (`scanner.burn_block_window`, symmetric: the check is `abs(burn_block - commit_block) > window`). Burn immediately before committing anyway; an old burn cannot be attached to a new commitment, and an expired one is not refunded. `openroboto submit` pays and announces back-to-back so the window cannot lapse between them.
+4. **Time window.** The payment block must be within a bounded window of the commitment block — **50 blocks** (`scanner.burn_block_window`, symmetric: the check is `abs(burn_block - commit_block) > window`). Burn immediately before committing anyway; an old burn cannot be attached to a new commitment, and an expired one is not refunded. `openroboto submit` pays and announces back-to-back and checks the window before announcement; an interrupted payment can still need operator reconciliation.
 5. **No reuse.** Each burn transaction can back exactly one submission. Replayed or shared transaction hashes are rejected.
-6. **Free period.** When the season's published entry fee is `0`, payment verification is skipped and nothing is charged. ⚠️ `free_period` is a `payment_status` word — "this payment counts as settled" — and **not** a third `fee.kind`.
+6. **Legacy burn free period.** The backend may explicitly enable its legacy burn free-period policy. `free_period` is a payment status, not a fee kind or a zero-price Gamma option. Gamma fees must be positive and are verified by their exact finalized spend event.
 
 ### Submission status model
 
