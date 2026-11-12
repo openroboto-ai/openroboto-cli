@@ -207,7 +207,9 @@ def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) 
         action="store_true",
         help="re-announce a submission that is already done, paying the entry fee a "
         "second time. The upload is reused as it is, so this re-submits the same "
-        "model -- which the subnet counts once, however many times it is paid for",
+        "model -- which the subnet counts once, however many times it is paid for. "
+        "Gamma reuses a confirmed payment for the same submission and never "
+        "clears an unresolved payment",
     )
     parser.set_defaults(handler=run)
 
@@ -290,10 +292,16 @@ def _run(
                 "without paying again."
             )
             return _finish_scene_registration(settings, state, args.config)
-        say(
-            "⏭️  this submission is already announced. Pass --force to redo it "
-            "(that pays the entry fee again)"
-        )
+        if gamma_reused:
+            say(
+                "⏭️  this submission is already announced. Reusing its confirmed "
+                "Gamma payment; no new fee was charged."
+            )
+        else:
+            say(
+                "⏭️  this submission is already announced. Pass --force to redo it "
+                "(that pays the entry fee again)"
+            )
         return 0
 
     if force:
