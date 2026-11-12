@@ -36,6 +36,7 @@ from openroboto.contributor import ContributorKeyError
 from openroboto.huggingface import UploadError
 from openroboto.logging import setup_logger
 from openroboto.payment import BurnError, TransferError
+from openroboto.payment.gamma import GammaPaymentError
 from openroboto.training import TrainingError
 
 #: The whole command surface, in the order a miner uses it.
@@ -64,6 +65,7 @@ prints to stderr and does not conjure a `logs/` into the miner's directory."""
 EXPECTED_ERRORS = (
     BackendError,
     BurnError,
+    GammaPaymentError,
     ChainError,
     ConfigError,
     ContributorKeyError,

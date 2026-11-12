@@ -8,7 +8,10 @@ copy of admission/checker rules.
 The CLI-side loader verifies the archive SHA before extraction, loads the worker
 from the official runtime wheel already bundled with the CLI, and compares the
 actual worker/protocol source and fixture hashes with both the lock and the
-baseline. This works without a private validator checkout, registry credentials,
+baseline. The official protocol 0.18.0 wheel beside this lock is pinned by its
+PyPI URL and SHA-256 and is used only by the frozen worker subprocess. The
+candidate CLI continues to use its own installed protocol, including the Gamma
+additions in 0.19.0. This works without a private validator checkout, registry credentials,
 or MuJoCo. Any version difference stops before fixture comparisons.
 
 The comparator preserves `accepted`, `code`, each check's name/passed/kind/detail,
@@ -31,7 +34,8 @@ uv run python scripts/capture_cli_admission.py \
 
 The evidence directory must be new. `--python /absolute/path/to/python` selects a
 candidate CLI installation when comparing another wheel or local checkout; that
-interpreter also supplies the actual worker wheel and protocol source identity.
+interpreter supplies the candidate CLI and bundled worker wheel; the frozen
+worker protocol comes from the explicitly hash-locked fixture wheel.
 The runner verifies the pinned archive, baseline, lock and runtime code before
 starting any case. A mismatch returns a version error with no case pass counts.
 

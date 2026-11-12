@@ -1691,7 +1691,7 @@ requires-dist = [
     { name = "bittensor", specifier = ">=10.5,<11" },
     { name = "cryptography", specifier = ">=42" },
     { name = "huggingface-hub", specifier = ">=0.24.0" },
-    { name = "openroboto-protocol", specifier = "==0.18.0" },
+    { name = "openroboto-protocol", specifier = "==0.19.0" },
     { name = "pyyaml", specifier = ">=6.0" },
 ]
 
@@ -1706,11 +1706,11 @@ dev = [
 
 [[package]]
 name = "openroboto-protocol"
-version = "0.18.0"
+version = "0.19.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/dc/86/523bd39ac67e77887a58e565f351765ffcc8c8a9b9f49a36c774a9014199/openroboto_protocol-0.18.0.tar.gz", hash = "sha256:b721d1594bb1cd7d1e3935af97f3a865aa7458b1557d35018a126a3deab71c43", size = 127249, upload-time = "2026-11-10T06:44:44.497Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/7d/65/976c41f6884e262ca82db591633ef025e0d0dfd07de3fc4b3c6e06afdc52/openroboto_protocol-0.19.0.tar.gz", hash = "sha256:a46403e5955e6767786922f898a34ef4107fe11adee9893d8322992c119dcb64", size = 129112, upload-time = "2026-11-12T11:00:11.529Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/23/4b/5c81d88cc7e7ee0ed34422f9489f6d603ff4b755a288d16083f2ce8c0629/openroboto_protocol-0.18.0-py3-none-any.whl", hash = "sha256:bcddd6aa202352d0b83f4f023b395d6cef99128e419c49efa1a52a661229f3bf", size = 136812, upload-time = "2026-11-10T06:44:43.288Z" },
+    { url = "https://files.pythonhosted.org/packages/61/79/613510b3d4a0b6688ef35590ceef535fc35e6a40e4b98dfd54e10fb9314d/openroboto_protocol-0.19.0-py3-none-any.whl", hash = "sha256:d775c760597752ee1b4794ce61b651aed3a6a578de5e7e6dcc13d1d6f79a275e", size = 139148, upload-time = "2026-11-12T11:00:09.953Z" },
 ]
 
 [[package]]

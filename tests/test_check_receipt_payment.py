@@ -185,14 +185,20 @@ def test_scene_receipt_must_bind_the_joint_identity(checked):
     assert verify_receipt(settings, live, digest, submission_digest="c" * 64, now=now)
 
 
+@pytest.mark.parametrize("fee_kind", ["burn", "gamma"])
 @pytest.mark.parametrize(
     "failure", [None, "missing", "digest", "static-only", "version", "expired"]
 )
-def test_submit_gates_payment_with_the_actual_receipt(checked, monkeypatch, failure):
+def test_submit_gates_payment_with_the_actual_receipt(
+    checked, monkeypatch, failure, fee_kind
+):
     from openroboto.cli import main
 
     settings, live, package, _digest, path, now = checked
     settings.authoring["package"] = str(package)
+    if fee_kind == "gamma":
+        settings.competition["params"]["fee"] = {"kind": "gamma", "amount_gamma": "25"}
+        live.params["fee"] = {"kind": "gamma", "amount_gamma": "25"}
     if failure == "missing":
         path.unlink()
     elif failure:
@@ -208,7 +214,7 @@ def test_submit_gates_payment_with_the_actual_receipt(checked, monkeypatch, fail
         path.write_text(json.dumps(data))
     state = {}
     events = []
-    verdict = SimpleNamespace(live=live, cid=274, kind="burn")
+    verdict = SimpleNamespace(live=live, cid=274, kind=fee_kind)
     monkeypatch.setattr(submit.Settings, "load", lambda *a: settings)
     monkeypatch.setattr(submit, "load_state", lambda *a: state)
     monkeypatch.setattr(submit, "save_state", lambda *a: None)
@@ -231,6 +237,7 @@ def test_submit_gates_payment_with_the_actual_receipt(checked, monkeypatch, fail
         return True
 
     monkeypatch.setattr(submit, "perform_burn", pay)
+    monkeypatch.setattr(submit, "perform_gamma", pay)
     monkeypatch.setattr(
         submit, "perform_announce", lambda *a: events.append("announce") or True
     )
