@@ -1,6 +1,46 @@
 # Changelog
 
-## 1.8.1 (unreleased)
+## 1.9.0 (unreleased)
+
+Task authors, including schema-3 scene authors, use `openroboto init` →
+`openroboto check` → `openroboto submit`. Model miners keep their existing training
+and checkpoint workflow. Full task checks require Docker; MuJoCo and the worker
+run in the official bundled image instead of a separate host Python environment.
+
+- List task seasons by default and create the workspace for the selected
+  `competition.track` and execution profile: authoring config, valid task inputs,
+  complete `catalog.json`, the profile's README and `.gitignore`. Scene workspaces
+  include the MJCF and declared assets.
+- Route `build`, `check`, `doctor` and `status` by track. Remove the separate task
+  command group; authoring helpers are the top-level `catalog`, `create`,
+  `record-reference` and `self-test` commands.
+- Bundle task runtime 0.3.20 with protocol 0.18.0 and verify the pinned build
+  context, runtime identity and immutable local image before use. Full check
+  records missing references and runs worker structural/physical admission.
+  `check --static-only` needs no Docker and does not grant physical readiness.
+- Require a current, successful, digest-bound check receipt under the live
+  season's policy before payment. Submit revalidates fixed `repo@commit` content;
+  scene receipts also bind E/P/joint identities and the execution contract.
+  A failed new check invalidates the previous successful receipt.
+- Run schema-3 instruction rendering, per-initial-state reference recording and
+  physical self-test through the official container. `create --from-execution E`
+  retains the original E and requires fresh reference actions for the new inputs.
+  Declare solver data files with `authoring.solve_inputs`; only the solver and
+  those files are mounted read-only, and they stay outside the uploaded package.
+- Discover the backend's active scene execution contract, write it into the
+  workspace and verify its exact digest again before upload/payment. Season
+  operators publish the receipt validity policy; scene submissions also need a
+  verified route matching the bundled runtime and active execution contract.
+- Recognize scene dual-root packages in ordinary `submit` and register their
+  identity automatically. When chain ingestion is pending, rerun the same
+  command to finish registration without uploading or paying again.
+
+See the [task package guide](docs/TASK_PACKAGES.md) for the current workflow and
+operator declarations. Local checks, server admission, panel results and rewards
+remain separate outcomes. Earlier entries below preserve their versions' commands
+and runtime candidates; use the current guide when authoring a task.
+
+## 1.8.1
 
 Task authors using a contributor key outside the default location can pass
 `submit --key-file <path>`, just as they do for `identity`. The payment preflight
@@ -9,7 +49,7 @@ Repeat the same option when resuming an uploaded submission; the upload checkpoi
 is retained. Commands without the option keep the existing default, and scene
 registration continues to use the wallet hotkey.
 
-## Unreleased — imported-scene CLI candidate (OPE-234)
+## Historical imported-scene candidate notes (OPE-234)
 
 - Resolve the published protocol 0.18.0 from official PyPI and regenerate the
   consumer lock for CLI 1.8.0, including the exact published artifact hashes.

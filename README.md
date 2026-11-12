@@ -8,6 +8,9 @@ checkpoint to Hugging Face, pay a small on-chain evaluation fee, and announce it
 simulation with a seed nobody can predict, ranks the results, and pays emissions by
 rank.
 
+Task-authoring seasons accept task packages through the same CLI. See
+[Task authoring](#task-authoring) for their workspace and submission workflow.
+
 Everything you type is this one package. **There is nothing to clone.**
 
 ```bash
@@ -28,6 +31,9 @@ as open.
 
 ## Task authoring
 
+This section describes the 1.9.0 workflow on `main`. Version 1.9.0 is not yet
+published to PyPI; see the [changelog](CHANGELOG.md) for release status.
+
 Task and model seasons use the same top-level workflow. Choose a task season:
 
 ```bash
@@ -38,12 +44,19 @@ openroboto check                 # v1 demo: check --example
 openroboto submit
 ```
 
-The CLI writes a track-specific workspace. For controlled Panda v1/v2 tasks,
-`check` automatically prepares the official bundled CPU Docker image, builds the
-package, records missing reference actions and runs worker structural/physical
-admission. MuJoCo and the worker stay inside the container. No validator checkout,
-registry login or Python runtime path is needed. `check --static-only` runs
-without Docker; it does not produce a physical passing verdict.
+The CLI writes a workspace for the season's `competition.track` and execution
+profile. Controlled Panda v1/v2 tasks and schema-3 imported scenes use these same
+commands. `check` automatically prepares the official bundled CPU Docker image,
+builds the package, records missing reference actions and runs worker
+structural/physical admission. MuJoCo and the worker stay inside the container.
+No validator checkout, registry login or Python runtime path is needed.
+`check --static-only` runs without Docker; it does not produce a physical passing
+verdict.
+
+A successful full check records a digest-bound receipt. Before payment, `submit`
+checks that receipt against the live season's policy and verifies the uploaded
+`repo@commit`. Scene submissions also require the exact active execution contract
+published by the backend. Local success and server admission are separate results.
 
 `catalog`, `create`, `record-reference` and `self-test` are top-level authoring
 verbs. `build`, `check`, `doctor` and `status` route by `competition.track`.
@@ -51,10 +64,14 @@ The task command group has been removed. Read the
 [task package guide](docs/TASK_PACKAGES.md) for objects, ranges, reference scripts,
 image identities, JSON verdicts and the pre-payment gate.
 
-Schema-3 imported scenes retain the explicit `openroboto scene` workflow and
-`openroboto submit --scene-package <directory>`. They need matching execution and
-private roots and the scene-specific runtime. See the
-[scene guide](docs/TASK_PACKAGES.md#9-author-owned-scenes-schema-3).
+For schema-3 scenes, `init` writes the scene, declared assets and catalog. `check`
+prepares execution root E and records missing reference actions for every initial
+state into a matching private root P. Any change to E requires fresh reference
+actions. Ordinary `submit` recognizes both roots automatically and registers their
+identity with the backend. If chain ingestion is pending,
+rerun `submit` to finish registration without paying again. The explicit `scene`
+commands remain available for advanced inspection and independently installed
+runtimes; see the [scene guide](docs/TASK_PACKAGES.md#9-author-owned-scenes-schema-3).
 
 ## Model training requirements
 
@@ -66,7 +83,7 @@ private roots and the scene-specific runtime. See the
 - A registered Bittensor mainnet hotkey with enough TAO for the evaluation fee
 - A Hugging Face account and a write token
 
-## Your first submission
+## Your first model submission
 
 ```bash
 # 1. Install and scaffold
@@ -105,14 +122,18 @@ Real-machine setup, systemd, custom strategies: [docs/MINER_DEPLOY.md](docs/MINE
 
 | Command | What it does |
 |---|---|
-| `openroboto init [DIR] [-s simple\|example] [--validator] [--refresh] [--backend-url URL] [--force]` | Create a working workspace: config, a training strategy to edit, a README with the exact next commands, and a `.gitignore` that keeps your wallet password out of git. ⚠️ **This command queries the backend**: the open competitions come from `GET /api/v1/competitions`, and if that cannot be reached it writes **no file at all** rather than guessing a season. `--refresh` rewrites only the `competition:` section of an existing `miner.yaml`; `--backend-url` says which backend to ask (and the whole workspace is then written to match it); `--force` overwrites existing files |
-| `openroboto doctor` | Environment check: Python, config, the season's own spec, Docker, GPU, image, HF token, wallet balance against **this season's** fee |
+| `openroboto init [DIR] [-s simple\|example] [--validator] [--refresh] [--backend-url URL] [--force]` | Create a track-specific workspace: config, a training strategy or task definition and catalog, a README with the next commands, and a `.gitignore`. Task seasons are listed by default. ⚠️ **This command queries the backend**: the open competitions come from `GET /api/v1/competitions`, and if that cannot be reached it writes **no file at all** rather than guessing a season. `--refresh` rewrites only the `competition:` section of an existing `miner.yaml`; `--backend-url` says which backend to ask (and the whole workspace is then written to match it); `--force` overwrites existing files |
+| `openroboto doctor` | Check config, the season's spec and fee, HF permissions, wallet balance and the selected track's environment: model GPU/training image, or task package/profile, scene execution-contract snapshot and official self-test image |
 | `openroboto build` | Build the training image, or the task package and official self-test image, from the bundled context (no clone). Refuses for a competition this client has no image for, rather than filling that competition's image name with the π0.5 one |
 | `openroboto train [-s script.py]` | Train once; your strategy script is mounted into the container |
-| `openroboto check [PATH]` | Verify checkpoint layout with the rules the evaluator uses — **no GPU, no network, no second repository** |
+| `openroboto check [PATH] [--static-only] [--json]` | Route by `competition.track`: validate a model checkpoint's layout, or run task structural/reference/physical admission in the official container. Task `--static-only` checks structure without Docker and does not produce a physical passing receipt |
+| `openroboto catalog` | Show the configured task profile's robots, objects and complete parameter ranges; `init` also writes them to `catalog.json` |
+| `openroboto create PATH` | Create a task definition for the workspace profile; `--from-execution E` imports an existing scene into new inputs while retaining the original E |
+| `openroboto record-reference [--script solve.py]` | Record reference actions for every instance in the official container; the new reference changes the package identity |
+| `openroboto self-test` | Run the task package's physical admission in the official container |
 | `openroboto identity keygen \| show \| register \| bind \| unbind \| migrate` | The persistent contributor identity an authored task is paid to. `keygen` writes an Ed25519 key to `~/.openroboto/contributor.key` (mode 0600); `register` signs a `register` message; `bind` binds the hotkey in `miner.yaml` with **two** signatures (contributor key + hotkey sr25519). `submit` refuses to pay for a task-track entry from an unbound hotkey. See [CONTRIBUTOR.md](docs/CONTRIBUTOR.md) |
-| `openroboto submit [--config] [--output-dir] [--force]` | Upload → re-check the season against the backend → check the repository layout → pay the entry fee → announce on chain. Resumable from `state/competition_<id>.json`: an upload already done is not repeated and a fee already paid is not paid again |
-| `openroboto status [--hotkey] [--competition]` | Submission history and scanner rejection reasons (no API key needed) |
+| `openroboto submit [--config] [--output-dir] [--force]` | Upload → re-check the live season and fixed repository content → pay → announce. Task submissions also require a matching check receipt; scene submissions verify the live execution contract and register both roots automatically. Resumable from `state/competition_<id>.json`: an upload already done is not repeated and a fee already paid is not paid again |
+| `openroboto status [--hotkey] [--competition]` | Route by the configured track: model submission history/scanner rejections, or signed task submission and backend admission status |
 | `openroboto validator run` | External validator: read published weights, set them on chain |
 | `openroboto --version` | CLI version and protocol package version |
 
@@ -123,7 +144,7 @@ inside the training container. The bundled strategies leave that step blank on
 purpose and say so; `openroboto train` tells you what the run actually produced, and
 `openroboto check` gives the verdict **before you pay**.
 
-⚠️ **`openroboto submit` checks the layout too, and it is not optional.** Between
+⚠️ **`openroboto submit` repeats the model layout check before payment.** Between
 the upload and the payment it reads the file listing of your HuggingFace
 repository — the same listing the subnet reads *after* the fee — and stops
 without paying anything if that listing would not earn a score. There is no flag
@@ -154,7 +175,7 @@ that is never announced.
 
 Details: [docs/PAYMENT.md](docs/PAYMENT.md).
 
-## Submission format
+## Model submission format
 
 The evaluator accepts **complete model checkpoints** — an openpi JAX `params/`
 directory or a PyTorch `model.safetensors`, plus
