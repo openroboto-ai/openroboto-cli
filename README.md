@@ -31,6 +31,9 @@ as open.
 
 ## Task authoring
 
+This section describes the 1.9.0 workflow on `main`. Version 1.9.0 is not yet
+published to PyPI; see the [changelog](CHANGELOG.md) for release status.
+
 Task and model seasons use the same top-level workflow. Choose a task season:
 
 ```bash
