@@ -28,7 +28,7 @@ from types import ModuleType
 
 from openroboto import adapters
 from openroboto.commands.build import competition_adapter, competition_image
-from openroboto.competition import Fee, load_snapshot
+from openroboto.competition import GAMMA, Fee, load_snapshot
 from openroboto.config import ConfigError, Settings, environments
 from openroboto.console import say
 from openroboto.training.container import runner_image
@@ -430,7 +430,7 @@ def check_competition(settings: Settings) -> CheckResult:
         "competition",
         True,
         f"{snapshot.name} · {snapshot.status} · "
-        f"{fee.amount_tao} TAO to enter, by {fee.kind}",
+        f"{fee.display_amount} to enter, by {fee.kind}",
     )
 
 
@@ -610,20 +610,50 @@ def check_wallet(settings: Settings) -> CheckResult:
             required=False,
         )
 
+    priced = _entry_fee(settings)
     try:
-        from openroboto.chain import get_subtensor
+        from openroboto_protocol.gamma_payment import (
+            GAMMA_UNITS_PER_GAMMA,
+            gamma_amount_units,
+        )
+
+        from openroboto.chain import get_subtensor, open_wallet
+        from openroboto.payment.gamma import check_gamma_deposit
 
         subtensor = get_subtensor(settings.network)
         try:
             balance = float(subtensor.get_balance(address))
+            if priced is not None and priced[1].kind == GAMMA:
+                season, fee = priced
+                assert fee.amount_gamma is not None
+                hotkey = settings.hotkey_ss58 or str(
+                    open_wallet(settings).hotkey.ss58_address
+                )
+                gamma_balance = check_gamma_deposit(
+                    subtensor,
+                    netuid=settings.netuid,
+                    hotkey=hotkey,
+                    coldkey=address,
+                    amount_units=gamma_amount_units(fee.amount_gamma),
+                )
+                return CheckResult(
+                    "wallet balance",
+                    True,
+                    f"{gamma_balance / GAMMA_UNITS_PER_GAMMA:g} Gamma "
+                    f"({season} costs {fee.display_amount}); "
+                    f"{balance:.4f} TAO available for chain transaction fees",
+                )
         finally:
             subtensor.close()
     except Exception as exc:
+        from openroboto.payment.gamma import GammaPaymentError
+
+        if isinstance(exc, GammaPaymentError):
+            return CheckResult("wallet balance", False, str(exc))
         return CheckResult(
             "wallet", True, f"loaded (balance unavailable: {exc})", required=False
         )
 
-    priced = _entry_fee(settings)
     # An unknown fee cannot be compared against the balance (`None` does not
     # compare), and pretending it is covered is worse than saying so -- doctor is
     # the self-check entry point before money is spent, so "cannot be determined"
@@ -639,6 +669,7 @@ def check_wallet(settings: Settings) -> CheckResult:
         )
 
     season, fee = priced
+    assert fee.amount_tao is not None
     enough = balance >= fee.amount_tao
     return CheckResult(
         "wallet balance",

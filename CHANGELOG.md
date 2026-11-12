@@ -2,6 +2,21 @@
 
 ## 1.9.0 (unreleased)
 
+- Support fixed, season-configured Gamma submission fees for task authors, with
+  protocol 0.19.0 payment identity. Check the miner-owned deposit, local spender,
+  balance and daily allowance before signing. Require the exact `GammaSpent`
+  event; skipped spends do not authorize a submission.
+- Persist the signed Gamma transaction before broadcast and serialize workspace
+  submissions. Reconcile interrupted payments by their original hash, preserve a
+  separate durable journal and reuse the same proof on retries and `--force`.
+  Bind recovery to the original chain genesis and backend, wait for finality,
+  and coordinate identical payments across workspaces on the same host.
+  An expired transaction can be retried only after its complete finalized era
+  proves it never paid.
+  Existing TAO burn and transfer seasons retain their payment paths.
+- Explain Gamma preparation in initialized task and scene READMEs, show fees in
+  their own currency and check Gamma deposit readiness in `doctor`.
+
 Task authors, including schema-3 scene authors, use `openroboto init` →
 `openroboto check` → `openroboto submit`. Model miners keep their existing training
 and checkpoint workflow. Full task checks require Docker; MuJoCo and the worker

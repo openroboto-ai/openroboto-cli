@@ -58,6 +58,12 @@ checks that receipt against the live season's policy and verifies the uploaded
 `repo@commit`. Scene submissions also require the exact active execution contract
 published by the backend. Local success and server admission are separate results.
 
+Task seasons can publish a fixed Gamma fee in `params.fee.amount_gamma`. Submit
+spends the miner-owned deposit locally after all free gates and confirmation,
+then verifies its exact on-chain payment event. `doctor` checks the Gamma balance
+and authorization. An interrupted submission reconciles the original transaction
+without charging again. See [Gamma preparation](docs/TASK_PACKAGES.md#paying-a-gamma-submission-fee).
+
 `catalog`, `create`, `record-reference` and `self-test` are top-level authoring
 verbs. `build`, `check`, `doctor` and `status` route by `competition.track`.
 The task command group has been removed. Read the

@@ -122,10 +122,17 @@ from openroboto.commands.check import (
     tree_files,
     weights_subdir_of,
 )
+from openroboto.commands.gamma_payment import (
+    gamma_submission_lock,
+    perform_gamma,
+    resume_gamma_payment,
+)
 from openroboto.commands.upload import perform_upload
 from openroboto.competition import (
     BURN,
+    GAMMA,
     PrecheckFailed,
+    Snapshot,
     Verdict,
     confirm_payment,
     load_snapshot,
@@ -136,6 +143,7 @@ from openroboto.competition_state import (
     load_state,
     resolve_output_dir,
     save_state,
+    state_path,
 )
 from openroboto.config import ConfigError, Settings
 from openroboto.console import fail, say
@@ -207,6 +215,19 @@ def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) 
 def run(args: argparse.Namespace) -> int:
     settings = Settings.load(args.config)
     snapshot = load_snapshot(settings)
+    fee = snapshot.params.get("fee") if snapshot is not None else None
+    if snapshot is not None and (
+        (isinstance(fee, Mapping) and fee.get("kind") == GAMMA)
+        or state_path(snapshot.id).with_suffix(".gamma.json").exists()
+    ):
+        with gamma_submission_lock(snapshot.id):
+            return _run(args, settings, snapshot)
+    return _run(args, settings, snapshot)
+
+
+def _run(
+    args: argparse.Namespace, settings: Settings, snapshot: Snapshot | None
+) -> int:
     if snapshot is None:
         # Before anything is read or uploaded: this run cannot end in a payment,
         # and finding that out on the far side of several gigabytes is a cost
@@ -223,6 +244,11 @@ def run(args: argparse.Namespace) -> int:
     else:
         output_dir = args.output_dir or resolve_output_dir(competition_id)
     state = load_state(competition_id)
+    gamma_reused = False
+    if state_path(competition_id).with_suffix(".gamma.json").exists():
+        gamma_reused = resume_gamma_payment(settings, competition_id, state)
+
+    force = args.force and not gamma_reused
 
     scene_path = str(getattr(args, "scene_package", "") or "")
     if scene_path:
@@ -244,7 +270,7 @@ def run(args: argparse.Namespace) -> int:
         scene_path = output_dir
 
     if (scene_path or state.get("scene_submission")) and (
-        not state.get("burn_tx_hash") or args.force
+        not state.get("burn_tx_hash") or force
     ):
         if str(snapshot.track) != TASK_TRACK:
             fail(
@@ -257,7 +283,7 @@ def run(args: argparse.Namespace) -> int:
 
     say(f"🦞 submit | {snapshot.label} ({snapshot.name})")
 
-    if state.get("step") == "announce" and not args.force:
+    if state.get("step") == "announce" and not force:
         if state.get("scene_submission"):
             say(
                 "This scene is already announced. Continue registration "
@@ -270,7 +296,7 @@ def run(args: argparse.Namespace) -> int:
         )
         return 0
 
-    if args.force:
+    if force:
         # "the payment", not "the burn": on the real track the same two keys hold
         # a transfer, and a miner told they are about to burn 2 TAO looks for
         # stake that will never exist.
@@ -415,7 +441,12 @@ def run(args: argparse.Namespace) -> int:
         # fall through into (falling through to the burn would pay the right
         # amount in a way that reaches nobody, irreversibly, and leave the
         # submission unpaid).
-        pay = perform_burn if verdict.kind == BURN else perform_transfer
+        if verdict.kind == GAMMA:
+            pay = perform_gamma
+        elif verdict.kind == BURN:
+            pay = perform_burn
+        else:
+            pay = perform_transfer
         if not pay(settings, competition_id, state, verdict=verdict):
             return 1
 

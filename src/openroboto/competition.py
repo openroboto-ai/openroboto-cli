@@ -36,16 +36,18 @@ import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal
 from typing import Any, Final, NoReturn
 
 from openroboto_protocol.commitment import Track
+from openroboto_protocol.gamma_payment import GAMMA_UNITS_PER_GAMMA, gamma_amount_units
 from openroboto_protocol.schemas import Competition
 
 from openroboto.backend_api import BackendError, fetch_competitions
 from openroboto.config import ConfigError, Settings, environments
 from openroboto.console import fail, say
 
-#: The two ways a season can be paid for. `kind` is competition data, read from
+#: The ways a season can be paid for. `kind` is competition data, read from
 #: `params.fee.kind` -- it is **not** derived from the adapter or the track.
 #: A second table saying "the real track transfers" would be a second thing to
 #: keep in step with the data, and they would disagree on the season that breaks
@@ -55,7 +57,8 @@ from openroboto.console import fail, say
 #: words, meaning "this payment counts as settled", not a way to pay.
 BURN: Final = "burn"
 TRANSFER: Final = "transfer"
-FEE_KINDS: Final = (BURN, TRANSFER)
+GAMMA: Final = "gamma"
+FEE_KINDS: Final = (BURN, TRANSFER, GAMMA)
 
 REFRESH_HINT: Final = "  → `openroboto init --refresh` rewrites it from the backend"
 
@@ -109,13 +112,21 @@ class Fee:
     """One season's entry fee, as read from that season's `params.fee`."""
 
     kind: str
-    amount_tao: float
+    amount_tao: float | None
     #: 🔴 `None` is a real value and it means **do not pay**: the real track's
     #: collection address has not been published yet. Whoever reads it fails
-    #: closed. It is legitimately `None` for `kind == "burn"`, which needs no
+    #: closed. It is legitimately `None` for burn/Gamma fees, which need no
     #: address at all -- which is why the gate lives in `judge()`, where the
     #: kind is known, and not in the parser below.
     coldkey: str | None
+    amount_gamma: str | None = None
+
+    @property
+    def display_amount(self) -> str:
+        """The configured amount with its currency, without conversion."""
+        if self.kind == GAMMA:
+            return f"{self.amount_gamma} Gamma"
+        return f"{self.amount_tao} TAO"
 
 
 @dataclass(frozen=True)
@@ -284,6 +295,22 @@ def fee_of(params: Mapping[str, Any], *, where: str) -> Fee:
             f"which this client does not know (it knows: {', '.join(FEE_KINDS)}).\n"
             f"  → pip install -U openroboto"
         )
+    if kind == GAMMA:
+        amount_gamma = fee.get("amount_gamma")
+        try:
+            if not isinstance(amount_gamma, (str, int, float)):
+                raise ValueError("Gamma amount must be a number or decimal string")
+            units = gamma_amount_units(amount_gamma)
+        except (TypeError, ValueError) as exc:
+            raise ConfigError(
+                f"Invalid Gamma fee in {where}: {exc}.\n" + REFRESH_HINT
+            ) from exc
+        return Fee(
+            kind=kind,
+            amount_tao=None,
+            coldkey=None,
+            amount_gamma=format(Decimal(units) / GAMMA_UNITS_PER_GAMMA, "f"),
+        )
     amount = fee.get("amount_tao")
     if not isinstance(amount, (int, float)) or isinstance(amount, bool):
         raise ConfigError(
@@ -327,6 +354,7 @@ class Verdict:
 
     @property
     def amount_tao(self) -> float:
+        assert self.fee.amount_tao is not None
         return self.fee.amount_tao
 
     @property
@@ -397,13 +425,14 @@ def judge(
             f"operators; `openroboto init --refresh` cannot fix it."
         )
 
-    # A task-authoring season is priced and judged as a **burn**, by the same
-    # path as the simulation track: `admit_task` files the submission with
-    # `payment_kind="burn"` and verifies that burn. A season configured as
-    # `transfer` would take the miner's TAO to a coldkey and leave the backend
-    # looking for a burn that will never exist -- the fee is gone and the task
-    # never enters the pool.
-    if str(live.track) == "task" and live_fee.kind != BURN:
+    # Task admission accepts its configured burn or self-spent Gamma fee.
+    # Transfer would move money without producing either required proof.
+    if live_fee.kind == GAMMA and str(live.track) != "task":
+        raise PrecheckFailed(
+            "Gamma payment is supported for task-authoring seasons only. "
+            "Nothing was paid; ask the operator to correct params.fee.kind."
+        )
+    if str(live.track) == "task" and live_fee.kind not in (BURN, GAMMA):
         raise PrecheckFailed(
             f"{_name(live)} is a task-authoring season but its entry fee is "
             f"configured as `{live_fee.kind}`. This track is collected by "
@@ -449,11 +478,15 @@ def judge(
             f"  miner.yaml: {mine.coldkey}\n"
             f"  backend:    {live_fee.coldkey}\n" + REFRESH_HINT
         )
-    if live_fee.amount_tao != mine.amount_tao or live_fee.kind != mine.kind:
+    if (
+        live_fee.amount_tao != mine.amount_tao
+        or live_fee.amount_gamma != mine.amount_gamma
+        or live_fee.kind != mine.kind
+    ):
         raise PrecheckFailed(
             f"{_name(live)}'s entry fee has changed since you ran `init`.\n"
-            f"  miner.yaml: {mine.amount_tao} TAO ({mine.kind})\n"
-            f"  backend:    {live_fee.amount_tao} TAO ({live_fee.kind})\n"
+            f"  miner.yaml: {mine.display_amount} ({mine.kind})\n"
+            f"  backend:    {live_fee.display_amount} ({live_fee.kind})\n"
             + REFRESH_HINT
         )
 
@@ -560,12 +593,13 @@ def _announce(verdict: Verdict) -> None:
     say("✅ competition check passed")
     say(f"   Submitting to: {live.label} ({_name(live)} · cid={live.id})")
     say(f"   Submissions:   {verdict.window}")
-    destination = (
-        "burned on the subnet (no address)"
-        if verdict.kind == BURN
-        else f"transfer to {verdict.fee.coldkey}"
-    )
-    say(f"   Entry fee:     {verdict.amount_tao} TAO -- {destination}")
+    if verdict.kind == GAMMA:
+        destination = "spent from your own Gamma deposit on this subnet"
+    elif verdict.kind == BURN:
+        destination = "burned on the subnet (no address)"
+    else:
+        destination = f"transfer to {verdict.fee.coldkey}"
+    say(f"   Entry fee:     {verdict.fee.display_amount} -- {destination}")
     say(
         "   ⚠️  Passing this check does not guarantee the payment is accepted: "
         "the competition can still change in the seconds that follow."
