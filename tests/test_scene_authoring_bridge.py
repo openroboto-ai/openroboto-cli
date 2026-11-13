@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import importlib
 import json
 import shutil
 import sys
 import time
 from importlib.metadata import version
+from importlib.resources import files
 from pathlib import Path
 
 import pytest
@@ -23,8 +25,128 @@ from openroboto.scene_package import (
     execution_input,
     load_submission,
 )
+from openroboto.task_runtime import runtime_release
 
 FIXTURE = Path(__file__).parent / "fixtures/open_scene"
+
+
+@pytest.fixture
+def bundled_protocol_case(runtime_case):
+    case = runtime_case
+    release = runtime_release()
+    description = case["description"]["scene_authoring"]
+    registry = description["registry"]
+    registry["runtime"].update(
+        version=release["version"], protocol_version=release["protocol_version"]
+    )
+    description["runtime_version"] = release["version"]
+    environment = {
+        "id": registry["id"],
+        "version": registry["version"],
+        "digest": canonical_digest(registry),
+    }
+    case["task"]["environment"] = environment
+    description["environment"] = environment
+    case["metadata"].update(
+        protocol_version=release["protocol_version"],
+        runtime_version=release["version"],
+        scene_protocol_sha256=release["scene_protocol_compatibility"]["sha256"],
+    )
+    case["metadata"]["refs"]["environment"] = environment
+    (case["execution"] / "task.json").write_text(json.dumps(case["task"]))
+    return case
+
+
+def test_released_cross_version_protocol_pair_passes_the_full_identity_probe(
+    bundled_protocol_case,
+):
+    case = bundled_protocol_case
+    task, _ = execution_input(case["execution"])
+    result = case["bridge"]._probe(sys.executable, task, time.monotonic() + 10)
+    assert result["metadata"]["protocol_version"] == "0.18.0"
+    assert version("openroboto-protocol") == "0.19.0"
+    assert len(case["calls"]) == 2
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("protocol_version", "0.17.0"),
+        ("runtime_version", "0.3.21"),
+        ("scene_protocol_sha256", "0" * 64),
+        ("scene_protocol_sha256", None),
+    ],
+)
+def test_cross_version_probe_rejects_unreviewed_runtime_or_contract(
+    bundled_protocol_case, field, value
+):
+    case = bundled_protocol_case
+    case["metadata"][field] = value
+    task, _ = execution_input(case["execution"])
+    with pytest.raises(ScenePackageError, match="runtime_identity_mismatch"):
+        case["bridge"]._probe(sys.executable, task, time.monotonic() + 10)
+
+
+def test_cross_version_probe_rejects_an_unreviewed_host(
+    bundled_protocol_case, monkeypatch
+):
+    case = bundled_protocol_case
+    monkeypatch.setattr("importlib.metadata.version", lambda _: "0.20.0")
+    task, _ = execution_input(case["execution"])
+    with pytest.raises(ScenePackageError, match="runtime_identity_mismatch"):
+        case["bridge"]._probe(sys.executable, task, time.monotonic() + 10)
+
+
+def test_cross_version_probe_rejects_changed_installed_host_contracts(
+    bundled_protocol_case, monkeypatch, tmp_path
+):
+    case = bundled_protocol_case
+    root = tmp_path / "changed-protocol"
+    root.mkdir()
+    release = runtime_release()
+    source = files("openroboto_protocol")
+    for name in release["scene_protocol_compatibility"]["files"]:
+        (root / name).write_bytes(source.joinpath(name).read_bytes())
+    changed = root / "scene_schema.py"
+    changed.write_bytes(changed.read_bytes() + b"\n# changed scene contract\n")
+    monkeypatch.setattr(case["bridge"], "files", lambda _: root)
+    task, _ = execution_input(case["execution"])
+    with pytest.raises(ScenePackageError, match="runtime_identity_mismatch"):
+        case["bridge"]._probe(sys.executable, task, time.monotonic() + 10)
+
+
+@pytest.mark.parametrize("field", ["profile", "environment", "agent"])
+def test_reviewed_protocol_pair_preserves_other_scene_identity_gates(
+    bundled_protocol_case, field
+):
+    case = bundled_protocol_case
+    task, _ = execution_input(case["execution"])
+    if field == "profile":
+        case["metadata"]["profile"]["task_schema_version"] = 2
+    elif field == "environment":
+        case["metadata"]["refs"]["environment"] = {
+            **case["task"]["environment"],
+            "digest": "0" * 64,
+        }
+    else:
+        registry = case["description"]["scene_authoring"]["registry"]
+        registry["runtime"]["agent"] = {
+            **registry["runtime"]["agent"],
+            "tools_digest": "0" * 64,
+        }
+    with pytest.raises(ScenePackageError, match="runtime_identity_mismatch"):
+        case["bridge"]._probe(sys.executable, task, time.monotonic() + 10)
+
+
+def test_released_scene_contract_manifest_matches_installed_protocol():
+    compatibility = runtime_release()["scene_protocol_compatibility"]
+    root = files("openroboto_protocol")
+    actual = {
+        name: hashlib.sha256(root.joinpath(name).read_bytes()).hexdigest()
+        for name in compatibility["files"]
+    }
+    assert version("openroboto-protocol") == compatibility["host_version"]
+    assert canonical_digest(actual) == compatibility["sha256"]
 
 
 @pytest.fixture

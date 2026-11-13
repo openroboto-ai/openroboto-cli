@@ -31,7 +31,7 @@ as open.
 
 ## Task authoring
 
-This section describes the workflow in version 1.9.0. See the
+This section describes the workflow in version 1.9.1. See the
 [changelog](CHANGELOG.md) for the release details.
 
 Task and model seasons use the same top-level workflow. Choose a task season:
@@ -50,6 +50,9 @@ commands. `check` automatically prepares the official bundled CPU Docker image,
 builds the package, records missing reference actions and runs worker
 structural/physical admission. MuJoCo and the worker stay inside the container.
 No validator checkout, registry login or Python runtime path is needed.
+Use CLI 1.9.1 or later for schema-3 full checks. The CLI verifies the reviewed
+scene contracts across its payment protocol and the frozen container protocol;
+miners do not need a separate runtime wheel or a host protocol downgrade.
 `check --static-only` runs without Docker; it does not produce a physical passing
 verdict.
 
