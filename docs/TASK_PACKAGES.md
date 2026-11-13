@@ -225,6 +225,16 @@ exception in its output. Otherwise `--static-only` never qualifies for payment.
 The runtime version/content/policy and image digest declarations, when provided,
 must also match the checked release.
 
+Before opening a task season, operators must read its complete current `task`
+configuration and publish both receipt fields and the admission version. Set a
+positive receipt validity period explicitly, and keep `allow_static_only=false`
+when full physical checks are required. Obtain admission/runtime/content/policy
+identities from the reviewed official release and match the deployed worker's
+contract. A missing receipt policy or admission version is an operator
+configuration error; changing `miner.yaml` cannot fix it. Administrative updates
+replace the entire top-level `task` block, so preserve its source, execution
+profile and other existing fields. Read the live response back after updating.
+
 This workflow supports controlled Panda v1/v2 and schema-3 scenes. Scene receipts
 also bind the private-root digest, joint `submission_digest`, environment,
 execution-contract digest and exact runtime identity. A changed E creates a new
@@ -243,7 +253,14 @@ against the current server declaration.
 
 The CLI pins `openroboto-protocol==0.19.0` for Gamma payment identity. Runtime
 0.3.20 retains its frozen protocol 0.18.0 scene contracts and MuJoCo 3.17.0;
-payment does not execute in the self-test image. Verify normal locked installs and wheel contents with:
+payment does not execute in the self-test image. CLI 1.9.1 accepts this exact
+reviewed protocol pair only when both installations match the release's SHA-256
+manifest of scene-contract sources. The container probe measures its installed
+sources; the CLI independently measures the host sources. Schema/profile,
+environment, robot/control mapping and agent identity checks remain mandatory.
+An unknown protocol pair or changed contract sources are rejected. Do not
+downgrade the host protocol or install a separate runtime wheel to bypass a check.
+Verify normal locked installs and wheel contents with:
 
 ```bash
 uv sync --locked

@@ -26,6 +26,21 @@
     "task_sources.json": "323b874225ed7f8cf516d135f98c8be1d92eb3367c1ca4c3a6498044330a891a"
   },
   "protocol_version": "0.18.0",
+  "scene_protocol_compatibility": {
+    "files": [
+      "commitment.py",
+      "composed_execution.py",
+      "scene_contract.py",
+      "scene_schema.py",
+      "tabletop_assets.py",
+      "tabletop_v2.py",
+      "task_contract.py",
+      "task_profiles.py"
+    ],
+    "host_version": "0.19.0",
+    "runtime_version": "0.18.0",
+    "sha256": "14361cb538672aaddaf9608ec4721577aab215d52715cdb9a07b8f70e2db34c1"
+  },
   "timeout_s": 180,
   "version": "0.3.20"
 }

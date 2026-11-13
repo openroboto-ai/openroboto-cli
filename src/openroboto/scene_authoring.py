@@ -7,6 +7,7 @@ private files; the CLI projects only identities, fixed errors and check booleans
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import os
@@ -17,6 +18,7 @@ import signal
 import subprocess
 import tempfile
 import time
+from importlib.resources import files
 from typing import Any, NoReturn
 
 from openroboto_protocol.scene_contract import (
@@ -34,16 +36,24 @@ from openroboto.scene_package import (
     execution_input,
     load_bound_roots,
 )
+from openroboto.task_runtime import runtime_release
 
 MAX_CAPTURE_BYTES = 1_048_576
 MAX_REPORT_BYTES = 8_388_608
 MAX_TIMEOUT_SECONDS = 900
 # Probe the installed distributions and schema, not a version supplied by E.
 IDENTITY_PROBE = (
-    "import json; from importlib.metadata import version; "
+    "import hashlib,json; from importlib.metadata import version; "
+    "from importlib.resources import files; "
     "from openroboto_protocol.scene_contract import profile_catalog; "
+    "from openroboto_protocol.tabletop_assets import canonical_digest; "
     "from task_source.scene_runtime import registry_refs; "
+    f"paths={runtime_release()['scene_protocol_compatibility']['files']!r}; "
+    "root=files('openroboto_protocol'); "
+    "contract={p:hashlib.sha256(root.joinpath(p).read_bytes()).hexdigest() "
+    "for p in paths}; "
     "print(json.dumps({'protocol_version':version('openroboto-protocol'),"
+    "'scene_protocol_sha256':canonical_digest(contract),"
     "'runtime_version':version('openroboto-task-runtime'),"
     "'profile':profile_catalog(),'refs':registry_refs()}))"
 )
@@ -185,10 +195,32 @@ def _invoke(
                 stream.close()
 
 
-def _probe(python: str, task: SceneTask, deadline: float) -> dict[str, Any]:
-    """Bind capabilities to installed versions, the full registry and E's agent."""
+def _compatible_protocol(metadata: dict[str, Any]) -> bool:
+    """Allow only the released cross-version pair with identical scene sources."""
     from importlib.metadata import version
 
+    host_version = version("openroboto-protocol")
+    if metadata["protocol_version"] == host_version:
+        return True
+    release = runtime_release()
+    compatibility = release["scene_protocol_compatibility"]
+    root = files("openroboto_protocol")
+    contract = {
+        path: hashlib.sha256(root.joinpath(path).read_bytes()).hexdigest()
+        for path in compatibility["files"]
+    }
+    return bool(
+        host_version == compatibility["host_version"]
+        and metadata["protocol_version"] == compatibility["runtime_version"]
+        and metadata["runtime_version"] == release["version"]
+        and metadata["scene_protocol_sha256"]
+        == canonical_digest(contract)
+        == compatibility["sha256"]
+    )
+
+
+def _probe(python: str, task: SceneTask, deadline: float) -> dict[str, Any]:
+    """Bind capabilities to installed scene contracts, registry and E's agent."""
     try:
         status, metadata = _invoke(
             python, ["-c", IDENTITY_PROBE], timeout=_remaining(deadline, maximum=10)
@@ -210,7 +242,7 @@ def _probe(python: str, task: SceneTask, deadline: float) -> dict[str, Any]:
             and isinstance(registry, dict)
             and isinstance(runtime, dict)
             and isinstance(refs, dict)
-            and metadata["protocol_version"] == version("openroboto-protocol")
+            and _compatible_protocol(metadata)
             and isinstance(metadata["runtime_version"], str)
             and bool(metadata["runtime_version"])
             and metadata["runtime_version"]
@@ -257,8 +289,8 @@ def _probe(python: str, task: SceneTask, deadline: float) -> dict[str, Any]:
         raise ScenePackageError(
             "runtime_identity_mismatch",
             "runtime",
-            "Use scene API v1 with this exact protocol, schema/profile, environment "
-            "and agent. A changed runtime needs a newly authored E; "
+            "Use scene API v1 with reviewed protocol contracts, schema/profile, "
+            "environment and agent. A changed runtime needs a newly authored E; "
             "do not rewrite E here.",
         ) from exc
     return {"metadata": metadata, "description": description}

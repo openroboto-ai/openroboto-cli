@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.9.1 (2026-11-13)
+
+- Fix schema-3 full checks on the released CLI protocol 0.19.0 and bundled
+  runtime protocol 0.18.0. Accept only the explicitly reviewed version pair with
+  identical, release-bound scene-contract source digests on both sides.
+  Preserve runtime, schema/profile, environment, robot and agent identity gates.
+- Keep the frozen official runtime 0.3.20 and its image content unchanged.
+  A separate 0.3.18 runtime download or host protocol downgrade is not required.
+- Document the live season's required receipt validity and admission-version
+  declarations, including read/merge/readback when updating operator policy.
+
 ## 1.9.0 (2026-11-12)
 
 - Support fixed, season-configured Gamma submission fees for task authors, with
