@@ -206,11 +206,11 @@ def run(args: argparse.Namespace) -> int:
                             candidate["execution_contract"]
                         )
                         if (
-                            contract["agent"]
-                            != definition["execution_contract"]["agent"]
+                            contract["agent"]["tools_digest"]
+                            != definition["execution_contract"]["agent"]["tools_digest"]
                         ):
                             raise ConfigError(
-                                "The active panel uses another agent binding. "
+                                "The active panel uses other robot tools. "
                                 "Install its matching CLI/runtime before "
                                 "creating a workspace."
                             )

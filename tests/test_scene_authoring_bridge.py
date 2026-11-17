@@ -72,7 +72,7 @@ def test_released_cross_version_protocol_pair_passes_the_full_identity_probe(
     "field,value",
     [
         ("protocol_version", "0.17.0"),
-        ("runtime_version", "0.3.22"),
+        ("runtime_version", "0.3.23"),
         ("scene_protocol_sha256", "0" * 64),
         ("scene_protocol_sha256", None),
     ],
@@ -165,23 +165,27 @@ def test_packaging_patch_runs_the_registered_environment_and_older_harness(
     case = bundled_protocol_case
     registry = case["description"]["scene_authoring"]["registry"]
     pinned = case["task"]["execution_contract"]["agent"]
-    registry["runtime"]["agent"] = {**pinned, "harness_commit": "e" * 40}
+    # Every task runs with the season runtime's own harness and prompt.
+    registry["runtime"]["agent"] = {
+        **pinned,
+        "harness_commit": "e" * 40,
+        "system_prompt_digest": "0" * 64,
+    }
     _registered_case(case)
     task, _ = execution_input(case["execution"])
     case["bridge"]._probe(sys.executable, task, time.monotonic() + 10)
 
 
-@pytest.mark.parametrize("change", ["digest", "version", "prompt"])
-def test_packaging_patch_keeps_environment_and_prompt_gates(
+@pytest.mark.parametrize("change", ["digest", "version", "tools"])
+def test_packaging_patch_keeps_environment_and_tools_gates(
     bundled_protocol_case, change
 ):
     case = bundled_protocol_case
-    if change == "prompt":
+    if change == "tools":
         registry = case["description"]["scene_authoring"]["registry"]
         registry["runtime"]["agent"] = {
             **registry["runtime"]["agent"],
-            "harness_commit": "e" * 40,
-            "system_prompt_digest": "0" * 64,
+            "tools_digest": "0" * 64,
         }
     starter = _registered_case(case)
     if change == "digest":
@@ -797,7 +801,8 @@ def test_identity_drift_after_execution_rejects_receipt(runtime_case, capsys):
 
 
 @pytest.mark.parametrize(
-    "code", ["reference_tool_proof_failed", "secret-private-error"]
+    "code",
+    ["reference_tool_proof_failed", "robot_fixture_no_contact", "secret-private-error"],
 )
 def test_runtime_failure_codes_are_projected_not_echoed(runtime_case, capsys, code):
     case = runtime_case
@@ -807,8 +812,10 @@ def test_runtime_failure_codes_are_projected_not_echoed(runtime_case, capsys, co
     assert main(command(case)) == 1
     result = json.loads(capsys.readouterr().out)
     assert result["issues"][0]["code"] == (
-        code if code == "reference_tool_proof_failed" else "scene_runtime_failed"
+        "scene_runtime_failed" if code == "secret-private-error" else code
     )
+    if code == "robot_fixture_no_contact":
+        assert "in_zone" in result["issues"][0]["message"]
     assert "secret-private-error" not in case["output"].read_text()
 
 

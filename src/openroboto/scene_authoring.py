@@ -12,7 +12,6 @@ import json
 import math
 import os
 import pathlib
-import re
 import selectors
 import shutil
 import signal
@@ -83,6 +82,13 @@ ERROR_MESSAGES = {
         "Native object motion differs from the declared scene joints. "
         "Correct task_definition and its checker in a NEW E; retain the "
         "private diagnostics, then run openroboto check again."
+    ),
+    "robot_fixture_no_contact": (
+        "A no_contact invariant between the robot and a fixed object is not "
+        "accepted: one graze fails the whole episode, which measures luck with "
+        "clearances rather than manipulation. Constrain the result instead: use "
+        "in_zone to keep an object in its original zone, and pose or stable to "
+        "keep it upright. Edit task_definition and its checker definition."
     ),
     "reference_instances_failed": (
         "The reference did not complete every initial state. Inspect the "
@@ -242,23 +248,17 @@ def registered_environment(task_environment: Any, installed: Any) -> bool:
 
 
 def compatible_agent(running: Any, pinned: Any) -> bool:
-    """The model sees the pinned prompt and tools; the harness may be newer.
+    """Only the tools must match the pinned agent block.
 
-    Same rule as the backend's reference-proof check. The runtime itself still
-    refuses a pinned harness it is not compatible with (``accepts_binding``).
+    Every task is evaluated with the current harness and prompt of the season's
+    runtime (pinned by its content digest), so the pinned harness commit and
+    prompt digest are informational. The tools define the action semantics.
     """
-    if (
-        not isinstance(running, dict)
-        or not isinstance(pinned, dict)
-        or set(running) != set(pinned)
-    ):
-        return False
-    commit = running.get("harness_commit")
-    return bool(
-        running.get("system_prompt_digest") == pinned.get("system_prompt_digest")
+    return (
+        isinstance(running, dict)
+        and isinstance(pinned, dict)
+        and isinstance(running.get("tools_digest"), str)
         and running.get("tools_digest") == pinned.get("tools_digest")
-        and isinstance(commit, str)
-        and re.fullmatch(r"[0-9a-f]{40}", commit)
     )
 
 

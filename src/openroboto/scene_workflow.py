@@ -23,6 +23,9 @@ from openroboto.scene_package import (
 from openroboto.task_runtime import TaskRuntime
 from openroboto.task_workspace import json_text, workspace_path
 
+# Runtime codes about the authored task itself, not about the solver.
+TASK_ISSUES = frozenset({"robot_fixture_no_contact", "motion_mismatch"})
+
 
 def is_scene(settings: Settings) -> bool:
     return bool(
@@ -214,12 +217,16 @@ def check(args: argparse.Namespace, settings: Settings) -> dict[str, Any]:
                 )
             )
         if not recorded["ok"]:
+            authored = {i.get("code") for i in recorded["issues"]} & TASK_ISSUES
             return {
                 **result,
                 "ok": False,
                 "issues": recorded["issues"],
                 "report": str(attempt / "record.json"),
-                "next": f"Fix {solve}; the reference must solve every initial state. "
+                "next": "Fix the authored task.json as the issue says. "
+                "Run openroboto check again."
+                if authored
+                else f"Fix {solve}; the reference must solve every initial state. "
                 "Run openroboto check again.",
             }
         selected = candidate

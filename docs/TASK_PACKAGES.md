@@ -252,7 +252,7 @@ reference actions. Check refuses a changed contract; submit verifies it again
 against the current server declaration.
 
 The CLI pins `openroboto-protocol==0.19.0` for Gamma payment identity. Runtime
-0.3.21 retains its frozen protocol 0.18.0 scene contracts and MuJoCo 3.17.0;
+0.3.22 retains its frozen protocol 0.18.0 scene contracts and MuJoCo 3.17.0;
 payment does not execute in the self-test image. CLI 1.9.1 and later accept this exact
 reviewed protocol pair only when both installations match the release's SHA-256
 manifest of scene-contract sources. The container probe measures its installed
@@ -289,6 +289,24 @@ Solvers that read local data files declare them in `authoring.solve_inputs` as
 workspace-relative paths. Recording mounts only those regular files and the
 script read-only, preserving their paths; it never mounts workspace credentials
 or uploads the solver's auxiliary inputs.
+
+Every task, including tasks submitted earlier, is evaluated with the season
+runtime's current agent prompt, which describes the robot's hand (sizes measured
+from the simulation; with yaw=0 the fingers close along the world x axis). A local
+check uses the same prompt as the live panel. A newly submitted task may not use a
+`no_contact` invariant between the robot and a fixed object: check and server
+admission reject it with `robot_fixture_no_contact`. Constrain the result
+instead: `in_zone` keeps an object in its original zone, `pose` or `stable` keeps
+it upright. A negated `no_contact`, object-object `no_contact` and goal-only
+`no_contact` are allowed. Already admitted tasks are not re-checked.
+
+The pool counts at most a fixed number of tasks per problem; past that, a task
+is rejected as a duplicate and its fee is not refunded. A full `openroboto check`
+asks the backend, signed with your hotkey, and prints `ok`, `crowded` or `full`
+without failing the check. `openroboto submit` asks again before paying and stops
+on `full` unless you pass `--allow-duplicate`. If the query cannot run, both
+commands warn and continue. Only a verdict and counts come back, never other
+tasks' contents.
 
 To import an existing execution tree without changing its old evidence:
 

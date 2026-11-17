@@ -146,8 +146,8 @@
   },
   "execution_contract": {
     "agent": {
-      "harness_commit": "71c038ebabb77411ca306a14e72eb41a0b412710",
-      "system_prompt_digest": "0d6db8fbfca8ad568d387528ccbc38fd5dc031b10eff1c41a22029b65ea1668c",
+      "harness_commit": "9b52004f4e26d05d01374e8334cb6dd322ea723e",
+      "system_prompt_digest": "4410ffe75131c4d70db9a2020b30896df90b41fd88de5fcc2e85bf72d0b47433",
       "tools_digest": "2ef160b4647a5c9cbd0fc5f85efca224abda3298ea7811a66f8ed55ce202de32"
     },
     "budget": {
