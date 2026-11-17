@@ -20,9 +20,10 @@ release and run `openroboto check` again. Tasks already submitted are not affect
   and execution profile are unchanged, so existing E/P keep their
   identity. The full check accepts the registered environment and an
   agent binding with the same prompt and tool digests on this packaging patch.
-- Existing workspaces pin `authoring.runtime` in `miner.yaml`; after upgrading,
-  set its `version` and `content_sha256` to the values the error message prints
-  (or run `init` in a new directory), then run `openroboto check` again.
+- Existing workspaces cache the season and pin `authoring.runtime` in
+  `miner.yaml`. After upgrading, run `openroboto init <workspace> --refresh`, set
+  `authoring.runtime` to the values the next `openroboto check` prints (or run
+  `init` in a new directory), then run `openroboto check` again.
 - Runtime-mismatch errors now say how to upgrade.
 
 ## 1.9.1 (2026-11-13)

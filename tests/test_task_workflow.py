@@ -299,7 +299,7 @@ def test_runtime_mismatch_is_actionable(workspace):
     _root, config = workspace
     settings = Settings.load(str(config))
     settings.competition_params["task"]["runtime"] = {"version": "wrong"}
-    with pytest.raises(Exception, match="Upgrade the CLI"):
+    with pytest.raises(Exception, match="pip install -U openroboto"):
         resolve_runtime(settings)
 
 
