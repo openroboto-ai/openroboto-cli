@@ -31,7 +31,7 @@ as open.
 
 ## Task authoring
 
-This section describes the workflow in version 1.10.0. See the
+This section describes the workflow in version 1.10.1. See the
 [changelog](CHANGELOG.md) for the release details.
 
 Task and model seasons use the same top-level workflow. Choose a task season:
