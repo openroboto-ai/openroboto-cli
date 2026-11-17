@@ -1,12 +1,12 @@
 {
   "archive": "admission-contract.tar.gz",
-  "archive_sha256": "594bdf434da3c03efa6f4e517ab40dc446aab0404244c137436dbae307bccd6f",
-  "fixture_delivery_commit": "8bd5344a82859940e4a9a86a2767b4d6568a8b7a",
+  "archive_sha256": "947136dd7381fdcf62d65a5d1b04686fd4d1fb35a32b804b2e6b5b1d9e444b5d",
+  "fixture_delivery_commit": "4c435265df4bbb6171c98f8b4a588ae6012e00ba",
   "identity": {
-    "admission_source_sha256": "ed4a9488dc9f90a4f98e98ce43d8f03a92f04f8f689e7eb0d4bc85a1e5f3a946",
+    "admission_source_sha256": "7da60b81b0ceb36bb99f04c0762ef3a332a4724c0fffcef42424464017de7439",
     "admission_version": "task-source-miner/1",
     "fixture_suite_sha256": "0fc4b01c78650ca291c4e452d076201d08e0c092d092a729f4b200023d65337d",
-    "validator_commit": "98575eaaefbccf6bccf4bfe1e7865fac75581ea5"
+    "validator_commit": "01ed95f0d1bcd6dcc4fe5b7aa86412180f1aff51"
   },
   "protocol_wheel": {
     "filename": "openroboto_protocol-0.18.0-py3-none-any.whl",
@@ -16,5 +16,5 @@
   },
   "repository": "openroboto-ai/validator",
   "schema_version": 1,
-  "validator_commit": "98575eaaefbccf6bccf4bfe1e7865fac75581ea5"
+  "validator_commit": "01ed95f0d1bcd6dcc4fe5b7aa86412180f1aff51"
 }
