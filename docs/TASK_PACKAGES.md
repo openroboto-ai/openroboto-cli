@@ -252,7 +252,7 @@ reference actions. Check refuses a changed contract; submit verifies it again
 against the current server declaration.
 
 The CLI pins `openroboto-protocol==0.19.0` for Gamma payment identity. Runtime
-0.3.21 retains its frozen protocol 0.18.0 scene contracts and MuJoCo 3.17.0;
+0.3.22 retains its frozen protocol 0.18.0 scene contracts and MuJoCo 3.17.0;
 payment does not execute in the self-test image. CLI 1.9.1 and later accept this exact
 reviewed protocol pair only when both installations match the release's SHA-256
 manifest of scene-contract sources. The container probe measures its installed
@@ -289,6 +289,15 @@ Solvers that read local data files declare them in `authoring.solve_inputs` as
 workspace-relative paths. Recording mounts only those regular files and the
 script read-only, preserving their paths; it never mounts workspace credentials
 or uploads the solver's auxiliary inputs.
+
+Tasks for seasons from 2026-11-23 pin the agent prompt that describes the
+robot's hand (sizes measured from the simulation; with yaw=0 the fingers close
+along the world x axis). Such a task may not use a `no_contact` invariant between
+the robot and a fixed object: check and server admission reject it with
+`robot_fixture_no_contact`. Constrain the result instead: `in_zone` keeps an
+object in its original zone, `pose` or `stable` keeps it upright. A negated
+`no_contact`, object-object `no_contact` and goal-only `no_contact` are allowed.
+Tasks submitted before keep their original prompt and rules.
 
 To import an existing execution tree without changing its old evidence:
 

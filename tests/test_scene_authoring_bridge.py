@@ -72,7 +72,7 @@ def test_released_cross_version_protocol_pair_passes_the_full_identity_probe(
     "field,value",
     [
         ("protocol_version", "0.17.0"),
-        ("runtime_version", "0.3.22"),
+        ("runtime_version", "0.3.23"),
         ("scene_protocol_sha256", "0" * 64),
         ("scene_protocol_sha256", None),
     ],

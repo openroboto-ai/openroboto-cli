@@ -75,7 +75,7 @@ def test_init_generates_the_exact_season_catalog_and_valid_template(
         config.competition["track"] == "task"
         and config.authoring["package"] == "task-package"
     )
-    assert config.authoring["runtime"]["version"] == "0.3.21"
+    assert config.authoring["runtime"]["version"] == "0.3.22"
     assert "train_strategy.py" not in (target / "README.md").read_text()
 
 

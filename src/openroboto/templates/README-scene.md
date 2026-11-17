@@ -28,6 +28,15 @@ exact digest with the live server before uploading or paying.
    If chain ingestion is pending, rerun `openroboto submit` to finish registration
    without paying again. `openroboto status` reports backend admission separately.
 
+Tasks for seasons from 2026-11-23 pin the agent prompt that describes the
+robot's hand (sizes measured from the simulation; with yaw=0 the fingers close
+along the world x axis). Such a task may not use a `no_contact` invariant between
+the robot and a fixed object: check and server admission reject it with
+`robot_fixture_no_contact`. Constrain the result instead: `in_zone` keeps an
+object in its original zone, `pose` or `stable` keeps it upright. A negated
+`no_contact`, object-object `no_contact` and goal-only `no_contact` are allowed.
+Tasks submitted before keep their original prompt and rules.
+
 `openroboto check --static-only` checks structure without Docker and does not
 prove reference playback or readiness. Full local success does not grant server
 admission, panel results, originality or rewards. Server capability, runtime and
