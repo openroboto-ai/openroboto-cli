@@ -797,7 +797,8 @@ def test_identity_drift_after_execution_rejects_receipt(runtime_case, capsys):
 
 
 @pytest.mark.parametrize(
-    "code", ["reference_tool_proof_failed", "secret-private-error"]
+    "code",
+    ["reference_tool_proof_failed", "robot_fixture_no_contact", "secret-private-error"],
 )
 def test_runtime_failure_codes_are_projected_not_echoed(runtime_case, capsys, code):
     case = runtime_case
@@ -807,8 +808,10 @@ def test_runtime_failure_codes_are_projected_not_echoed(runtime_case, capsys, co
     assert main(command(case)) == 1
     result = json.loads(capsys.readouterr().out)
     assert result["issues"][0]["code"] == (
-        code if code == "reference_tool_proof_failed" else "scene_runtime_failed"
+        "scene_runtime_failed" if code == "secret-private-error" else code
     )
+    if code == "robot_fixture_no_contact":
+        assert "in_zone" in result["issues"][0]["message"]
     assert "secret-private-error" not in case["output"].read_text()
 
 

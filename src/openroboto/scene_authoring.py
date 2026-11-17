@@ -84,6 +84,13 @@ ERROR_MESSAGES = {
         "Correct task_definition and its checker in a NEW E; retain the "
         "private diagnostics, then run openroboto check again."
     ),
+    "robot_fixture_no_contact": (
+        "A no_contact invariant between the robot and a fixed object is not "
+        "accepted: one graze fails the whole episode, which measures luck with "
+        "clearances rather than manipulation. Constrain the result instead: use "
+        "in_zone to keep an object in its original zone, and pose or stable to "
+        "keep it upright. Edit task_definition and its checker definition."
+    ),
     "reference_instances_failed": (
         "The reference did not complete every initial state. Inspect the "
         "private per-instance diagnostics, fix solve.py or the authored scene, "
