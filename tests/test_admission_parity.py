@@ -332,5 +332,5 @@ def test_shared_fixture_archive_matches_the_bundled_worker_without_checkout(tmp_
     assert prepared["identity"] == prepared["baseline"]["identity"]
     assert (
         prepared["identity"]["validator_commit"]
-        == "ca3f555fe81cbd38fe2a7e913a23421d480b099e"
+        == "e3337b4f9f188660b631802fc33fe8faed7bf2db"
     )

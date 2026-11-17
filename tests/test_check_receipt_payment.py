@@ -139,7 +139,7 @@ def test_operator_must_publish_the_current_worker_admission_version(checked):
 def test_current_live_runtime_and_image_binding(checked):
     settings, live, _package, digest, _path, now = checked
     live.params["task"]["runtime"] = {"admission_version": "future"}
-    with pytest.raises(ConfigError, match="Install the season"):
+    with pytest.raises(ConfigError, match="Upgrade the CLI"):
         verify_receipt(settings, live, digest, now=now)
     live.params["task"]["runtime"] = {
         "admission_version": "task-source-miner/1",

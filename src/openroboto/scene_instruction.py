@@ -211,9 +211,13 @@ def _public_rendering(
             == ("instruction_render" if accepted else "unsupported")
             and body["runtime_version"] == identity["metadata"]["runtime_version"]
             and body["execution_profile"] == profile_ref()
-            and body["installed_environment"] == task.environment.model_dump()
+            and runtime.registered_environment(
+                task.environment.model_dump(), body["installed_environment"]
+            )
+            and body["installed_environment"]
+            == identity["metadata"]["refs"]["environment"]
             and body["input_environment"] == task.environment.model_dump()
-            and body["environment_matches_installation"] is True
+            and type(body["environment_matches_installation"]) is bool
             and body["input_task_sha256"] == hashlib.sha256(task_bytes).hexdigest()
             and body["package_validated"] is False
             and body["private_reference_created"] is False

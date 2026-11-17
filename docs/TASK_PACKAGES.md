@@ -252,8 +252,8 @@ reference actions. Check refuses a changed contract; submit verifies it again
 against the current server declaration.
 
 The CLI pins `openroboto-protocol==0.19.0` for Gamma payment identity. Runtime
-0.3.20 retains its frozen protocol 0.18.0 scene contracts and MuJoCo 3.17.0;
-payment does not execute in the self-test image. CLI 1.9.1 accepts this exact
+0.3.21 retains its frozen protocol 0.18.0 scene contracts and MuJoCo 3.17.0;
+payment does not execute in the self-test image. CLI 1.9.1 and later accept this exact
 reviewed protocol pair only when both installations match the release's SHA-256
 manifest of scene-contract sources. The container probe measures its installed
 sources; the CLI independently measures the host sources. Schema/profile,

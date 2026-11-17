@@ -228,8 +228,8 @@ def verify_receipt(
         expected = runtime_policy.get(policy_key, release[release_key])
         if expected != release[release_key]:
             raise ConfigError(
-                f"The season requires another {policy_key}. Install the season's "
-                "CLI/runtime release and run openroboto check again."
+                f"The season requires another {policy_key}. Upgrade the CLI "
+                "(pip install -U openroboto) and run openroboto check again."
             )
         if value.get(receipt_key) != expected:
             raise ConfigError(

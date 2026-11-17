@@ -1,5 +1,31 @@
 # Changelog
 
+## 1.10.0 (2026-11-17)
+
+Task authors must upgrade (`pip install -U openroboto`) when the season switches
+to runtime 0.3.21. Once the season declares it, CLI 1.9.x and earlier stop before
+payment with "The season requires another version/content_sha256"; install this
+release and run `openroboto check` again. Tasks already submitted are not affected.
+
+- Bundle task runtime 0.3.21, the same agent harness the evaluation workers run.
+  The model is now told its episode budget in its first message: the control-step,
+  reply and wall-time limits, that an action's `steps` argument consumes that many
+  control steps, and that fewer steps score higher. Local runs no longer send
+  `steps: 100` on every action and hit `step_limit` after a few calls.
+- Align local scene checks with server admission: the server replay of your
+  reference is authoritative and the raw recording is no longer compared byte for
+  byte (it drifts by about 1e-5 across CPUs), and a failed noise sample is
+  re-checked on fresh seeds before the reference is reported as brittle.
+- The system prompt, tool definitions, environment (`ope274-scene-runtime-0.3.20-r1`)
+  and execution profile are unchanged, so existing E/P keep their
+  identity. The full check accepts the registered environment and an
+  agent binding with the same prompt and tool digests on this packaging patch.
+- Existing workspaces cache the season and pin `authoring.runtime` in
+  `miner.yaml`. After upgrading, run `openroboto init <workspace> --refresh`, set
+  `authoring.runtime` to the values the next `openroboto check` prints (or run
+  `init` in a new directory), then run `openroboto check` again.
+- Runtime-mismatch errors now say how to upgrade.
+
 ## 1.9.1 (2026-11-13)
 
 - Fix schema-3 full checks on the released CLI protocol 0.19.0 and bundled
