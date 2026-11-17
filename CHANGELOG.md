@@ -2,22 +2,34 @@
 
 ## 1.11.0 (2026-11-17)
 
-For the task season that starts on 2026-11-23. Upgrade together with that season
-(`pip install -U openroboto`): before it, this release refuses the current season
-("Season runtime.version ... differs"); after it, older CLIs are refused. Tasks
-already submitted keep their original prompt and rules and are not affected.
+Upgrade when the season switches to runtime 0.3.22 (`pip install -U openroboto`):
+before that, this release refuses the season ("Season runtime.version ...
+differs"); after it, older CLIs are refused. Then run `openroboto init <workspace>
+--refresh` and `openroboto check` again.
 
 - Bundle task runtime 0.3.22. The agent's system prompt now describes its hand,
   measured from the simulation: the hand points straight down, `move_to` places
   the tool center point 0.95 cm above the fingertips, the fingers close along
   (cos(yaw), sin(yaw), 0) (with yaw=0, the world x axis), the open gap is
   `gripper` x 8 cm minus 0.2 cm, and the palm's size and height above the TCP.
-  The scene starter pins this prompt (`system_prompt_digest` `4410ffe7...`).
-- New tasks may not use a `no_contact` invariant between the robot and a fixed
-  object. Check and server admission reject it with `robot_fixture_no_contact`;
-  use `in_zone` to keep an object in its original zone and `pose` or `stable` to
-  keep it upright. A negated `no_contact`, `no_contact` between objects and a
-  goal-only `no_contact` remain allowed.
+- From this release every task, including tasks submitted earlier, is evaluated
+  with the season runtime's current prompt and harness. A local check uses the
+  same prompt as the live panel. The agent block pinned in `task.json` is no
+  longer compared except for its tool digest.
+- Newly submitted tasks may not use a `no_contact` invariant between the robot
+  and a fixed object. Check and server admission reject it with
+  `robot_fixture_no_contact`; use `in_zone` to keep an object in its original
+  zone and `pose` or `stable` to keep it upright. A negated `no_contact`,
+  `no_contact` between objects and a goal-only `no_contact` remain allowed.
+  Already admitted tasks are not re-checked.
+- Duplicate check. The pool counts at most a fixed number of tasks per problem;
+  past that, a task is rejected as a duplicate and its fee is not refunded. A
+  full `openroboto check` now asks the backend (signed with your hotkey) and
+  prints `ok`, `crowded` or `full`; it never fails the check. `openroboto
+  submit` asks again before paying and stops on `full` unless you pass
+  `--allow-duplicate`. If the query cannot run (network, rate limit, model
+  unavailable), both commands warn and continue. Only a verdict and counts are
+  returned; other tasks' contents are never shown.
 - Environment, tools, execution profile and admission policy are unchanged.
 
 ## 1.10.0 (2026-11-17)

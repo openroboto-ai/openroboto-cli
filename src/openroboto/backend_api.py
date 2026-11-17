@@ -104,6 +104,7 @@ HEALTH_PATH = "/healthz"
 READY_PATH = "/readyz"
 TASK_ACCESS_MESSAGE_PATH = "/api/v1/tasks/access-message"
 TASKS_MINE_PATH = "/api/v1/tasks/mine"
+TASK_DUPLICATE_CHECK_PATH = "/api/v1/tasks/duplicate-check"
 WEIGHTS_PATH = "/api/v1/weights"
 #: The pre-v1 address. Still live, and still the only one an
 #: un-migrated backend has -- see `fetch_weights`.
@@ -466,6 +467,45 @@ def fetch_task_access_message(base_url: str, hotkey: str) -> str:
 
 class TaskAccessMessage(Contract):
     message: str
+
+
+def check_task_duplicates(
+    base_url: str,
+    *,
+    hotkey: str,
+    signature: str,
+    task: dict[str, Any],
+    competition_id: int | None,
+    miner_key: str = "",
+) -> dict[str, Any]:
+    """`POST /api/v1/tasks/duplicate-check`: is this problem already full?
+
+    Signed with the same hotkey access message as `/tasks/mine`. The backend
+    answers only a verdict and counts; library task contents are never
+    returned. One call runs one model query and can take tens of seconds.
+    """
+    raw = _post(
+        base_url,
+        TASK_DUPLICATE_CHECK_PATH,
+        {
+            "hotkey": hotkey,
+            "signature": signature,
+            "task": task,
+            "competition_id": competition_id,
+        },
+        api_key=miner_key,
+        # One model query per call; the backend answers in tens of seconds.
+        timeout=120,
+    )
+    try:
+        data = json.loads(raw)["data"]
+        if data["verdict"] not in ("ok", "crowded", "full"):
+            raise ValueError(data["verdict"])
+    except (ValueError, KeyError, TypeError) as exc:
+        raise BackendError(
+            f"{TASK_DUPLICATE_CHECK_PATH} answered an unreadable verdict: {exc}"
+        ) from exc
+    return dict(data)
 
 
 def fetch_my_tasks(
@@ -921,7 +961,11 @@ def _get(
 
 
 def _post(
-    base_url: str, path: str, payload: dict[str, Any], api_key: str = ""
+    base_url: str,
+    path: str,
+    payload: dict[str, Any],
+    api_key: str = "",
+    timeout: float = REQUEST_TIMEOUT_SEC,
 ) -> bytes:
     """POST one JSON object and return the raw response body.
 
@@ -943,7 +987,7 @@ def _post(
     request = build_request(url, headers, data=body)
 
     try:
-        with urlopen(request, REQUEST_TIMEOUT_SEC) as response:
+        with urlopen(request, timeout) as response:
             raw: bytes = response.read()
     except urllib.error.HTTPError as exc:
         raise _http_failure(url, exc, key_hint=False) from exc

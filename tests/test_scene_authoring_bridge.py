@@ -165,23 +165,27 @@ def test_packaging_patch_runs_the_registered_environment_and_older_harness(
     case = bundled_protocol_case
     registry = case["description"]["scene_authoring"]["registry"]
     pinned = case["task"]["execution_contract"]["agent"]
-    registry["runtime"]["agent"] = {**pinned, "harness_commit": "e" * 40}
+    # Every task runs with the season runtime's own harness and prompt.
+    registry["runtime"]["agent"] = {
+        **pinned,
+        "harness_commit": "e" * 40,
+        "system_prompt_digest": "0" * 64,
+    }
     _registered_case(case)
     task, _ = execution_input(case["execution"])
     case["bridge"]._probe(sys.executable, task, time.monotonic() + 10)
 
 
-@pytest.mark.parametrize("change", ["digest", "version", "prompt"])
-def test_packaging_patch_keeps_environment_and_prompt_gates(
+@pytest.mark.parametrize("change", ["digest", "version", "tools"])
+def test_packaging_patch_keeps_environment_and_tools_gates(
     bundled_protocol_case, change
 ):
     case = bundled_protocol_case
-    if change == "prompt":
+    if change == "tools":
         registry = case["description"]["scene_authoring"]["registry"]
         registry["runtime"]["agent"] = {
             **registry["runtime"]["agent"],
-            "harness_commit": "e" * 40,
-            "system_prompt_digest": "0" * 64,
+            "tools_digest": "0" * 64,
         }
     starter = _registered_case(case)
     if change == "digest":

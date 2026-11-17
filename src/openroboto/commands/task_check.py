@@ -104,6 +104,9 @@ def run(args: argparse.Namespace, settings: Settings) -> int:
         )
         if written is not None:
             result["receipt"] = str(written)
+        if result["ready_to_submit"] and not args.static_only:
+            if duplicates := duplicate_check(settings, package):
+                result["duplicate_check"] = duplicates
     except (ConfigError, TaskPackageError, OSError, ValueError) as exc:
         result["ok"] = False
         result["ready_to_submit"] = False
@@ -133,7 +136,27 @@ def run(args: argparse.Namespace, settings: Settings) -> int:
         for key in ("error", "reason", "next", "report"):
             if result.get(key):
                 say(f"{key}: {result[key]}")
+        if result.get("duplicate_check"):
+            say(result["duplicate_check"]["message"])
     return 0 if result["ok"] else 1
+
+
+def duplicate_check(settings: Settings, package: Path) -> dict[str, Any]:
+    """Advisory: the backend's same-problem verdict, never a check failure."""
+    from openroboto import task_duplicates
+    from openroboto.scene_workflow import is_scene
+
+    if not is_scene(settings):
+        return {}
+    try:
+        verdict = task_duplicates.query(settings, package)
+    except task_duplicates.DuplicateCheckUnavailable as exc:
+        return {
+            "verdict": "unavailable",
+            "message": f"Duplicate check skipped ({exc}); "
+            "openroboto submit asks again before paying.",
+        }
+    return {**verdict, "message": task_duplicates.describe(verdict)}
 
 
 def _check(args: argparse.Namespace, settings: Settings) -> dict[str, Any]:

@@ -211,7 +211,39 @@ def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) 
         "Gamma reuses a confirmed payment for the same submission and never "
         "clears an unresolved payment",
     )
+    parser.add_argument(
+        "--allow-duplicate",
+        action="store_true",
+        help="pay even when the duplicate check says this problem is already "
+        "full in the task pool; such a task is rejected and the fee is not "
+        "refunded",
+    )
     parser.set_defaults(handler=run)
+
+
+def duplicate_is_payable(
+    settings: Settings, package: pathlib.Path, allow: bool
+) -> bool:
+    """Refuse to pay for a problem the pool already counts in full.
+
+    Advisory when the check cannot run: an outage on our side never blocks a
+    miner. `full` stops before payment unless `--allow-duplicate` is given.
+    """
+    from openroboto import task_duplicates
+
+    try:
+        verdict = task_duplicates.query(settings, package)
+    except task_duplicates.DuplicateCheckUnavailable as exc:
+        say(f"⚠️  Duplicate check skipped ({exc}); continuing.")
+        return True
+    say(task_duplicates.describe(verdict))
+    if verdict["verdict"] != "full" or allow:
+        return True
+    fail(
+        "Nothing was paid. Pass --allow-duplicate to pay for it anyway, or "
+        "change the problem the task poses."
+    )
+    return False
 
 
 def run(args: argparse.Namespace) -> int:
@@ -422,6 +454,12 @@ def _run(
             if not slot_is_free(settings, state, verdict):
                 return 1
             if not evaluator_can_read(settings, state, verdict.live):
+                return 1
+            if state.get("scene_submission") and not duplicate_is_payable(
+                settings,
+                pathlib.Path(output_dir),
+                getattr(args, "allow_duplicate", False),
+            ):
                 return 1
             confirm_payment(verdict, settings.netuid)
         except PrecheckFailed:
