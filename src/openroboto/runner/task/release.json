@@ -1,7 +1,7 @@
 {
   "admission_policy_sha256": "0c1415ee4f0c70edd39b50e55e7ff8ce8210186355045eea81206071c31a0654",
   "admission_version": "task-source-miner/1",
-  "content_sha256": "f50986692dd1023ccf28b934e5b058599e84bab1a0f37765e96df5e8223143de",
+  "content_sha256": "2e2a8aa3ca252f0e5a6d8e933e6da6c58c0690e03bb2b47977c8a4fa72a16a6f",
   "execution_profiles": [
     {
       "digest": "f72932959102b72b74812a7ef68339c0ea0116b0211499f1263de025f6821066",
@@ -21,7 +21,7 @@
   ],
   "files": {
     "Dockerfile": "d7ed2829600b6e82a342ff1e3e9bd5fcfb491e5ef554d097cb5d351ec394d8ea",
-    "openroboto_task_runtime-0.3.22-py3-none-any.whl": "970e9fe7079c1b4f6445dcef68c61aa655eda3cea2db69c0fb6f132a7b98b3c5",
+    "openroboto_task_runtime-0.3.22-py3-none-any.whl": "d1c13a1e2f5fe9100f00a2982d45c138f40a85571d733e177392abc11f7f4ba0",
     "requirements.lock": "a49970aa19f97aa2296dbe52ab126bf820d3c7ecd4d35d9c4bb64076959f1903",
     "task_sources.json": "323b874225ed7f8cf516d135f98c8be1d92eb3367c1ca4c3a6498044330a891a"
   },

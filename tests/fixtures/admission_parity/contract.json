@@ -1,12 +1,12 @@
 {
   "archive": "admission-contract.tar.gz",
-  "archive_sha256": "a8393c33bb401d1bd7318d39183ae22590e2a1cdf3e35a4ed3836a564c5daa53",
-  "fixture_delivery_commit": "00fab319f18ea0e2414b29bd66f73585664b404b",
+  "archive_sha256": "073af6b13a72f9d609b62cf63c034cde7325048573fa72abcf9bc24064f807fd",
+  "fixture_delivery_commit": "8c986abaf12bded8982ca9351456ba63c3a5c97c",
   "identity": {
-    "admission_source_sha256": "c00ed4addcab1e9d295e1aab744f84c7f3fd13f0b15287d7dc8a2818a745c971",
+    "admission_source_sha256": "7da60b81b0ceb36bb99f04c0762ef3a332a4724c0fffcef42424464017de7439",
     "admission_version": "task-source-miner/1",
     "fixture_suite_sha256": "0fc4b01c78650ca291c4e452d076201d08e0c092d092a729f4b200023d65337d",
-    "validator_commit": "ed9e5fdba2079bcfd75efb525dc41e8c9bbe660d"
+    "validator_commit": "8a826c5870f4cc1d102b28cd33af0940bb547a40"
   },
   "protocol_wheel": {
     "filename": "openroboto_protocol-0.18.0-py3-none-any.whl",
@@ -16,5 +16,5 @@
   },
   "repository": "openroboto-ai/validator",
   "schema_version": 1,
-  "validator_commit": "ed9e5fdba2079bcfd75efb525dc41e8c9bbe660d"
+  "validator_commit": "8a826c5870f4cc1d102b28cd33af0940bb547a40"
 }
