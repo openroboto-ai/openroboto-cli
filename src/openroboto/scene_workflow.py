@@ -23,7 +23,6 @@ from openroboto.scene_package import (
 from openroboto.task_runtime import TaskRuntime
 from openroboto.task_workspace import json_text, workspace_path
 
-
 # Runtime codes about the authored task itself, not about the solver.
 TASK_ISSUES = frozenset({"robot_fixture_no_contact", "motion_mismatch"})
 
