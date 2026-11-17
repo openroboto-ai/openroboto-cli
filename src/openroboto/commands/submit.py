@@ -111,7 +111,6 @@ from openroboto.backend_api import (
     ContributorDetail,
     fetch_contributor,
     fetch_roster,
-    fetch_submissions,
 )
 from openroboto.commands.announce import perform_announce
 from openroboto.commands.burn import perform_burn, perform_transfer
@@ -182,6 +181,16 @@ ROSTER_LIMIT = 1000
 #: such a season can even be parsed; by the time a row is here, `live.track` is
 #: its string value.
 TASK_TRACK: Final = "task"
+
+
+# The backend registers an announced scene by itself once chain ingestion has
+# created the task (it downloads the pinned repo@commit and measures it); no
+# second CLI run or signed registration call is needed.
+SCENE_REGISTERED_BY_BACKEND: Final = (
+    "The backend registers the scene by itself once it ingests the announcement "
+    "(usually within a few minutes), then admission starts. Nothing else to run; "
+    "follow it with `openroboto status`."
+)
 
 
 def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
@@ -287,11 +296,9 @@ def _run(
 
     if state.get("step") == "announce" and not force:
         if state.get("scene_submission"):
-            say(
-                "This scene is already announced. Continue registration "
-                "without paying again."
-            )
-            return _finish_scene_registration(settings, state, args.config)
+            say("⏭️  this scene is already announced; no new fee was charged.")
+            say(SCENE_REGISTERED_BY_BACKEND)
+            return 0
         if gamma_reused:
             say(
                 "⏭️  this submission is already announced. Reusing its confirmed "
@@ -463,58 +470,8 @@ def _run(
 
     say("✅ submitted. Run `openroboto status` to see whether the backend accepted it")
     if state.get("scene_submission"):
-        return _finish_scene_registration(settings, state, args.config)
+        say(SCENE_REGISTERED_BY_BACKEND)
     return 0
-
-
-def _finish_scene_registration(
-    settings: Settings, state: dict[str, Any], config: str
-) -> int:
-    from openroboto.commands.task_scene import (
-        REGISTRATION_MAX_PAGES,
-        REGISTRATION_PAGE_SIZE,
-        run_register,
-    )
-
-    offset = 0
-    try:
-        for _ in range(REGISTRATION_MAX_PAGES):
-            page = fetch_submissions(
-                settings.backend_url,
-                int(state["competition_id"]),
-                hotkey=str(state.get("hotkey_ss58") or settings.hotkey_ss58),
-                limit=REGISTRATION_PAGE_SIZE,
-                offset=offset,
-            )
-            if page.meta.page.offset != offset:
-                raise BackendError(
-                    "Submission history returned inconsistent pagination."
-                )
-            for row in page.data:
-                if (
-                    row.hf_repo_id == state["hf_repo_id"]
-                    and row.hf_commit == announced_commit(state)
-                    and row.burn_tx_hash == state["burn_tx_hash"]
-                ):
-                    return run_register(
-                        argparse.Namespace(
-                            config=config,
-                            package=state["scene_local_path"],
-                            task_id=row.task_id,
-                            lookup_offset=0,
-                        )
-                    )
-            if not page.data or not page.meta.page.has_more:
-                break
-            offset += len(page.data)
-    except BackendError as exc:
-        fail(f"Cannot finish scene registration: {exc}")
-    say(
-        "Scene registration is pending. Wait for chain ingestion, then rerun "
-        "openroboto submit with the same workspace; it resumes without paying "
-        "again. The backend has not admitted this scene yet."
-    )
-    return 1
 
 
 def _prepare_scene_submission(

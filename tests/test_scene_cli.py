@@ -577,11 +577,6 @@ def test_normal_submit_entry_orders_gates_and_reuses_paid_checkpoint(
 
     monkeypatch.setattr(submit, "perform_announce", announce)
 
-    def register(*a):
-        calls.append("register")
-        return 0
-
-    monkeypatch.setattr(submit, "_finish_scene_registration", register)
     if failure == "changed-local":
 
         def changed(*a, **k):
@@ -601,11 +596,11 @@ def test_normal_submit_entry_orders_gates_and_reuses_paid_checkpoint(
         argv.append("--force")
     assert main(argv) == expected
     if failure == "none":
-        assert calls == ["gate", "upload", "confirm", "pay", "announce", "register"]
+        assert calls == ["gate", "upload", "confirm", "pay", "announce"]
     elif failure == "paid-resume":
-        assert calls == ["upload", "announce", "register"]
+        assert calls == ["upload", "announce"]
     elif failure == "announced":
-        assert calls == ["register"]
+        assert calls == []
     elif failure == "force-invalid":
         assert calls == []
         assert state["burn_tx_hash"] == "fixture-tx"
@@ -624,51 +619,3 @@ def test_previous_scene_profile_is_explicitly_rejected_without_migration(capsys)
     assert before == {
         p.relative_to(old): p.read_bytes() for p in old.rglob("*") if p.is_file()
     }
-
-
-@pytest.mark.parametrize("found", [True, False])
-def test_submit_registration_binds_season_repo_commit_and_payment(
-    scene, monkeypatch, found
-):
-    settings = Settings(backend_url="https://example.invalid", hotkey_ss58="author")
-    state = {
-        "competition_id": 77,
-        "hf_repo_id": "author/scene",
-        "hf_commit": "a" * 40,
-        "burn_tx_hash": "current-payment",
-        "scene_local_path": str(scene),
-    }
-    queried, registered = [], []
-
-    def history(base, competition, **kwargs):
-        queried.append((base, competition, kwargs))
-        offset = kwargs["offset"]
-        wrong_payment = SimpleNamespace(
-            task_id="old",
-            hf_repo_id="author/scene",
-            hf_commit="a" * 40,
-            burn_tx_hash="old-payment",
-        )
-        correct = SimpleNamespace(
-            task_id="exact",
-            hf_repo_id="author/scene",
-            hf_commit="a" * 40,
-            burn_tx_hash="current-payment",
-        )
-        return SimpleNamespace(
-            data=[wrong_payment] if offset == 0 else ([correct] if found else []),
-            meta=SimpleNamespace(
-                page=SimpleNamespace(offset=offset, has_more=offset == 0)
-            ),
-        )
-
-    monkeypatch.setattr(submit, "fetch_submissions", history)
-    monkeypatch.setattr(
-        task_scene, "run_register", lambda args: registered.append(args) or 0
-    )
-    assert submit._finish_scene_registration(settings, state, "miner.yaml") == (
-        0 if found else 1
-    )
-    assert [q[1] for q in queried] == [77, 77]
-    assert all(q[2]["hotkey"] == "author" for q in queried)
-    assert [args.task_id for args in registered] == (["exact"] if found else [])

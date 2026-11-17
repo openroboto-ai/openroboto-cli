@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Scene submissions finish in one `openroboto submit` run. The backend now
+  registers an announced scene by itself after chain ingestion, so `submit` no
+  longer tries to register, no longer exits with "Scene registration is
+  pending" and no longer asks you to run it again. Requires the backend release
+  with automatic scene registration.
+
 ## 1.10.0 (2026-11-17)
 
 Task authors must upgrade (`pip install -U openroboto`) when the season switches
