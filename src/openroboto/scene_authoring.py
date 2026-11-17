@@ -12,6 +12,7 @@ import json
 import math
 import os
 import pathlib
+import re
 import selectors
 import shutil
 import signal
@@ -219,6 +220,48 @@ def _compatible_protocol(metadata: dict[str, Any]) -> bool:
     )
 
 
+def registered_environment(task_environment: Any, installed: Any) -> bool:
+    """E carries the installed environment, or the registered one it patches.
+
+    The installed digest covers every runtime source file, so a runtime packaging
+    patch changes it while the registered environment (id, version) stays the
+    same, as on the workers. Such an E must still carry exactly the registered
+    environment (the bundled starter's), never an arbitrary digest.
+    """
+    if task_environment == installed:
+        return True
+    registered = json.loads(
+        files("openroboto").joinpath("templates/scene/task.json").read_text()
+    )["environment"]
+    return bool(
+        task_environment == registered
+        and isinstance(installed, dict)
+        and installed.get("id") == registered["id"]
+        and installed.get("version") == registered["version"]
+    )
+
+
+def compatible_agent(running: Any, pinned: Any) -> bool:
+    """The model sees the pinned prompt and tools; the harness may be newer.
+
+    Same rule as the backend's reference-proof check. The runtime itself still
+    refuses a pinned harness it is not compatible with (``accepts_binding``).
+    """
+    if (
+        not isinstance(running, dict)
+        or not isinstance(pinned, dict)
+        or set(running) != set(pinned)
+    ):
+        return False
+    commit = running.get("harness_commit")
+    return bool(
+        running.get("system_prompt_digest") == pinned.get("system_prompt_digest")
+        and running.get("tools_digest") == pinned.get("tools_digest")
+        and isinstance(commit, str)
+        and re.fullmatch(r"[0-9a-f]{40}", commit)
+    )
+
+
 def _probe(python: str, task: SceneTask, deadline: float) -> dict[str, Any]:
     """Bind capabilities to installed scene contracts, registry and E's agent."""
     try:
@@ -268,18 +311,19 @@ def _probe(python: str, task: SceneTask, deadline: float) -> dict[str, Any]:
             and description["execution_profile"]
             == runtime["execution_profile"]
             == profile_ref()
-            and description["environment"]
-            == refs["environment"]
-            == task.environment.model_dump()
+            and description["environment"] == refs["environment"]
             and refs["environment"]
             == {
                 "id": registry["id"],
                 "version": registry["version"],
                 "digest": canonical_digest(registry),
             }
+            and registered_environment(
+                task.environment.model_dump(), refs["environment"]
+            )
             and refs["artifact"] == task.robot.artifact.model_dump()
             and refs["control_mapping"] == task.robot.control_mapping.model_dump()
-            and runtime["agent"] == contract["agent"]
+            and compatible_agent(runtime["agent"], contract["agent"])
         )
         if not valid:
             raise ValueError("identity mismatch")

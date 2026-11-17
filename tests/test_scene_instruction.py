@@ -509,7 +509,7 @@ def test_new_capacity_uses_the_installed_schema_without_truncation(
         ("execution_profile", {}),
         ("installed_environment", {}),
         ("input_environment", {}),
-        ("environment_matches_installation", False),
+        ("environment_matches_installation", "yes"),
         ("input_task_sha256", "0" * 64),
         ("package_validated", True),
         ("private_reference_created", True),

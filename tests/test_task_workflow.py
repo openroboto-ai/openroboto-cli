@@ -75,7 +75,7 @@ def test_init_generates_the_exact_season_catalog_and_valid_template(
         config.competition["track"] == "task"
         and config.authoring["package"] == "task-package"
     )
-    assert config.authoring["runtime"]["version"] == "0.3.20"
+    assert config.authoring["runtime"]["version"] == "0.3.21"
     assert "train_strategy.py" not in (target / "README.md").read_text()
 
 
@@ -299,7 +299,7 @@ def test_runtime_mismatch_is_actionable(workspace):
     _root, config = workspace
     settings = Settings.load(str(config))
     settings.competition_params["task"]["runtime"] = {"version": "wrong"}
-    with pytest.raises(Exception, match="Install the season's CLI release"):
+    with pytest.raises(Exception, match="Upgrade the CLI"):
         resolve_runtime(settings)
 
 

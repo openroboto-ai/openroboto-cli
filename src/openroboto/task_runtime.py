@@ -40,7 +40,8 @@ def resolve_runtime(settings: Settings) -> dict[str, Any]:
         if key in declared and declared[key] != expected:
             raise ConfigError(
                 f"Season runtime.{key}={declared[key]!r} differs from "
-                f"this CLI's {expected!r}. Install the season's CLI release."
+                f"this CLI's {expected!r}. Upgrade the CLI "
+                "(pip install -U openroboto) and run openroboto check again."
             )
         if (
             key in settings.authoring.get("runtime", {})
@@ -48,7 +49,9 @@ def resolve_runtime(settings: Settings) -> dict[str, Any]:
         ):
             raise ConfigError(
                 f"authoring.runtime.{key} differs from the bundled runtime. "
-                "Run init in a new directory using the season's CLI release."
+                f"After upgrading the CLI, set authoring.runtime.{key} in "
+                f"miner.yaml to {expected!r} (or run init in a new directory), "
+                "then run openroboto check again."
             )
     return release
 

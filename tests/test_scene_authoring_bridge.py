@@ -72,7 +72,7 @@ def test_released_cross_version_protocol_pair_passes_the_full_identity_probe(
     "field,value",
     [
         ("protocol_version", "0.17.0"),
-        ("runtime_version", "0.3.21"),
+        ("runtime_version", "0.3.22"),
         ("scene_protocol_sha256", "0" * 64),
         ("scene_protocol_sha256", None),
     ],
@@ -134,6 +134,70 @@ def test_reviewed_protocol_pair_preserves_other_scene_identity_gates(
             **registry["runtime"]["agent"],
             "tools_digest": "0" * 64,
         }
+    with pytest.raises(ScenePackageError, match="runtime_identity_mismatch"):
+        case["bridge"]._probe(sys.executable, task, time.monotonic() + 10)
+
+
+def _registered_case(case):
+    """E carries the bundled starter's registered environment; the installed
+    runtime is a later packaging patch of it (same id/version, other digest)."""
+    starter = json.loads(
+        files("openroboto").joinpath("templates/scene/task.json").read_text()
+    )["environment"]
+    registry = case["description"]["scene_authoring"]["registry"]
+    registry.update(id=starter["id"], version=starter["version"])
+    installed = {
+        "id": starter["id"],
+        "version": starter["version"],
+        "digest": canonical_digest(registry),
+    }
+    assert installed["digest"] != starter["digest"]
+    case["description"]["scene_authoring"]["environment"] = installed
+    case["metadata"]["refs"]["environment"] = installed
+    case["task"]["environment"] = starter
+    (case["execution"] / "task.json").write_text(json.dumps(case["task"]))
+    return starter
+
+
+def test_packaging_patch_runs_the_registered_environment_and_older_harness(
+    bundled_protocol_case,
+):
+    case = bundled_protocol_case
+    registry = case["description"]["scene_authoring"]["registry"]
+    pinned = case["task"]["execution_contract"]["agent"]
+    registry["runtime"]["agent"] = {**pinned, "harness_commit": "e" * 40}
+    _registered_case(case)
+    task, _ = execution_input(case["execution"])
+    case["bridge"]._probe(sys.executable, task, time.monotonic() + 10)
+
+
+@pytest.mark.parametrize("change", ["digest", "version", "prompt"])
+def test_packaging_patch_keeps_environment_and_prompt_gates(
+    bundled_protocol_case, change
+):
+    case = bundled_protocol_case
+    if change == "prompt":
+        registry = case["description"]["scene_authoring"]["registry"]
+        registry["runtime"]["agent"] = {
+            **registry["runtime"]["agent"],
+            "harness_commit": "e" * 40,
+            "system_prompt_digest": "0" * 64,
+        }
+    starter = _registered_case(case)
+    if change == "digest":
+        case["task"]["environment"] = {**starter, "digest": "0" * 64}
+        (case["execution"] / "task.json").write_text(json.dumps(case["task"]))
+    elif change == "version":
+        registry = case["description"]["scene_authoring"]["registry"]
+        registry["version"] = starter["version"] + "-other"
+        installed = {
+            "id": registry["id"],
+            "version": registry["version"],
+            "digest": canonical_digest(registry),
+        }
+        case["description"]["scene_authoring"]["environment"] = installed
+        case["metadata"]["refs"]["environment"] = installed
+    task, _ = execution_input(case["execution"])
     with pytest.raises(ScenePackageError, match="runtime_identity_mismatch"):
         case["bridge"]._probe(sys.executable, task, time.monotonic() + 10)
 
