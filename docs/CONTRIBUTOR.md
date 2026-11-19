@@ -27,9 +27,16 @@ do not use a contributor identity, and their behaviour is unchanged.
 
 ```bash
 openroboto identity keygen
-openroboto identity register --reward-address <your coldkey ss58>
+openroboto identity register --reward-address <your hotkey ss58>
 openroboto identity bind
 ```
+
+**Earnings go to the bound hotkey.** Emissions reach a miner only through
+validator weights, which are keyed by the hotkeys registered on the subnet, so
+the task track pays the hotkey most recently bound to your identity. The reward
+address is recorded with the identity but does not receive payouts. If no
+hotkey is bound at settlement time, that day's share for your tasks is not
+paid; bind again and the next settlement pays you.
 
 `bind` defaults to `subnet.hotkey_ss58` in `miner.yaml` and signs with the
 hotkey in the wallet that config names. It must be the same key: only that

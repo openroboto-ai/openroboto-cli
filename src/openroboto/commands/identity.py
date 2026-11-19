@@ -92,8 +92,9 @@ def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) 
     register.add_argument(
         "--reward-address",
         required=True,
-        help="SS58 address where this author's earnings are paid (usually your "
-        "coldkey). Changing it later requires a signed migration",
+        help="SS58 address recorded with the identity (use your hotkey). "
+        "Earnings are paid to the hotkey bound with `identity bind`, not to "
+        "this address. Changing it later requires a signed migration",
     )
     register.set_defaults(handler=run_register)
 
